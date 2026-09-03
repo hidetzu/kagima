@@ -22,7 +22,7 @@ description: Run kagima's checks and return PASS / FAIL / NOT-VERIFIED with the 
 | Tier | Entry point | State |
 |---|---|---|
 | **Fast / inner** | `node .claude/tools/docs-check.mjs` | ⚠ **exists** |
-| **Fast / inner** | `npm run check` (types, lint, unit) | ⚠ **does not exist yet** |
+| **Fast / inner** | `npm run check` (types, lint, format, unit) | ⚠ **exists** |
 | **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **does not exist yet** |
 | **External** | a second browser engine, and a STUN server we did not write | ⚠ **does not exist yet** |
 
@@ -52,9 +52,28 @@ node .claude/tools/docs-check.mjs --only=links       # one case
 ⚠ **Copy that number into the report. Never write it into a document**
 ([`../../rules/evidence.md`](../../rules/evidence.md)).
 
-⚠ **`npm run check` is the other half of this tier and it does not exist yet** (§ 1).
-⚠ **When it lands it must satisfy the same three obligations the contract sets:**
-⚠ **run one named case, count without running, and announce the subset on its first line.**
+```bash
+npm run check                    # every case
+npm run check -- --list          # ⚠ name them, run none, load nothing heavy
+npm run check -- --only=types    # one case
+```
+
+⚠ **Its cases are `types`, `lint`, `format`, `unit`.** ⚠ **`--list` says what each one can see;
+read that rather than assuming from the name.**
+
+- ⚠ **`types` exists because Node strips types to run them and never checks them.**
+  ⚠ **Without it a type error runs happily.**
+- ⚠ **`format` checks and never writes.** ⚠ **A check that edits the tree cannot be trusted to
+  have measured it.**
+- ⚠ **An unknown `--only=` is an error, not an empty run.**
+  ⚠ **Zero cases exiting 0 is indistinguishable from a clean run**, ⚠ **and that is the way a
+  check suite silently stops checking anything.** ⚠ **`test/cases.test.ts` holds that shut.**
+
+⚠ **`.claude/` is deliberately outside what `lint` and `types` look at** (`biome.json`,
+`tsconfig.json`). ⚠ **Those files are a port kept diffable against upstream**
+([`../../rules/README.md`](../../rules/README.md) § Language); ⚠ **linting them would generate
+pressure to edit them, which is the opposite of what they are for.**
+⚠ **They are not unchecked** — ⚠ **`docs-check.mjs` is what holds them.**
 
 ## 3. Final gate
 

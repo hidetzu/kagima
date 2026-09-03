@@ -21,6 +21,9 @@
 
 ```text
 CLAUDE.md                    どう働くか(English)
+package.json                 ⚠ npm run check の入口。⚠ ビルドステップは無い
+scripts/                     check runner(⚠ Node が .ts をそのまま実行する)
+test/                        unit
 docs/
   PRODUCT.md                 ⚠ プロダクトの正本。何を作り、何を作らないか
   SPEC.md                    今日なにを主張してよいか(⚠ 実装がないので空)
@@ -36,10 +39,17 @@ docs/
 ## 検査
 
 ```bash
-node .claude/tools/docs-check.mjs              # 全ケース
-node .claude/tools/docs-check.mjs --list       # ⚠ 名前を並べるだけ。何も実行しない
+npm run check                                  # 型 / lint / format / unit
+npm run check -- --list                        # ⚠ 名前を並べるだけ。何も実行しない
+npm run check -- --only=types                  # 1 ケースだけ
+
+node .claude/tools/docs-check.mjs              # ドキュメントを自分の言い分に縛る
+node .claude/tools/docs-check.mjs --list       # ⚠ 同上
 node .claude/tools/docs-check.mjs --only=links # 1 ケースだけ
 ```
+
+⚠ **`.claude/` は `lint` と `types` の対象外である。** ⚠ **上流と diff が取れる状態を保つため**
+(⚠ **`docs-check` が代わりに縛っている**)。
 
 観測(⚠ **採点ではない**):
 
