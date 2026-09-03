@@ -50,8 +50,8 @@ incident, and `CLAUDE.md` §9 keeps the row.**
 |---|---|---|
 | [`evidence.md`](evidence.md) | ⚠ **What may be said to have been observed.** Denominators, counts, outcomes | template, ⚠ **plus kagima's two domain lines** |
 | [`verification.md`](verification.md) | The three tiers, partial runs, `PASS` / `FAIL` / `NOT-VERIFIED` | template, verbatim |
-| [`owner-decisions.md`](owner-decisions.md) | Decide yourself vs. ask, `ready-for-ai` | template, ⚠ **minus the Slack and `visual-decision` clauses kagima did not port** |
-| [`git.md`](git.md) | Commits, permission, forbidden operations, what never goes public | template, verbatim |
+| [`owner-decisions.md`](owner-decisions.md) | Decide yourself vs. ask, `ready-for-ai` | ⚠ **diverged.** Minus the Slack and `visual-decision` clauses, ⚠ **and the `ready-for-ai` clause rewritten** ([`../../docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md`](../../docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
+| [`git.md`](git.md) | Commits, permission, forbidden operations, what never goes public | ⚠ **diverged.** The Loop Controller exception no longer covers merge (same ADR) |
 | [`security.md`](security.md) | ⚠ **Identifiers, the passphrase, logging, rate limits, the join token, media, secrets, what survives a room** | ⚠ **kagima's own.** Grounds stated in the file |
 
 ⚠ **`security.md` is not here because security is nice to have.**

@@ -17,11 +17,16 @@
 
 - MUST: ⚠ **Take permission for `git push` every single time.**
   ⚠ **Permission granted before does not carry forward.**
-  - ⚠ **One exception.** Via the Loop Controller, for **one issue approved by the owner at the
-    start**, pushing to that issue's branch, opening the PR, and **merging once CI is fully green**
-    count as approved (`.claude/skills/loop-controller/SKILL.md`).
-    ⚠ **Auto-merge (`--auto`) and merges that bypass protection (`--admin`) are not included.**
-    ⚠ **Never merge on red or in-progress CI.**
+  - ⚠ **One exception.** Via the Loop Controller, for **one issue that passed the quality gate**,
+    pushing to that issue's branch and **opening the PR** count as approved
+    (`.claude/skills/loop-controller/SKILL.md`).
+  - ⚠ **Merge is never included.** ⚠ **kagima changed this on 2026-09-04, by owner decision**
+    (`docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md`).
+    ⚠ **Upstream, one owner approval at the start covered the merge at the end.**
+    ⚠ **Here the AI enters the loop on its own, so the merge is where the human enters** —
+    ⚠ **and permission for it is taken every single time, like any other push.**
+  - ⚠ **Auto-merge (`--auto`), merge queues, and merges that bypass protection (`--admin`) are
+    forbidden outright.** ⚠ **Never merge on red or in-progress CI.**
   - ⚠ **Used standalone, every skill still takes permission every time.** Nothing is weakened.
 
 ## ⚠ Never do these without being told
