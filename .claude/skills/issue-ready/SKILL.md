@@ -1,6 +1,6 @@
 ---
 name: issue-ready
-description: Judge whether an issue can be handed to an AI, and shape it into something that can. Use when drafting a new issue, auditing existing ones, or deciding whether ready-for-ai may be applied. Never applies the label.
+description: Judge whether an issue can be handed to an AI, and shape it into something that can. Use when drafting a new issue, auditing existing ones, or before applying ready-for-ai. Applying the label is done by .claude/tools/ready-for-ai.mjs, only on YES, and never on the conditions owner-decisions.md forbids.
 ---
 
 # Issue Quality Gate
@@ -13,15 +13,26 @@ draft issue / existing issue
         |
    issue-ready       <- here. decides whether it can be handed over
         |
-   the owner applies the label
+   ⚠ the verdict is posted to the issue, then the label is applied
+   ⚠ by .claude/tools/ready-for-ai.mjs — ⚠ never by hand
         |
-   issue-work
+   issue-work / loop-controller  (⚠ which re-runs this gate first)
 ```
+
+⚠ **kagima diverges from the template here.** ⚠ **Upstream, only a human applies the label.**
+⚠ **Since 2026-09-04, by owner decision, this project's AI applies it itself**
+([`../../rules/owner-decisions.md`](../../rules/owner-decisions.md) § `ready-for-ai` owns the
+conditions; ⚠ **they are not restated here**).
 
 ## ⚠ What this skill never does
 
-- ⚠ **Never applies the `ready-for-ai` label.** The owner does
-  ([`owner-decisions.md`](../../rules/owner-decisions.md)).
+- ⚠ **Never applies the label on anything but `Ready for AI: YES`**, and
+  ⚠ **never on the conditions [`owner-decisions.md`](../../rules/owner-decisions.md) forbids**
+  (`needs-decision`, an open dependency, an environment that cannot verify, or an unsettled
+  product / security / privacy / running-cost question).
+  ⚠ **That file owns the list. ⚠ Read it; it is not copied here.**
+- ⚠ **Never removes the label.** ⚠ **Applying and removing are not symmetric** — ⚠ **removing one
+  the owner applied overrides the owner.** ⚠ **Say it should go, and stop.**
 - ⚠ **Never closes, rewrites, or splits an issue.** It proposes.
 - ⚠ **Never fills in a missing spec.** When the issue, `docs/SPEC.md`, `docs/adr/` and the code
   disagree, ⚠ **do not decide which is right** — return `NEEDS-HUMAN-DECISION`.
@@ -122,6 +133,19 @@ what is counted).
 | 9 | ⚠ **It changes what a recorded value means** | ⚠ Goes straight to the rules. A human decides |
 | 10 | ⚠ **The AI given this issue cannot actually run the verification it needs** | ⚠ Then nobody can show it green |
 | 11 | ⚠ **Outcomes are not distinguished** (and this issue is one where they apply) | ⚠ **The AI reports "not there" for "not obtained."** §3 |
+| 12 | ⚠ **A dependency this issue names is still open** | ⚠ **The work can be started and not finished.** ⚠ **See below** |
+
+### ⚠ Clause 12 — dependencies are read, not guessed
+
+⚠ **An issue's dependencies are the ones it names**, in a `Depends on:` line or in its
+`Out of Scope`. ⚠ **Never infer one from a hunch about implementation order.**
+
+- MUST: ⚠ **Check the state of each named issue** (`gh issue view <N> --json state`).
+  ⚠ **Open means clause 12 is hit.**
+- MUST: ⚠ **Say which dependency is open, by `owner/repo#N`.** ⚠ **"Blocked" with no number is
+  not a reason.**
+- MUST NOT: ⚠ **Never treat a merged PR as a closed dependency.** ⚠ **The issue closing is the
+  event that matters**, ⚠ **and `Closes` does not always fire.**
 
 ### ⚠ Clause 10 asks about the AI, not about CI
 
@@ -151,7 +175,13 @@ Classification: KEEP / REWRITE / SPLIT / CLOSE / NEEDS-HUMAN-DECISION
 Ready for AI: YES / NO
 
 Reason:
-  <which clause it hit. If none, say all 11 were checked>
+  <which clause it hit. If none, say all 12 were checked>
+
+⚠ Dependencies:
+  <each named dependency, by owner/repo#N, with its state. "none named" if there are none>
+
+⚠ Label:
+  <APPLIED / NOT-APPLIED, and which condition in owner-decisions.md stopped it>
 
 ⚠ Outcome distinction:
   <applicable or not. If applicable, which outcomes are written and which are missing>
@@ -169,9 +199,23 @@ Human Decision:
   <⚠ list what a human must decide, without deciding it>
 ```
 
-⚠ **`Ready for AI: YES` still does not apply the label.**
+## 5-1. ⚠ Applying the label
+
 ⚠ **`YES` means "an AI can implement this", not "this should be implemented."**
-The owner decides the latter.
+⚠ **Those are different, and the second one is still not this skill's to answer** — ⚠ **but under
+kagima's rules the AI may now act on the first** ([`../../rules/owner-decisions.md`](../../rules/owner-decisions.md)).
+
+```bash
+node .claude/tools/ready-for-ai.mjs --issue <N> --verdict-file <path to the verdict above>
+```
+
+- MUST: ⚠ **Post the verdict first, then label.** ⚠ **The tool does both, in that order.**
+  ⚠ **A label with no verdict behind it is indistinguishable from one applied by mistake.**
+- MUST: ⚠ **Never apply it with `gh issue edit`.** ⚠ **That skips the record, and the record is
+  the only thing that lets anyone tell the AI's labels from the owner's**
+  (`.claude/tools/label-eval.mjs`).
+- MUST: ⚠ **The tool refuses on `needs-decision`.** ⚠ **A refusal is an answer, not an obstacle** —
+  ⚠ **never work around it.**
 
 ---
 

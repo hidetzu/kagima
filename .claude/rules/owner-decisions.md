@@ -51,12 +51,63 @@ Ask only where **being wrong cannot be walked back**.
 ⚠ **This is not a priority label.** It marks "an AI can carry this to the end without a human
 deciding mid-way".
 
-- MUST: ⚠ **Only a human applies it.** The AI goes as far as producing the verdict
-  (`.claude/skills/issue-ready/SKILL.md`).
-- MUST NOT: ⚠ **Never apply it, and never remove it.**
-- MUST: ⚠ **The label is an entry condition, not a guarantee that it can be implemented.**
-  ⚠ **Bodies and comments change after a label is applied, and labels get applied by mistake** —
-  ⚠ **so re-run the gate every time.**
-- MUST: ⚠ **Even with the label, permission for `git push` and merge is taken every time**
-  ([`git.md`](git.md)). ⚠ **The one exception is the Loop Controller's**, and it is written out
-  in full there.
+⚠ **kagima changed this clause on 2026-09-04, by owner decision.**
+⚠ **Upstream, only a human may apply the label. Here, the AI applies it under the conditions
+below** ([`../../docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md`](../../docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)
+carries the decision, the grounds, and what moved to pay for it).
+⚠ **This divergence from the template is deliberate and recorded.** ⚠ **Never quietly re-align it.**
+
+### ⚠ The gate did not get weaker. It moved.
+
+```text
+before   human applies ready-for-ai  ->  human approves the plan  ->  ... -> merge (covered by that approval)
+now      AI applies ready-for-ai     ->  ... -> PR                ->  ⚠ human approves the merge
+```
+
+- MUST: ⚠ **Exactly one human gate exists per issue, and it is the merge.**
+  ⚠ **Never end up with zero.** ⚠ **If you find yourself about to merge without having asked,
+  you have misread this file.**
+- MUST: ⚠ **`git push` and opening the PR are covered inside the Loop Controller and nowhere else**
+  ([`git.md`](git.md)). ⚠ **Merge never is.**
+
+### ⚠ When the AI may apply it
+
+- MAY: ⚠ **Apply it only when [`../skills/issue-ready/SKILL.md`](../skills/issue-ready/SKILL.md)
+  returns `Ready for AI: YES`**, ⚠ **and the verdict was posted to the issue first.**
+  ⚠ **The reasoning goes on the issue before the label does** — ⚠ **a label with no verdict behind
+  it is indistinguishable from one applied by mistake.**
+- MUST: ⚠ **Apply it with `node .claude/tools/ready-for-ai.mjs`, never with `gh issue edit`.**
+  ⚠ **That tool posts the verdict, applies the label and records the application in one step.**
+  ⚠ **A rule every call site has to remember is not a rule, it is a hope**
+  ([`security.md`](security.md) says the same thing about redaction).
+- MUST: ⚠ **Re-run the gate immediately before work starts, every time**, even on an issue the AI
+  labelled itself. ⚠ **Bodies and comments change after a label is applied.**
+
+### ⚠ When the AI must not apply it
+
+⚠ **Any one of these means no label.** ⚠ **Not "probably fine". No label.**
+
+| # | ⚠ Condition | ⚠ Why |
+|---|---|---|
+| 1 | The issue carries `needs-decision` | ⚠ **The owner has not decided yet** |
+| 2 | ⚠ **A named dependency is still open** | ⚠ **The work cannot be finished, only started** |
+| 3 | ⚠ **The environment cannot run the verification the issue needs** | ⚠ **Then nobody can show it green** (`issue-ready` clause 10) |
+| 4 | ⚠ **An unsettled question touches the product** — the concept, the v0.1.0 experience, a non-goal | ⚠ **[`../../docs/PRODUCT.md`](../../docs/PRODUCT.md) § 6** |
+| 5 | ⚠ **An unsettled question touches security or privacy** | ⚠ **Weakening a promise is the owner's, always** |
+| 6 | ⚠ **It would introduce a continuing running cost** | ⚠ **Same** |
+| 7 | `issue-ready` returned anything but `YES` | ⚠ **The gate already said no** |
+
+- MUST NOT: ⚠ **Never remove the label.** ⚠ **Applying and removing are not symmetric:**
+  ⚠ **removing one the owner applied overrides the owner.**
+  ⚠ **When an issue should lose it, say so and stop.**
+- MUST NOT: ⚠ **Never apply it to an issue the AI wrote in order to unblock itself**
+  without the gate having run on it like any other.
+- MUST: ⚠ **When 4, 5 or 6 is what stopped it, mark the issue `needs-decision` and move on to
+  another issue.** ⚠ **Do not stall the whole queue on one owner question.**
+
+### ⚠ The label is still only an entry condition
+
+- MUST: ⚠ **It is not a guarantee that the issue can be implemented.**
+  ⚠ **Labels get applied by mistake — ⚠ including by the AI.**
+- MUST: ⚠ **The Loop Controller re-runs the gate before touching anything, and stops on `NO`**
+  ([`../skills/loop-controller/SKILL.md`](../skills/loop-controller/SKILL.md)).

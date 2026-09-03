@@ -41,6 +41,13 @@ node .claude/tools/docs-check.mjs --list       # ⚠ 名前を並べるだけ。
 node .claude/tools/docs-check.mjs --only=links # 1 ケースだけ
 ```
 
+観測(⚠ **採点ではない**):
+
+```bash
+node .claude/tools/telemetry-eval.mjs   # 作業がどう渡され、どう終わったか
+node .claude/tools/label-eval.mjs       # ⚠ 誰が ready-for-ai を貼ったか
+```
+
 ⚠ **件数はこれ自身が実行時に言う。** ⚠ **ドキュメントには書かない**
 ([`.claude/rules/evidence.md`](.claude/rules/evidence.md))。
 
@@ -51,14 +58,16 @@ node .claude/tools/docs-check.mjs --only=links # 1 ケースだけ
 ## 開発の進め方
 
 ```text
-issue-ready   ->  Owner が ready-for-ai を付ける  ->  loop-controller
-                                                          |
-                        inner verify -> final verify -> mutation check
-                                                          |
-                                    change-review  ->  PR  ->  CI  ->  merge
+issue-ready  ->  ⚠ AI が根拠を残して ready-for-ai を貼る  ->  loop-controller
+                                                                 |
+                       inner verify -> final verify -> mutation check
+                                                                 |
+                           change-review  ->  PR  ->  CI  ->  ⚠ Owner が merge を承認 -> merge
 ```
 
-- ⚠ **`ready-for-ai` を貼るのは人間だけである。** ⚠ **AI は判定までしかしない。**
+- ⚠ **`ready-for-ai` は AI が貼る。** ⚠ **ただし条件つきであり、外すことはしない**
+  ([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md))。
+- ⚠ **人間のゲートは merge の 1 つだけである。** ⚠ **0 にはしない。**
 - ⚠ **Owner 判断が要るものは `needs-decision` として整理し、それ以外を先に進める**
   ([`docs/PRODUCT.md`](docs/PRODUCT.md) § 6)。
 
@@ -77,17 +86,23 @@ issue-ready   ->  Owner が ready-for-ai を付ける  ->  loop-controller
 | 何 | どう扱ったか |
 |---|---|
 | `rules/evidence.md` | ⚠ **原文のまま + kagima の 2 行を追加**(⚠ 追加のみ。⚠ **削除は禁じられている**) |
-| `rules/verification.md` / `rules/git.md` | 原文のまま |
-| `rules/owner-decisions.md` | ⚠ **原文から、移植しなかった仕組みへの参照だけを外した** |
+| `rules/verification.md` | 原文のまま |
+| `rules/git.md` | ⚠ **乖離あり。** Loop Controller の例外から merge を外した([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
+| `rules/owner-decisions.md` | ⚠ **乖離あり。** 移植しなかった仕組みへの参照を外し、⚠ **`ready-for-ai` 節を書き直した**([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
 | `rules/README.md` | kagima 用に書き直し(索引なので) |
-| `skills/issue-ready` / `issue-work` / `change-review` / `loop-controller` | 原文のまま。⚠ `change-review` は FILL IN を埋めた |
+| `skills/issue-work` | 原文のまま |
+| `skills/change-review` | 原文のまま。⚠ FILL IN を埋めた |
+| `skills/issue-ready` / `skills/loop-controller` | ⚠ **乖離あり。** ラベル付与の自律化と、人間ゲートの merge への移動([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
 | `hooks/telemetry.mjs` / `tools/telemetry-eval.mjs` / `telemetry-dir.mjs` | 原文のまま |
-| `tools/docs-check.mjs` | ⚠ **kagima 用のケースを 1 つ足した**(`env-example-has-no-values`) |
+| `tools/docs-check.mjs` | ⚠ **kagima 用のケースを足した**(`env-example-has-no-values` / `ready-for-ai-label-line`) |
 | `docs/SPEC.md` / `docs/adr/README.md` | 骨組みを引き継ぎ、日本語で書き直した |
 
 ⚠ **`.claude/` を英語のままにしているのは意図である。**
 ⚠ **上流と diff が取れる状態を保ち、改善を送り返せるようにするため**
 ([`.claude/rules/README.md`](.claude/rules/README.md) § Language に根拠がある)。
+
+⚠ **「乖離あり」の 4 ファイルは、上流へ送り返す候補である**
+(⚠ **ただし、この形が実際に回ってから。一般的に聞こえることではなく、動いたことが根拠になる**)。
 
 ### kagima が自分で書いたもの
 
@@ -95,6 +110,8 @@ issue-ready   ->  Owner が ready-for-ai を付ける  ->  loop-controller
 |---|---|
 | [`.claude/rules/security.md`](.claude/rules/security.md) | ⚠ **守る対象がプロダクトそのものだから。** ⚠ **根拠はコードが 1 行も無い時点で成立している** |
 | [`.claude/skills/verify/SKILL.md`](.claude/skills/verify/SKILL.md) | ⚠ **テンプレートは意図的に同梱していない。** ⚠ **契約は移植でき、コマンドは移植できない** |
+| `.claude/ready-for-ai-label.mjs` / `tools/ready-for-ai.mjs` | ⚠ **ラベル付与と記録を 1 ステップにする。** ⚠ **毎回思い出す規則は規則ではなく願望だから** |
+| `tools/label-eval.mjs` | ⚠ **「誰が `ready-for-ai` を貼ったか」を観測する。** ⚠ **Owner 分は引き算であり、推定だと出力に毎回書く** |
 
 ### ⚠ 移植しなかったもの
 

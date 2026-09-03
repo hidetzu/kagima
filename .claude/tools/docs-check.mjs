@@ -131,6 +131,26 @@ const CASES = [
         : { ok: true, said: `${f} carries names only (every non-blank line is a comment)` };
     },
   },
+  {
+    name: "ready-for-ai-label-line",
+    // ⚠ Grounds: `.claude/ready-for-ai-label.mjs` declares the label string, and two tools import
+    //   it. ⚠ `.claude/rules/owner-decisions.md` states when it may be applied — ⚠ and a markdown
+    //   file cannot import anything, so it holds a second copy of the same string.
+    // ⚠ Two copies of one decision is exactly what `CLAUDE.md` §3 forbids keeping unchecked.
+    //   ⚠ If they drift, the rule governs a label nothing applies, and the tool applies a label
+    //   ⚠ no rule governs — ⚠ and nothing announces it.
+    run() {
+      const declared = /READY_FOR_AI_LABEL\s*=\s*["'`]([^"'`]+)["'`]/.exec(read(".claude/ready-for-ai-label.mjs"));
+      if (!declared) return { ok: false, said: "ready-for-ai-label.mjs no longer declares READY_FOR_AI_LABEL" };
+      const label = declared[1];
+      const f = ".claude/rules/owner-decisions.md";
+      // ⚠ Strip first, or the check reads the very words written to describe it (`CLAUDE.md` §5).
+      const named = stripMarkdown(read(f)).includes(label);
+      return named
+        ? { ok: true, said: `${f} names the label ready-for-ai-label.mjs declares (both say ${label})` }
+        : { ok: false, said: `ready-for-ai-label.mjs declares "${label}", and ${f} never names it — the rule would govern a different label than the tool applies` };
+    },
+  },
 ];
 
 // ── the runner ─────────────────────────────────────────────────────────────
