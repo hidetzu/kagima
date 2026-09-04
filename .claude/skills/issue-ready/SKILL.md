@@ -129,11 +129,22 @@ what is counted).
 | 5 | Scope is too broad | A judgement call arrives mid-way |
 | 6 | Out of Scope is missing | It spreads without limit |
 | 7 | An owner decision is unresolved | ⚠ The AI decides in their place |
-| 8 | It contradicts the code, SPEC, or an ADR | ⚠ The AI decides which is right |
+| 8 | It contradicts the code, SPEC, or an ADR | ⚠ The AI decides which is right. ⚠ **One exception: see below** |
 | 9 | ⚠ **It changes what a recorded value means** | ⚠ Goes straight to the rules. A human decides |
 | 10 | ⚠ **The AI given this issue cannot actually run the verification it needs** | ⚠ Then nobody can show it green |
 | 11 | ⚠ **Outcomes are not distinguished** (and this issue is one where they apply) | ⚠ **The AI reports "not there" for "not obtained."** §3 |
 | 12 | ⚠ **A dependency this issue names is still open** | ⚠ **The work can be started and not finished.** ⚠ **See below** |
+
+### ⚠ Clause 8 does not fire on `Acceptance Criteria` vs. `PRODUCT.md`
+
+⚠ **That one pair is resolved by the AI, not by a human**
+([`../../rules/owner-decisions.md`](../../rules/owner-decisions.md) § The one conflict the AI
+resolves itself owns it; ⚠ **it is not restated here**).
+
+- MUST: ⚠ **Still say in the verdict that the two disagree, and which criterion.**
+  ⚠ **Resolvable is not the same as unremarkable.**
+- MUST: ⚠ **Every other contradiction still fires clause 8.**
+  ⚠ **In particular an issue's `Owner Decisions` conflicting with anything is always a human's.**
 
 ### ⚠ Clause 12 — dependencies are read, not guessed
 

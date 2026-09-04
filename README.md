@@ -101,11 +101,11 @@ issue-ready  ->  ⚠ AI が根拠を残して ready-for-ai を貼る  ->  loop-c
 | `rules/evidence.md` | ⚠ **原文のまま + kagima の 2 行を追加**(⚠ 追加のみ。⚠ **削除は禁じられている**) |
 | `rules/verification.md` | 原文のまま |
 | `rules/git.md` | ⚠ **乖離あり。** Loop Controller の例外から merge を外した([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
-| `rules/owner-decisions.md` | ⚠ **乖離あり。** 移植しなかった仕組みへの参照を外し、⚠ **`ready-for-ai` 節を書き直した**([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
+| `rules/owner-decisions.md` | ⚠ **乖離あり。** 移植しなかった仕組みへの参照を外し、⚠ **`ready-for-ai` 節を書き直し**([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md))、⚠ **優先順位の例外を 1 組だけ足した**([`docs/adr/0008`](docs/adr/0008-let-product-md-outrank-an-issues-acceptance-criteria.md)) |
 | `rules/README.md` | kagima 用に書き直し(索引なので) |
 | `skills/issue-work` | 原文のまま |
 | `skills/change-review` | 原文のまま。⚠ FILL IN を埋めた |
-| `skills/issue-ready` / `skills/loop-controller` | ⚠ **乖離あり。** ラベル付与の自律化と、人間ゲートの merge への移動([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md)) |
+| `skills/issue-ready` / `skills/loop-controller` | ⚠ **乖離あり。** ラベル付与の自律化と、人間ゲートの merge への移動([`docs/adr/0006`](docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md))。⚠ `issue-ready` は第 8 項の例外も([`docs/adr/0008`](docs/adr/0008-let-product-md-outrank-an-issues-acceptance-criteria.md)) |
 | `hooks/telemetry.mjs` / `tools/telemetry-eval.mjs` / `telemetry-dir.mjs` | 原文のまま |
 | `tools/docs-check.mjs` | ⚠ **kagima 用のケースを足した**(`env-example-has-no-values` / `ready-for-ai-label-line`) |
 | `docs/SPEC.md` / `docs/adr/README.md` | 骨組みを引き継ぎ、日本語で書き直した |
