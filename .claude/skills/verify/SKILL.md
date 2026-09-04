@@ -139,11 +139,15 @@ promise, not a wall** — ⚠ **and `security.md` says so about itself.**
 | Constraint | Which tier catches it |
 |---|---|
 | `.env.example` carries no values | fast — `docs-check --only=env-example-has-no-values` |
-| the passphrase never reaches a log | ⚠ **fast, once a check exists.** ⚠ **Until then: `NOT-VERIFIED`, and say so** |
+| the passphrase never reaches a log | fast — `test/log.test.ts`. ⚠ **Two halves: the boundary redacts, ⚠ and nothing bypasses the boundary.** ⚠ **Either alone is a promise** |
 | a wrong passphrase and an unknown room are indistinguishable | ⚠ **final gate.** ⚠ Compare the two responses, ⚠ **including their shape** |
 | rate limiting actually rejects | ⚠ **final gate.** ⚠ **Drive it past the limit and read what came back** |
 | closing a room drops its state | ⚠ **final gate.** ⚠ **Rejoin afterwards and confirm it answers like a room that never existed** |
 | media never reaches the server | ⚠ **not catchable by a passing test.** ⚠ **See below** |
+| a room never reaches disk | fast — `test/room.test.ts`. ⚠ **Asserts no persistence module is imported.** ⚠ **Not the same as "nothing remains in memory"** |
+| the room id and the passphrase come from a CSPRNG | fast — `test/room.test.ts`, `test/passphrase.test.ts`. ⚠ **A negative check plus a positive one; ⚠ the negative alone cannot show a CSPRNG *is* used** |
+| a secret is never compared with `===` | fast — `test/join.test.ts` |
+| every refusal looks identical on the wire | fast — `test/server.test.ts`. ⚠ **Compares status, headers and body over a real socket.** ⚠ **A unit test cannot see the bytes** |
 
 ⚠ **That last row is the hard one.** ⚠ **"No file was written" is not evidence that no file is
 ever written** ([`../../rules/evidence.md`](../../rules/evidence.md) — ⚠ **not written to disk
