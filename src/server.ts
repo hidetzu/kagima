@@ -9,6 +9,7 @@
 //
 // ⚠ **Every room dies with this process.** ⚠ **That is the specification** (`docs/adr/0005`).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { logger } from "./log.ts";
 import { randomBytes } from "node:crypto";
 import { createRoom } from "./room/create-room.ts";
 import {
@@ -229,8 +230,8 @@ export const handle = async (
 const joinTokenSecret = (): string => {
   const fromEnv = process.env["JOIN_TOKEN_SECRET"];
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  console.log("⚠ JOIN_TOKEN_SECRET is not set — using a random one for this process only");
-  console.log("⚠ restarting will invalidate every join token it issued");
+  logger.warn("JOIN_TOKEN_SECRET is not set — using a random one for this process only");
+  logger.warn("restarting will invalidate every join token it issued");
   return randomBytes(32).toString("base64url");
 };
 
@@ -240,8 +241,8 @@ export const startServer = (
 ) => {
   const trustedSourceHeader = process.env["TRUSTED_SOURCE_HEADER"] ?? "";
   if (trustedSourceHeader === "") {
-    console.log("⚠ TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
-    console.log("⚠ behind a tunnel that makes every caller look like one source");
+    logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
+    logger.warn("behind a tunnel that makes every caller look like one source");
   }
   const ctx: Context = {
     store: createRoomStore(),
@@ -256,8 +257,8 @@ export const startServer = (
     void handle(ctx, req, res).catch(() => send(res, 500, { error: "something went wrong here" }));
   });
   server.listen(port, () => {
-    console.log(`kagima is listening on ${baseUrl} (port ${port})`);
-    console.log("⚠ rooms live in this process only — stopping it ends every room");
+    logger.info("kagima is listening", { baseUrl, port });
+    logger.info("rooms live in this process only — stopping it ends every room");
   });
   return server;
 };
