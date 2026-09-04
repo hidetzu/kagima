@@ -29,6 +29,7 @@ export type SignalMessage =
   | { type: "offer"; sdp: string }
   | { type: "answer"; sdp: string }
   | { type: "candidate"; candidate: string; sdpMid: string | null; sdpMLineIndex: number | null }
+  | { type: "hello"; nickname: string }
   | { type: "bye" };
 
 export type Transport = {
@@ -160,7 +161,10 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
         await pc.addIceCandidate(candidate);
         return;
       }
+      case "hello":
       case "bye":
+        // ⚠ Not this module's business. ⚠ The page listens for `hello` itself; ⚠ the call carries
+        //   ⚠ media and negotiation, and nothing about who anyone is.
         return;
     }
   });

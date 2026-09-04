@@ -83,6 +83,36 @@
       const token = await joinOwnRoom(room.roomId, room.passphrase);
       const transport = await connectSignaling(room.roomId, token);
 
+      // ⚠ Listen BEFORE anything slow. ⚠ `createCall` awaits getUserMedia, and the guest can
+      //   ⚠ arrive and say hello while that is still running — ⚠ a handler registered afterwards
+      //   ⚠ never sees it, and the host silently never learns who came in.
+      //   ⚠ Found by the browser check: frames flowed and the name never appeared.
+      // ⚠ Two facts arrive separately and in no fixed order: who came in, and whether media is
+      //   ⚠ flowing. ⚠ Writing the same line from two handlers means whichever lands last wins,
+      //   ⚠ and the browser check caught exactly that — ⚠ `track` fired after `hello` and erased
+      //   ⚠ the name (`.claude/skills/change-review/SKILL.md` § 4: ⚠ the same state written from
+      //   ⚠ two places, with nothing deciding which is last).
+      // ⚠ So the facts are held, and the line is composed from them.
+      let guestName = null;
+      let connected = false;
+      const render = () => {
+        // ⚠ textContent, never innerHTML: the name came from outside. ⚠ The other wall is
+        //   ⚠ validation, in src/signaling/messages.ts.
+        status.textContent = connected
+          ? guestName === null
+            ? "つながりました。"
+            : `${guestName} さんとつながりました。`
+          : guestName === null
+            ? "相手が来るのを待っています。"
+            : `${guestName} さんが入りました。つないでいます。`;
+      };
+
+      transport.onMessage((message) => {
+        if (message.type !== "hello") return;
+        guestName = message.nickname;
+        render();
+      });
+
       // ⚠ The guest offers, because the guest arrives second and knows the host is there.
       //   ⚠ The host waiting for an offer IS the waiting state; no extra message is needed.
       call = await createCall({ transport, isOfferer: false });
@@ -91,8 +121,9 @@
       globalThis.kagimaCall = call;
 
       call.pc.addEventListener("track", () => {
-        // ⚠ Says what happened, not a state name.
-        status.textContent = "つながりました。";
+        // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other fact.
+        connected = true;
+        render();
       });
 
       transport.socket.addEventListener("close", (event) => {
