@@ -139,10 +139,29 @@ test(titleOf("frames"), async () => {
 
   // ⚠ A second, independent way of seeing the same thing. ⚠ A connection carrying nothing cannot
   //   ⚠ make both true.
-  const remoteWidth = async (page: (typeof host)["page"]) =>
-    page.evaluate(() => (document.getElementById("remote") as HTMLVideoElement).videoWidth);
-  assert.ok((await remoteWidth(host.page)) > 0, "the host's remote video has no dimensions");
-  assert.ok((await remoteWidth(guest.page)) > 0, "the guest's remote video has no dimensions");
+  //
+  // ⚠ Waited for, not sampled. ⚠ A decoded frame and a sized video element are two different
+  //   ⚠ moments: the element gets its dimensions when metadata lands, which is after.
+  // ⚠ Read once, this passed locally and failed on CI with "no dimensions" — ⚠ a slower machine
+  //   ⚠ made the gap visible. ⚠ Waiting is how an asynchronous fact is observed;
+  //   ⚠ dropping the assertion would have been editing the check to make it go quiet.
+  const waitForPicture = async (page: (typeof host)["page"], who: string): Promise<number> => {
+    await page.waitForFunction(
+      () => (document.getElementById("remote") as HTMLVideoElement).videoWidth > 0,
+      undefined,
+      { timeout: 20_000 },
+    );
+    const width = await page.evaluate(
+      () => (document.getElementById("remote") as HTMLVideoElement).videoWidth,
+    );
+    assert.ok(width > 0, `${who}'s remote video has no dimensions`);
+    return width;
+  };
+  const hostWidth = await waitForPicture(host.page, "the host");
+  const guestWidth = await waitForPicture(guest.page, "the guest");
+  console.log(
+    `  observed: remote video is ${hostWidth}px wide for the host, ${guestWidth}px for the guest`,
+  );
 
   // ⚠ What ICE actually produced, recorded rather than assumed
   //   (`.claude/rules/verification.md` — ⚠ never assert what the other side will do).
