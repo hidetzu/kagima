@@ -20,6 +20,7 @@ import {
 } from "./room/join.ts";
 import { type RateLimiter, createRateLimiter } from "./room/rate-limit.ts";
 import { attachSignaling } from "./signaling/attach.ts";
+import { serveStatic } from "./static.ts";
 import { createHub } from "./signaling/hub.ts";
 import { type RoomStore, createRoomStore } from "./room/store.ts";
 
@@ -126,6 +127,9 @@ export const handle = async (
 ): Promise<void> => {
   const url = new URL(req.url ?? "/", ctx.baseUrl);
 
+  // ⚠ Only GET reaches the static map, and only by an exact name from a closed list.
+  if (req.method === "GET" && serveStatic(url.pathname, res)) return;
+
   if (url.pathname === "/api/rooms") {
     if (req.method !== "POST") {
       res.setHeader("allow", "POST");
@@ -217,7 +221,7 @@ export const handle = async (
 
   send(res, 404, {
     error: "no such endpoint",
-    endpoints: ["POST /api/rooms", "POST /api/rooms/{roomId}/join"],
+    endpoints: ["POST /api/rooms", "POST /api/rooms/{roomId}/join", "GET /dev-call.html"],
   });
 };
 
