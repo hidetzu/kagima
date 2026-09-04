@@ -95,26 +95,52 @@
       transport.send({ type: "hello", nickname });
       await call.start();
 
-      call.pc.addEventListener("track", () => {
-        $("status").textContent = "つながりました。";
-      });
+      // ⚠ ONE writer for this line, and every fact goes through it.
+      //   ⚠ Four handlers wrote it directly before, and nothing decided which was last —
+      //   ⚠ a `track` landing after "the other side left" would talk over it.
+      //   ⚠ CI caught exactly that on the host page; ⚠ this page had the same shape.
+      //   ⚠ `.claude/skills/change-review/SKILL.md` § 4.
+      let connected = false;
       // ⚠ Three endings, and they are not the same thing (kagima#11).
+      //   ⚠ Once one has happened it outranks "are we connected" — ⚠ it is the last thing known.
+      let ending = null;
+      const render = () => {
+        $("status").textContent =
+          ending === "closed"
+            ? "この通話は終わりました。何も残っていません。"
+            : ending === "peer-left"
+              ? "相手の接続が切れました。待っています。"
+              : ending === "detached"
+                ? "kagima とのつながりが切れました。通話は続いているかもしれません。"
+                : connected
+                  ? "つながりました。"
+                  : "つないでいます。";
+      };
+
+      call.pc.addEventListener("track", () => {
+        connected = true;
+        render();
+      });
+
       transport.socket.addEventListener("close", (e) => {
         if (e.code === 4005) {
           call.hangUp();
-          $("status").textContent = "この通話は終わりました。何も残っていません。";
+          ending = "closed";
+          render();
           return;
         }
         // ⚠ Not the room ending — ⚠ this connection went away, and the call may still be running.
         //   ⚠ The tracks stay: media goes browser to browser and does not need us.
-        $("status").textContent =
-          "kagima とのつながりが切れました。通話は続いているかもしれません。";
+        ending = "detached";
+        render();
       });
 
       transport.onMessage((message) => {
         if (message.type !== "peer-left") return;
         // ⚠ Recoverable, and worded as such. ⚠ "切断されました" would read as a fault.
-        $("status").textContent = "相手の接続が切れました。待っています。";
+        ending = "peer-left";
+        connected = false;
+        render();
       });
     } catch (error) {
       console.warn("kagima: the call could not start", error);
