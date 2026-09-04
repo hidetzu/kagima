@@ -119,9 +119,21 @@ now      AI applies ready-for-ai     ->  ... -> PR                ->  ⚠ human 
   ⚠ **The reasoning goes on the issue before the label does** — ⚠ **a label with no verdict behind
   it is indistinguishable from one applied by mistake.**
 - MUST: ⚠ **Apply it with `node .claude/tools/ready-for-ai.mjs`, never with `gh issue edit`.**
-  ⚠ **That tool posts the verdict, applies the label and records the application in one step.**
+  ⚠ **That tool posts the verdict, applies the label, marks it and records the outcome in one step.**
   ⚠ **A rule every call site has to remember is not a rule, it is a hope**
   ([`security.md`](security.md) says the same thing about redaction).
+- MUST: ⚠ **The tool applies `applied-by-ai` alongside `ready-for-ai`.**
+  ⚠ **That mark is what makes "who applied it" a measurement rather than a subtraction:**
+  ⚠ **`gh` acts as the owner, so the timeline's actor is the owner whoever pressed the button,**
+  ⚠ **and a file on one machine cannot know about an application made on another.**
+  ⚠ **An application with no mark beside it, in a log that is complete for this repository,
+  is an observed absence.**
+- MUST NOT: ⚠ **Never apply `applied-by-ai` by hand.**
+  ⚠ **Doing so makes an owner's application read as the AI's, and nothing can tell afterwards.**
+- MUST: ⚠ **Every refusal is recorded too.** ⚠ **A refusal leaves no trace on GitHub at all**,
+  ⚠ **so the local record is the only place "how often did the gate say no" can be counted** —
+  ⚠ **and an uncounted refusal is indistinguishable from one that never happened**
+  ([`evidence.md`](evidence.md)).
 - MUST: ⚠ **Re-run the gate immediately before work starts, every time**, even on an issue the AI
   labelled itself. ⚠ **Bodies and comments change after a label is applied.**
 

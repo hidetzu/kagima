@@ -166,6 +166,8 @@ promise, not a wall** — ⚠ **and `security.md` says so about itself.**
 | the room id and the passphrase come from a CSPRNG | fast — `test/room.test.ts`, `test/passphrase.test.ts`. ⚠ **A negative check plus a positive one; ⚠ the negative alone cannot show a CSPRNG *is* used** |
 | a secret is never compared with `===` | fast — `test/join.test.ts` |
 | every refusal looks identical on the wire | fast — `test/server.test.ts`. ⚠ **Compares status, headers and body over a real socket.** ⚠ **A unit test cannot see the bytes** |
+| who applied `ready-for-ai` is read, not inferred | fast — `docs-check --only=label-attribution`. ⚠ **Fixtures, because the judgement is the part that used to be wrong** |
+| an exercise never labels a real issue | ⚠ **no check.** ⚠ **The tool refuses when the record is redirected; ⚠ that refusal has no test, and it cost two issues to learn** |
 
 ⚠ **That last row is the hard one.** ⚠ **"No file was written" is not evidence that no file is
 ever written** ([`../../rules/evidence.md`](../../rules/evidence.md) — ⚠ **not written to disk

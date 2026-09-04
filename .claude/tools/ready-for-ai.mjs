@@ -39,7 +39,7 @@ import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname } from "node:path";
 import {
-  READY_FOR_AI_LABEL, NEEDS_DECISION_LABEL, YES_MARKER, labelLogPath,
+  APPLIED_BY_AI_LABEL, READY_FOR_AI_LABEL, NEEDS_DECISION_LABEL, YES_MARKER, labelLogPath,
 } from "../ready-for-ai-label.mjs";
 
 const args = process.argv.slice(2);
@@ -49,8 +49,55 @@ const arg = (name) => {
 };
 const DRY = args.includes("--dry-run");
 
-const die = (why) => { console.error(`ready-for-ai: ${why}`); process.exit(1); };
+// ⚠ **Timestamps read the way "when did I work" reads** — local time with its offset,
+//   ⚠ the same shape `hooks/telemetry.mjs` writes.
+const stamp = () => {
+  const d = new Date(), off = -d.getTimezoneOffset(), s = off < 0 ? "-" : "+";
+  const p = (n) => String(Math.floor(Math.abs(n))).padStart(2, "0");
+  return new Date(d.getTime() + off * 60000).toISOString().slice(0, 19)
+    + `${s}${p(off / 60)}:${p(off % 60)}`;
+};
+
+// ⚠ **Append-only, and it never leaves this machine** — same contract as the rest of
+//   ⚠ `.claude/telemetry/` (`hooks/telemetry.mjs`). ⚠ **Nothing here is scored.**
+const record = (rec) => {
+  try {
+    const log = labelLogPath();
+    mkdirSync(dirname(log), { recursive: true });
+    appendFileSync(log, `${JSON.stringify({ ts: stamp(), ...rec })}\n`);
+  } catch (e) {
+    // ⚠ Losing a measurement is strictly better than losing the ability to work
+    //   (`hooks/telemetry.mjs` says the same thing about itself).
+    process.stderr.write(`ready-for-ai: the record could not be written: ${e.message}\n`);
+  }
+};
+
+// ⚠ **Every refusal is recorded, not only every application.**
+//   ⚠ Without this, "how often did the gate say no" is unanswerable — ⚠ and a refusal leaves no
+//   ⚠ trace on GitHub at all, so this file is the only place it can be counted.
+const die = (why, refusal) => {
+  if (refusal !== undefined) record({ event: "label_refused", label: READY_FOR_AI_LABEL, by: "ai", ...refusal });
+  console.error(`ready-for-ai: ${why}`);
+  process.exit(1);
+};
 const gh = (a) => execFileSync("gh", a, { encoding: "utf8" });
+
+// ⚠ **A redirected record means this is an exercise, and an exercise must not change the world.**
+//
+// ⚠ **Grounds: this went wrong on 2026-09-04.** ⚠ **`CLAUDE_DEV_TELEMETRY_DIR` was set to keep a
+//   ⚠ verification out of the real record — ⚠ and it did exactly that, and nothing else.**
+//   ⚠ **The labels went onto two real issues, one of which had already been judged unfit for
+//   ⚠ them.** ⚠ **The variable redirects the record; ⚠ it never redirected GitHub, and the name
+//   ⚠ read as though it did.**
+// ⚠ **So the tool now refuses.** ⚠ **`--dry-run` is the way to exercise it** — ⚠ **it says so.**
+if (process.env["CLAUDE_DEV_TELEMETRY_DIR"] !== undefined && !DRY) {
+  console.error(
+    "ready-for-ai: CLAUDE_DEV_TELEMETRY_DIR is set, so this is an exercise — ⚠ and an exercise must not label a real issue.\n" +
+      "⚠ That variable redirects the local record only. ⚠ GitHub is always real.\n" +
+      "⚠ Add --dry-run to exercise this, or unset the variable to mean it.",
+  );
+  process.exit(1);
+}
 
 const issue = arg("--issue")?.replace(/^#/, "");
 const verdictFile = arg("--verdict-file");
@@ -62,7 +109,10 @@ if (!verdict.trim()) die("the verdict file is empty");
 
 // ⚠ **The gate's own words decide this, not the caller's intent.**
 if (!YES_MARKER.test(verdict)) {
-  die(`the verdict does not say "Ready for AI: YES" — ⚠ the gate said no, so the label does not go on`);
+  die(
+    `the verdict does not say "Ready for AI: YES" — ⚠ the gate said no, so the label does not go on`,
+    { issue: Number(issue), why: "verdict-not-yes" },
+  );
 }
 
 const repo = gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
@@ -71,9 +121,13 @@ const labels = view.labels.map((l) => l.name);
 
 console.log(`ready-for-ai: ${repo}#${view.number} — ${view.title}${DRY ? "   ⚠ DRY RUN" : ""}`);
 
-if (view.state === "CLOSED") die(`${repo}#${issue} is CLOSED — ⚠ never touch something already finished`);
+if (view.state === "CLOSED") {
+  die(`${repo}#${issue} is CLOSED — ⚠ never touch something already finished`,
+    { repo, issue: Number(issue), why: "issue-closed" });
+}
 if (labels.includes(NEEDS_DECISION_LABEL)) {
-  die(`${repo}#${issue} carries "${NEEDS_DECISION_LABEL}" — ⚠ the owner has not decided. ⚠ Not a label to work around`);
+  die(`${repo}#${issue} carries "${NEEDS_DECISION_LABEL}" — ⚠ the owner has not decided. ⚠ Not a label to work around`,
+    { repo, issue: Number(issue), why: "needs-decision" });
 }
 if (labels.includes(READY_FOR_AI_LABEL)) {
   // ⚠ **Not an error, and not a record either.** ⚠ **Recording it would double-count an
@@ -108,7 +162,8 @@ for (const d of deps) {
 }
 console.log(`  deps ${deps.size ? [...deps].join(", ") : "none named"}`);
 if (open.length) {
-  die(`a named dependency is still open: ${open.join(", ")} — ⚠ the work could be started and not finished`);
+  die(`a named dependency is still open: ${open.join(", ")} — ⚠ the work could be started and not finished`,
+    { repo, issue: Number(issue), why: "dependency-open", open });
 }
 
 if (DRY) {
@@ -122,26 +177,22 @@ if (DRY) {
 gh(["issue", "comment", issue, "--body-file", verdictFile]);
 console.log(`  ok   verdict posted`);
 
-gh(["issue", "edit", issue, "--add-label", READY_FOR_AI_LABEL]);
-console.log(`  ok   "${READY_FOR_AI_LABEL}" applied`);
+// ⚠ Both labels, in one call. ⚠ Two calls could leave the mark off after a crash, and an
+//   ⚠ unmarked application reads as the owner's forever after.
+gh(["issue", "edit", issue, "--add-label", `${READY_FOR_AI_LABEL},${APPLIED_BY_AI_LABEL}`]);
+console.log(`  ok   "${READY_FOR_AI_LABEL}" applied, marked "${APPLIED_BY_AI_LABEL}"`);
 
 // ---- the record ------------------------------------------------------------
 // ⚠ **Append-only. ⚠ Never rewritten.** ⚠ **It never enters git and never leaves this machine.**
 // ⚠ **Written last on purpose**: ⚠ **a record of something that did not happen is worse than a
 //   ⚠ missing record**, and a missing one is visible as an unexplained owner application in
 //   ⚠ `label-eval.mjs` rather than silently vanishing.
-const log = labelLogPath();
-mkdirSync(dirname(log), { recursive: true });
-const stamp = () => {
-  const d = new Date(), off = -d.getTimezoneOffset(), s = off < 0 ? "-" : "+";
-  const p = (n) => String(Math.floor(Math.abs(n))).padStart(2, "0");
-  return new Date(d.getTime() + off * 60000).toISOString().slice(0, 19)
-    + `${s}${p(off / 60)}:${p(off % 60)}`;
-};
-appendFileSync(log, `${JSON.stringify({
-  ts: stamp(),
+// ⚠ **The cross-check, not the source of truth.** ⚠ **Attribution is read off the timeline now**
+//   ⚠ (`tools/label-eval.mjs`); ⚠ **this file is what catches the two disagreeing.**
+record({
   event: "label_applied",
   label: READY_FOR_AI_LABEL,
+  marker: APPLIED_BY_AI_LABEL,
   repo,
   issue: Number(view.number),
   by: "ai",                     // ⚠ **the only value this tool ever writes**
@@ -149,7 +200,7 @@ appendFileSync(log, `${JSON.stringify({
   // ⚠ **Length only.** ⚠ **The verdict itself is on the issue; ⚠ it is not duplicated here**
   verdict_chars: verdict.length,
   dependencies: [...deps],
-})}\n`);
+});
 console.log(`  ok   recorded (by=ai)`);
 
 console.log(`\nready-for-ai: ${repo}#${view.number} labelled. ⚠ The label is an entry condition, not a guarantee — ⚠ re-run the gate before starting work.`);

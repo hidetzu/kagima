@@ -31,6 +31,28 @@ export const READY_FOR_AI_LABEL = "ready-for-ai";
 // ⚠ **The label that means the owner has not decided.** ⚠ **Its presence forbids the other one.**
 export const NEEDS_DECISION_LABEL = "needs-decision";
 
+/**
+ * ⚠ **The mark that says the AI applied `ready-for-ai`, and not the owner.**
+ *
+ * ⚠ **Why this is a label and not a line in the local record.**
+ *
+ * ⚠ **The question is "who applied it", and it spans machines and people.**
+ * ⚠ **A file on this laptop cannot answer it** — ⚠ **it cannot know about an application made
+ * anywhere else, and its silence about one is indistinguishable from that one not happening**
+ * (`.claude/rules/evidence.md`: ⚠ **not observed ≠ did not happen**).
+ *
+ * ⚠ **`gh` acts as the repository owner, so the timeline's actor is the owner either way.**
+ * ⚠ **So the AI leaves its own mark in the same timeline the question is asked of.**
+ *
+ * ⚠ **That turns the owner's count from a subtraction into an observation:**
+ * ⚠ **a `ready-for-ai` event with no mark beside it, in a log that is complete for this
+ * repository.**
+ *
+ * ⚠ **MUST NOT be applied by hand.** ⚠ **Doing so makes an owner application read as the AI's,
+ * and nothing can tell afterwards.**
+ */
+export const APPLIED_BY_AI_LABEL = "applied-by-ai";
+
 // ⚠ **Append-only.** ⚠ **One line per application. ⚠ Never rewritten, never compacted.**
 export const LABEL_LOG_NAME = "labels.jsonl";
 
