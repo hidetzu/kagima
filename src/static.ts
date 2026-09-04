@@ -28,7 +28,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * thing somebody drops there by accident.**
  */
 const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string }> = new Map([
+  ["/", { file: "public/index.html", type: "text/html; charset=utf-8" }],
+  ["/index.html", { file: "public/index.html", type: "text/html; charset=utf-8" }],
   ["/dev-call.html", { file: "public/dev-call.html", type: "text/html; charset=utf-8" }],
+  ["/client/host.ts", { file: "src/client/host.ts", type: "text/javascript; charset=utf-8" }],
   ["/client/call.ts", { file: "src/client/call.ts", type: "text/javascript; charset=utf-8" }],
   [
     "/client/transport.ts",

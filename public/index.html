@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kagima</title>
+<!--
+  ⚠ The referrer is suppressed for this page and everything it opens.
+  ⚠ A room URL in a referer header is the room URL handed to somebody who was never told it.
+-->
+<meta name="referrer" content="no-referrer" />
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 34rem; padding: 1.5rem; }
+  h1 { font-size: 1.4rem; }
+  .field { margin: 1rem 0; }
+  .value { font-family: ui-monospace, monospace; word-break: break-all; background: #f4f4f5;
+           padding: .6rem; border-radius: .3rem; }
+  button { font: inherit; padding: .5rem .9rem; border-radius: .3rem; border: 1px solid #999;
+           background: #fff; cursor: pointer; }
+  .hint { color: #555; font-size: .9rem; }
+  video { width: 100%; max-width: 16rem; background: #222; border-radius: .3rem; }
+</style>
+
+<h1>kagima</h1>
+
+<section id="before">
+  <p>合言葉で、ひとときだけ開くプライベート空間をつくります。</p>
+  <p class="hint">アカウントは要りません。閉じれば何も残りません。</p>
+  <button id="create" type="button">ルームをつくる</button>
+</section>
+
+<section id="after" hidden>
+  <div class="field">
+    <div>共有する URL</div>
+    <div class="value" id="share-url"></div>
+    <button id="copy-url" type="button">URL をコピー</button>
+  </div>
+
+  <div class="field">
+    <div>合言葉</div>
+    <div class="value" id="passphrase"></div>
+    <button id="copy-passphrase" type="button">合言葉をコピー</button>
+  </div>
+
+  <!--
+    ⚠ There is deliberately no button that copies both.
+    ⚠ The URL and the passphrase are meant to travel by different routes; that separation is the
+    ⚠ only wall between a leaked link and a stranger in the room (docs/PRODUCT.md § 3).
+    ⚠ One paste into one channel would remove it.
+  -->
+  <p class="hint">
+    ⚠ URL と合言葉は、別々の方法で相手に渡してください。<br />
+    どちらか片方が漏れても、それだけでは入れません。
+  </p>
+
+  <p id="status">相手が来るのを待っています。</p>
+  <video id="local" autoplay muted playsinline></video>
+  <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
+  <video id="remote" autoplay playsinline></video>
+  <p><button id="close" type="button">ルームを閉じる</button></p>
+</section>
+
+<script type="module">
+  import { createRoom, joinOwnRoom, closeRoom, copyOne } from "/client/host.ts";
+  import { createCall, classifyMediaError } from "/client/call.ts";
+  import { connectSignaling } from "/client/transport.ts";
+
+  const $ = (id) => document.getElementById(id);
+  const status = $("status");
+
+  // ⚠ Held here and nowhere else. ⚠ No storage, no URL, no cookie (docs/adr/0005).
+  let room = null;
+  let call = null;
+
+  $("create").addEventListener("click", async () => {
+    $("create").disabled = true;
+    try {
+      room = await createRoom();
+      $("share-url").textContent = room.shareUrl;
+      $("passphrase").textContent = room.passphrase;
+      $("before").hidden = true;
+      $("after").hidden = false;
+
+      // ⚠ The host reads the passphrase once, to get its own token. ⚠ Then it stops reading it.
+      const token = await joinOwnRoom(room.roomId, room.passphrase);
+      const transport = await connectSignaling(room.roomId, token);
+
+      // ⚠ The guest offers, because the guest arrives second and knows the host is there.
+      //   ⚠ The host waiting for an offer IS the waiting state; no extra message is needed.
+      call = await createCall({ transport, isOfferer: false });
+      $("local").srcObject = call.localStream;
+      $("remote").srcObject = call.remoteStream;
+      globalThis.kagimaCall = call;
+
+      call.pc.addEventListener("track", () => {
+        // ⚠ Says what happened, not a state name.
+        status.textContent = "つながりました。";
+      });
+
+      transport.socket.addEventListener("close", (event) => {
+        if (event.code !== 4005) return;
+        call?.hangUp();
+        status.textContent = "このルームは閉じました。何も残っていません。";
+      });
+    } catch (error) {
+      console.warn("kagima: the room could not be opened", error);
+      const failure = classifyMediaError(error);
+      // ⚠ Never opens with what does not work, and never shows the raw error (CLAUDE.md § 4-1).
+      status.textContent =
+        failure === "denied"
+          ? "カメラとマイクの使用を許可すると会話をはじめられます。許可してから、もう一度お試しください。"
+          : failure === "no-device"
+            ? "カメラまたはマイクが見つかりませんでした。接続してから、もう一度お試しください。"
+            : "いまはルームをひらけませんでした。少し待ってから、もう一度お試しください。";
+      $("before").hidden = true;
+      $("after").hidden = false;
+    }
+  });
+
+  // ⚠ One thing per button. ⚠ Never both at once — see the comment in the markup.
+  $("copy-url").addEventListener("click", async () => {
+    $("copy-url").textContent = (await copyOne(room.shareUrl))
+      ? "URL をコピーしました"
+      : "コピーできませんでした。手で選んでください";
+  });
+  $("copy-passphrase").addEventListener("click", async () => {
+    $("copy-passphrase").textContent = (await copyOne(room.passphrase))
+      ? "合言葉をコピーしました"
+      : "コピーできませんでした。手で選んでください";
+  });
+
+  $("close").addEventListener("click", async () => {
+    if (room === null) return;
+    await closeRoom(room.roomId, room.hostKey);
+    call?.hangUp();
+    status.textContent = "このルームは閉じました。何も残っていません。";
+  });
+</script>
