@@ -54,6 +54,16 @@ jobs:
           set -o pipefail
           node .claude/tools/docs-check.mjs 2>&1 | tee /tmp/docs.log
 
+      # ⚠ The browser is downloaded here rather than assumed. ⚠ Only chromium: the second engine
+      #   ⚠ is the external tier and it is kagima#14, not this job.
+      - run: npx playwright install --with-deps chromium
+
+      - name: npm run e2e
+        id: e2e
+        run: |
+          set -o pipefail
+          npm run e2e 2>&1 | tee /tmp/e2e.log
+
       # ⚠ Runs even when something above failed. ⚠ A failing run is exactly when a reader needs
       #   to know which tiers were never reached.
       - name: What ran, and ⚠ what did not
@@ -67,14 +77,18 @@ jobs:
             echo '```'
             head -n 1 /tmp/check.log 2>/dev/null || echo "npm run check — did not reach it"
             head -n 1 /tmp/docs.log  2>/dev/null || echo "docs-check — did not reach it"
+            head -n 1 /tmp/e2e.log   2>/dev/null || echo "npm run e2e — did not reach it"
             echo '```'
             echo ""
             echo "## ⚠ Tiers this run did NOT cover"
             echo ""
             echo "| Tier | Why not |"
             echo "|---|---|"
-            echo "| Final gate | ⚠ **No entry point exists yet** (kagima#13) |"
             echo "| External | ⚠ **No entry point exists yet** (kagima#14) |"
+            echo ""
+            echo "⚠ **The final gate ran here, in Chromium only.**"
+            echo "⚠ **That is evidence about Chromium and nothing else** — ⚠ **a second engine is"
+            echo "⚠ the external tier, and it has not run.**"
             echo ""
             echo "⚠ **A green tick here is not evidence about those tiers.**"
             echo "⚠ **When an entry point for one of them lands, this workflow must run it —**"

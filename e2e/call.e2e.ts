@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { chromium, type Browser } from "playwright";
 import { startServer } from "../src/server.ts";
+import { titleOf } from "./scenarios.ts";
 
 const PORT = 8899;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -31,6 +32,14 @@ const CHROMIUM_ARGS = [
   "--use-fake-ui-for-media-stream",
 ];
 
+/**
+ * ⚠ **Started on first use, not by whichever case happens to run first.**
+ *
+ * ⚠ **`--only=host-closes` found this: the case passed in a full run and failed alone, because
+ * the browser was launched inside the `frames` case.** ⚠ **A suite whose cases only work in one
+ * order cannot honour "run one named case"** (`.claude/rules/verification.md`),
+ * ⚠ **and the partial run is the one people actually use.**
+ */
 let browser: Browser | undefined;
 // ⚠ Tracked at module level and closed in `after`, whatever happened.
 //   ⚠ A browser left open by a failing assertion keeps the process alive, and the run hangs
@@ -44,18 +53,27 @@ const launch = async (args: string[]): Promise<Browser> => {
   return b;
 };
 
+/** ⚠ **The shared browser and server, brought up once, by whoever needs them first.** */
+const ready = async (): Promise<Browser> => {
+  if (server === undefined) {
+    process.env["JOIN_TOKEN_SECRET"] = "an-end-to-end-secret";
+    server = startServer(PORT, BASE);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  browser ??= await launch(CHROMIUM_ARGS);
+  return browser;
+};
+
 after(async () => {
   for (const b of browsers) await b.close().catch(() => {});
   server?.closeAllConnections();
   server?.close();
 });
 
-test("⚠⚠ two browsers in one room actually exchange frames", async () => {
+test(titleOf("frames"), async () => {
   // ⚠ The server under test is the one just started, on a port nothing else is using
   //   (`.claude/rules/verification.md` — ⚠ a leftover dev server measures the previous run).
-  process.env["JOIN_TOKEN_SECRET"] = "an-end-to-end-secret";
-  server = startServer(PORT, BASE);
-  await new Promise((r) => setTimeout(r, 200));
+  await ready();
 
   const room = (await (await fetch(`${BASE}/api/rooms`, { method: "POST" })).json()) as {
     roomId: string;
@@ -69,7 +87,6 @@ test("⚠⚠ two browsers in one room actually exchange frames", async () => {
     return ((await res.json()) as { token: string }).token;
   };
 
-  browser = await launch(CHROMIUM_ARGS);
   const open = async (token: string, offerer: boolean) => {
     const context = await browser!.newContext({ permissions: ["camera", "microphone"] });
     const page = await context.newPage();
@@ -144,7 +161,8 @@ test("⚠⚠ two browsers in one room actually exchange frames", async () => {
   assert.deepEqual(guest.errors, [], `the guest page threw: ${guest.errors.join("; ")}`);
 });
 
-test("⚠ a media failure says what to do, and never shows the raw error", async () => {
+test(titleOf("media-refused"), async () => {
+  await ready();
   // ⚠ "you did not allow the camera" is not "could not connect" and is not "nobody is here yet"
   //   (`CLAUDE.md` § 4-1). ⚠ Telling the user the wrong one either scares them off or hands an
   //   ⚠ attacker a fact. ⚠ So the refusal path is driven for real, in a browser that refuses.
@@ -198,7 +216,8 @@ test("⚠ a media failure says what to do, and never shows the raw error", async
   await context.close();
 });
 
-test("⚠⚠ the host closing the room stops the guest's tracks, not just the picture", async () => {
+test(titleOf("host-closes"), async () => {
+  await ready();
   // ⚠ `.claude/rules/security.md` § 5: a hidden video element with a live track is a camera that
   //   ⚠ is still on. ⚠ So the assertion reads `track.readyState`, never whether anything is shown.
   const room = (await (await fetch(`${BASE}/api/rooms`, { method: "POST" })).json()) as {
