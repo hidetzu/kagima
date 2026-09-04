@@ -203,17 +203,30 @@ test("⚠ the three refusals are counted apart", () => {
   record("nope", "whatever");
   record("nope", "whatever");
 
+  // ⚠ Every reason, including the ones kagima#5 added and this test never triggers.
+  //   ⚠ Asserting only the three would let a new reason appear uncounted, and an uncounted
+  //   ⚠ rejection is indistinguishable from a request that never arrived.
   assert.deepEqual(counter.counts(), {
     "wrong-passphrase": 1,
     "unknown-room": 1,
     "malformed-room-id": 2,
+    "rate-limited-source": 0,
+    "rate-limited-room": 0,
+    "at-capacity": 0,
   });
 });
 
 test("⚠ a counter starts at zero for every reason, not absent", () => {
   // ⚠ Zero is a measurement. ⚠ An absent key is not, and it reads as one.
   const counts = createRejectionCounter().counts();
-  const reasons: JoinRejection[] = ["malformed-room-id", "unknown-room", "wrong-passphrase"];
+  const reasons: JoinRejection[] = [
+    "malformed-room-id",
+    "unknown-room",
+    "wrong-passphrase",
+    "rate-limited-source",
+    "rate-limited-room",
+    "at-capacity",
+  ];
   for (const r of reasons) assert.equal(counts[r], 0, `${r} is not present`);
 });
 

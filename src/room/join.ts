@@ -28,7 +28,16 @@ const DECOY_PASSPHRASE = "decoy-decoy-decoy-decoy";
  * ⚠ **`.claude/rules/evidence.md`: an uncounted rejection is indistinguishable from a request
  * that never arrived.** ⚠ **So they are counted apart** — ⚠ **and answered alike.**
  */
-export type JoinRejection = "malformed-room-id" | "unknown-room" | "wrong-passphrase";
+export type JoinRejection =
+  | "malformed-room-id"
+  | "unknown-room"
+  | "wrong-passphrase"
+  // ⚠ Added by kagima#5. ⚠ The three above keep exactly the meaning they had —
+  //   ⚠ changing what a recorded value means is its own kind of breakage
+  //   ⚠ (`.claude/skills/change-review/SKILL.md` § 3).
+  | "rate-limited-source"
+  | "rate-limited-room"
+  | "at-capacity";
 
 export type JoinOutcome =
   | { readonly ok: true; readonly token: string }
@@ -101,6 +110,9 @@ export const createRejectionCounter = (): RejectionCounter => {
     "malformed-room-id": 0,
     "unknown-room": 0,
     "wrong-passphrase": 0,
+    "rate-limited-source": 0,
+    "rate-limited-room": 0,
+    "at-capacity": 0,
   };
   return {
     record(why) {
