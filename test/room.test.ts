@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { MAX_ID_ATTEMPTS, createRoom } from "../src/room/create-room.ts";
+import { MAX_ID_ATTEMPTS, createRoom, defaultDeps } from "../src/room/create-room.ts";
 import {
   ALPHABET,
   ID_LENGTH,
@@ -14,7 +14,7 @@ import {
   isRoomId,
   roomIdFromBytes,
 } from "../src/room/room-id.ts";
-import { createRoomStore } from "../src/room/store.ts";
+import { ROOM_IDLE_MS, createRoomStore } from "../src/room/store.ts";
 
 const BASE = "https://kagima.example";
 
@@ -214,4 +214,93 @@ test("⚠ the room id generator draws from node:crypto", async () => {
   const code = codeOf(await readFile("src/room/room-id.ts", "utf8"));
   assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"node:crypto"/);
   assert.match(code, /randomBytes\(ID_LENGTH\)/);
+});
+
+// ── how long a room lives ───────────────────────────────────────────────────
+// ⚠ **Time is injected.** ⚠ **A test that waits out a real expiry is a test nobody runs, and it
+//   ⚠ still could not show what happens exactly on the boundary.**
+
+const at = (start = 1_000_000) => {
+  let t = start;
+  return { now: () => t, advance: (ms: number) => (t += ms) };
+};
+
+// ⚠ The store and the room have to read the SAME clock. ⚠ The first version of these cases gave
+//   ⚠ the store a fake clock and let `createRoom` keep the real one, ⚠ so every room looked
+//   ⚠ decades young and nothing ever expired — ⚠ five cases failed for one reason, and the
+//   ⚠ reason was in the test, not in the code.
+const roomAt = (store: ReturnType<typeof createRoomStore>, now: () => number) =>
+  createRoom(store, BASE, { ...defaultDeps, now });
+
+test("⚠ a room nobody joins expires, and not a moment early", () => {
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const { room } = roomAt(store, clock.now);
+
+  clock.advance(ROOM_IDLE_MS - 1);
+  assert.notEqual(store.get(room.id), undefined, "it expired early");
+  clock.advance(1);
+  assert.equal(store.get(room.id), undefined, "it did not expire");
+});
+
+test("⚠⚠ an expired room answers exactly like one that never existed", () => {
+  // ⚠ `docs/adr/0004`: the two are the same thing from outside, and that is only true if `get`
+  //   ⚠ refuses the moment it runs out — ⚠ not when the sweeper next happens to look.
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const { room } = roomAt(store, clock.now);
+  clock.advance(ROOM_IDLE_MS);
+
+  assert.equal(store.get(room.id), undefined);
+  assert.equal(store.get("z".repeat(ID_LENGTH)), undefined);
+});
+
+test("⚠ touching a room keeps it alive, so a call is not cut off by its own room", () => {
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const { room } = roomAt(store, clock.now);
+
+  for (let i = 0; i < 10; i++) {
+    clock.advance(ROOM_IDLE_MS - 1);
+    store.touch(room.id);
+  }
+  clock.advance(ROOM_IDLE_MS - 1);
+  assert.notEqual(store.get(room.id), undefined, "a touched room still expired");
+});
+
+test("⚠ touching a room that is already gone does not bring it back", () => {
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const { room } = roomAt(store, clock.now);
+  clock.advance(ROOM_IDLE_MS);
+  store.get(room.id); // ⚠ drops it
+  store.touch(room.id);
+  assert.equal(store.get(room.id), undefined, "an expired room was revived by a touch");
+  assert.equal(store.size(), 0);
+});
+
+test("⚠ sweeping says which rooms went, so their sockets can be hung up", () => {
+  // ⚠ The store knows nothing about sockets and must not learn. ⚠ It says which ids went.
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const stale = roomAt(store, clock.now).room;
+  clock.advance(ROOM_IDLE_MS - 1);
+  const fresh = roomAt(store, clock.now).room;
+  clock.advance(1);
+
+  assert.deepEqual(store.sweep(), [stale.id]);
+  assert.equal(store.size(), 1);
+  assert.notEqual(store.get(fresh.id), undefined);
+});
+
+test("⚠ a closed room and an expired room are both simply gone", () => {
+  // ⚠ Two ways in, one state out. ⚠ Nothing downstream should be able to tell them apart.
+  const clock = at();
+  const store = createRoomStore({ now: clock.now });
+  const closed = roomAt(store, clock.now).room;
+  const expired = roomAt(store, clock.now).room;
+  store.close(closed.id);
+  clock.advance(ROOM_IDLE_MS);
+  assert.equal(store.get(closed.id), undefined);
+  assert.equal(store.get(expired.id), undefined);
 });

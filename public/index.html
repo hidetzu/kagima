@@ -108,9 +108,17 @@
       };
 
       transport.onMessage((message) => {
-        if (message.type !== "hello") return;
-        guestName = message.nickname;
-        render();
+        if (message.type === "hello") {
+          guestName = message.nickname;
+          render();
+          return;
+        }
+        if (message.type !== "peer-left") return;
+        // ⚠ The other side dropped. ⚠ Recoverable, and worded as such — ⚠ it is not the room
+        //   ⚠ ending, and it is not a fault (CLAUDE.md § 4-1).
+        connected = false;
+        guestName = null;
+        status.textContent = "相手の接続が切れました。まだこのルームは開いています。";
       });
 
       // ⚠ The guest offers, because the guest arrives second and knows the host is there.
@@ -126,10 +134,20 @@
         render();
       });
 
+      // ⚠ Three endings, and they are not the same thing (kagima#11).
+      //   ⚠ 4005 is the room being over. ⚠ Anything else is this connection going away, which
+      //   ⚠ may come back. ⚠ Saying "ended" for the second one would be telling the person
+      //   ⚠ something we do not know.
       transport.socket.addEventListener("close", (event) => {
-        if (event.code !== 4005) return;
-        call?.hangUp();
-        status.textContent = "このルームは閉じました。何も残っていません。";
+        if (event.code === 4005) {
+          call?.hangUp();
+          status.textContent = "このルームは閉じました。何も残っていません。";
+          return;
+        }
+        // ⚠ The call itself may still be running: media goes browser to browser and does not
+        //   ⚠ need us (docs/adr/0003). ⚠ So the tracks are NOT stopped here.
+        connected = false;
+        status.textContent = "kagima とのつながりが切れました。通話は続いているかもしれません。";
       });
     } catch (error) {
       console.warn("kagima: the room could not be opened", error);

@@ -30,6 +30,9 @@ export type SignalMessage =
   | { type: "answer"; sdp: string }
   | { type: "candidate"; candidate: string; sdpMid: string | null; sdpMLineIndex: number | null }
   | { type: "hello"; nickname: string }
+  // ⚠ Sent by the server, not by a peer. ⚠ It says the other side's socket went away —
+  //   ⚠ which is not the room ending, and the pages keep the two apart.
+  | { type: "peer-left" }
   | { type: "bye" };
 
 export type Transport = {
@@ -162,6 +165,7 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
         return;
       }
       case "hello":
+      case "peer-left":
       case "bye":
         // ⚠ Not this module's business. ⚠ The page listens for `hello` itself; ⚠ the call carries
         //   ⚠ media and negotiation, and nothing about who anyone is.

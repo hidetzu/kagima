@@ -56,7 +56,9 @@ export const createRoom = (
 
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
     const id = deps.newId();
-    const room: Room = { id, passphrase, hostKey, createdAt: deps.now() };
+    const at = deps.now();
+    // ⚠ A room nobody ever joins still has a clock, and it starts here.
+    const room: Room = { id, passphrase, hostKey, createdAt: at, lastSeenAt: at };
     // ⚠ `add` refuses rather than overwrites, so a collision cannot silently steal a live room.
     if (store.add(room)) return { room, shareUrl: buildShareUrl(baseUrl, id) };
   }

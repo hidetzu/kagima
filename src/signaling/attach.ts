@@ -60,6 +60,14 @@ const tokenFromProtocols = (raw: string | undefined): string | null => {
 export type SignalingOptions = {
   readonly hub: Hub;
   readonly secret: string;
+  /**
+   * ⚠ **Called while anybody is connected, so the room does not expire under a live call.**
+   *
+   * ⚠ **On the heartbeat, not on messages** — ⚠ **a call that has finished negotiating sends
+   * nothing for minutes at a time, and a room that died then would look like the network
+   * rather than like us** (kagima#11).
+   */
+  readonly touch?: (roomId: string) => void;
   readonly now?: () => number;
   readonly heartbeatMs?: number;
 };
@@ -142,6 +150,8 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
         return;
       }
       missed += 1;
+      // ⚠ Still here. ⚠ The room's idle clock is pushed back by the same beat that proves it.
+      options.touch?.(roomId);
       ws.ping();
     }, heartbeatMs);
     // ⚠ Never hold the process open for a heartbeat.
@@ -174,7 +184,10 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
 
     ws.on("close", () => {
       clearInterval(beat);
-      options.hub.leave(roomId, peer.id);
+      const remaining = options.hub.leave(roomId, peer.id);
+      // ⚠ Tell whoever is still there. ⚠ "The other side left" is recoverable and is NOT
+      //   ⚠ "the room ended" — ⚠ the two get different words, and the client keeps them apart.
+      for (const other of remaining) other.send(JSON.stringify({ type: "peer-left" }));
       // ⚠ The room is NOT closed here. ⚠ A signalling socket dropping is not a room ending —
       //   ⚠ an established peer-to-peer call carries on without us (`docs/adr/0003`).
       //   ⚠ Closing a room is kagima#10, and it is the host's decision.

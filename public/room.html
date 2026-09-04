@@ -98,10 +98,23 @@
       call.pc.addEventListener("track", () => {
         $("status").textContent = "つながりました。";
       });
+      // ⚠ Three endings, and they are not the same thing (kagima#11).
       transport.socket.addEventListener("close", (e) => {
-        if (e.code !== 4005) return;
-        call.hangUp();
-        $("status").textContent = "この通話は終わりました。何も残っていません。";
+        if (e.code === 4005) {
+          call.hangUp();
+          $("status").textContent = "この通話は終わりました。何も残っていません。";
+          return;
+        }
+        // ⚠ Not the room ending — ⚠ this connection went away, and the call may still be running.
+        //   ⚠ The tracks stay: media goes browser to browser and does not need us.
+        $("status").textContent =
+          "kagima とのつながりが切れました。通話は続いているかもしれません。";
+      });
+
+      transport.onMessage((message) => {
+        if (message.type !== "peer-left") return;
+        // ⚠ Recoverable, and worded as such. ⚠ "切断されました" would read as a fault.
+        $("status").textContent = "相手の接続が切れました。待っています。";
       });
     } catch (error) {
       console.warn("kagima: the call could not start", error);
