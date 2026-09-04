@@ -44,9 +44,18 @@ export const NEEDS_DECISION_LABEL = "needs-decision";
  * ⚠ **`gh` acts as the repository owner, so the timeline's actor is the owner either way.**
  * ⚠ **So the AI leaves its own mark in the same timeline the question is asked of.**
  *
- * ⚠ **That turns the owner's count from a subtraction into an observation:**
- * ⚠ **a `ready-for-ai` event with no mark beside it, in a log that is complete for this
- * repository.**
+ * ⚠ **What this is, exactly.**
+ *
+ * ⚠ **An operational attribution marker.** ⚠ **NOT evidence that GitHub identified an AI.**
+ * ⚠ **GitHub identifies nobody here** — ⚠ **it records that a label was applied by the owner's
+ * credentials, and that is all it will ever record.**
+ *
+ * ⚠ **Nothing enforces the mark.** ⚠ **A person could apply it by hand and the timeline would
+ * look identical.** ⚠ **It holds because this project operates it, and for no other reason.**
+ *
+ * ⚠ **What it buys is not proof. ⚠ It is two smaller things:**
+ * ⚠ **the attribution travels with the issue instead of living on one laptop,**
+ * ⚠ **and it is per application instead of a subtraction over a total.**
  *
  * ⚠ **MUST NOT be applied by hand.** ⚠ **Doing so makes an owner application read as the AI's,
  * and nothing can tell afterwards.**

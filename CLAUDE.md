@@ -190,4 +190,4 @@ a row with a test is a wall.
 
 | What happened | What to do instead |
 |---|---|
-| — | — |
+| ⚠ **2026-09-04.** A verification run set `CLAUDE_DEV_TELEMETRY_DIR` to keep itself out of the real record, and read that as "this run is an exercise". ⚠ **It was not.** ⚠ **The variable redirects the local record and nothing else** — ⚠ **`gh` still spoke to GitHub, and `ready-for-ai` went onto two real issues.** ⚠ **One of them had already been judged unfit for it** | ⚠ **Treat every outward call as real unless something explicitly blocked it.** ⚠ **Redirecting where a run *records* is not redirecting what it *does*.** ⚠ **When a tool can tell it is being exercised, it refuses to change anything outside this process** — ⚠ **fail closed, and say which flag means it.** ⚠ **The wall is `test/exercise-never-touches-github.test.ts`**, ⚠ **and it works by putting a stub on `PATH` and asserting the stub was never reached** |

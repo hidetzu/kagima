@@ -14,17 +14,23 @@
 //   ⚠ application made anywhere else** — ⚠ **its silence about one is indistinguishable from that
 //   ⚠ one not happening** (`.claude/rules/evidence.md`).
 //
-// ⚠ **So the AI now leaves its mark in the same timeline the question is asked of**
-//   (`APPLIED_BY_AI_LABEL`). ⚠ **The timeline is complete for this repository.**
-//   ⚠ **An application with no mark beside it is an observed absence, not a subtraction.**
+// ⚠ **So the AI now leaves its own mark in the same timeline the question is asked of**
+//   (`APPLIED_BY_AI_LABEL`).
 //
-// ## ⚠ What is observed, and what is still not
+// ⚠ **The mark is a convention this project operates.** ⚠ **It is NOT evidence that GitHub
+//   ⚠ identified an AI** — ⚠ **GitHub identifies nobody here, and nothing stops a person applying
+//   ⚠ the mark by hand.**
+// ⚠ **What improved is smaller than "measured", and worth saying exactly:**
+//   ⚠ **the attribution travels with the issue rather than living on one laptop, and it is per
+//   ⚠ application rather than a subtraction over a total.**
 //
-//     observed    every `ready-for-ai` application, from the timeline
-//     observed    which of them carry the AI's mark
-//     observed    which of them do not          ⚠ the owner's, and this is now measured
-//     ⚠ NOT observed  applications made before the mark existed  ⚠ reported apart, as their own row
-//     ⚠ NOT observed  refusals                 ⚠ they leave no trace on GitHub; ⚠ local record only
+// ## ⚠ What is read, and what is still not
+//
+//     read from the timeline   every `ready-for-ai` application
+//     read from the timeline   which of them carry the mark, and which do not
+//     ⚠ by convention           that a marked one is the AI's and an unmarked one is the owner's
+//     ⚠ NOT known               applications made before the mark existed  ⚠ their own row
+//     ⚠ NOT known               refusals   ⚠ they leave no trace on GitHub; ⚠ local record only
 //
 // ## Usage
 //
@@ -195,10 +201,11 @@ if (seen === null) {
   console.log(`⚠ That is not the same as "the label was never applied."`);
   console.log(`⚠ Nothing below is a count of applications.`);
 } else {
-  console.log(`Observed on GitHub (⚠ the timeline is complete for this repository)`);
+  console.log(`Read from the timeline (⚠ attributed by a mark this project operates)`);
+  console.log(`⚠ GitHub identifies nobody here. ⚠ The mark is ours, and nothing enforces it.`);
   console.log(`  applications, total:              ${seen.applications.length}`);
-  console.log(`  ⚠ marked ${APPLIED_BY_AI_LABEL} — the AI:  ${seen.byAi.length}`);
-  console.log(`  ⚠ unmarked — the owner:           ${seen.byOwner.length}`);
+  console.log(`  ⚠ marked ${APPLIED_BY_AI_LABEL}:          ${seen.byAi.length}   ⚠ the AI, if the mark was only ever applied by the tool`);
+  console.log(`  ⚠ unmarked:                       ${seen.byOwner.length}   ⚠ the owner, on the same condition`);
   console.log(`  ⚠ before the mark existed:        ${seen.predatesTheMark.length}   ⚠ not attributable`);
   if (seen.markEra !== null) console.log(`  (the mark is first seen at ${seen.markEra})`);
   if (unreadableIssues.length) {
@@ -221,8 +228,13 @@ if (record.unreadable.length) console.log(`  ⚠ unreadable lines in the record:
 console.log("");
 
 console.log(`How to read this`);
-console.log(`  ! the owner's figure is now observed: an application with no mark beside it,`);
-console.log(`    in a log that is complete for this repository. ! it is not a subtraction.`);
+console.log(`  ! GitHub does not identify an AI. ! gh acts as the owner whoever pressed the`);
+console.log(`    button, and the timeline's actor says so. ! the mark is this project's own.`);
+console.log(`  ! nothing enforces the mark. ! applied by hand, it would look identical, and`);
+console.log(`    every figure below it would be wrong with nothing announcing it.`);
+console.log(`  ! what improved over the subtraction it replaced: the attribution travels with`);
+console.log(`    the issue instead of one laptop, and it is per application, not a remainder.`);
+console.log(`  ! that is smaller than "measured". ! it is said that way on purpose.`);
 console.log(`  ! applications made before the mark existed are their own row. ! they are not`);
 console.log(`    attributable by this mechanism, and calling them the owner's would be a guess.`);
 console.log(`  ! refusals are local-only. ! a refusal on another machine is not counted here,`);

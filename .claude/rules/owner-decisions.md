@@ -123,11 +123,12 @@ now      AI applies ready-for-ai     ->  ... -> PR                ->  ⚠ human 
   ⚠ **A rule every call site has to remember is not a rule, it is a hope**
   ([`security.md`](security.md) says the same thing about redaction).
 - MUST: ⚠ **The tool applies `applied-by-ai` alongside `ready-for-ai`.**
-  ⚠ **That mark is what makes "who applied it" a measurement rather than a subtraction:**
-  ⚠ **`gh` acts as the owner, so the timeline's actor is the owner whoever pressed the button,**
-  ⚠ **and a file on one machine cannot know about an application made on another.**
-  ⚠ **An application with no mark beside it, in a log that is complete for this repository,
-  is an observed absence.**
+  ⚠ **It is an operational attribution marker, ⚠ not evidence that GitHub identified an AI.**
+  ⚠ **GitHub identifies nobody here: `gh` acts as the owner whoever pressed the button.**
+  ⚠ **Nothing enforces the mark either** — ⚠ **it holds because this project operates it.**
+  ⚠ **What it buys over the subtraction it replaced is that the attribution travels with the
+  issue rather than living on one machine, and that it is per application rather than a
+  remainder.** ⚠ **That is smaller than "measured", and it is said that way on purpose.**
 - MUST NOT: ⚠ **Never apply `applied-by-ai` by hand.**
   ⚠ **Doing so makes an owner's application read as the AI's, and nothing can tell afterwards.**
 - MUST: ⚠ **Every refusal is recorded too.** ⚠ **A refusal leaves no trace on GitHub at all**,
