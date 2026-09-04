@@ -364,6 +364,13 @@ test(titleOf("host-screen"), async () => {
   // ⚠ Nothing that copies both. ⚠ Read off the clipboard, not off the labels — ⚠ a mutation that
   //   ⚠ added a working "copy both" button walked straight past the label version of this.
   await host.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // ⚠ Every `<details>` opened first, so a control hidden inside one is still swept.
+  //   ⚠ The diagnostics panel is collapsed, ⚠ and its copy button was invisible to this check
+  //   ⚠ the moment it was added — ⚠ a new copy control appearing in exactly the place this
+  //   ⚠ check cannot see is how the check quietly stops covering the page.
+  await page.$$eval("details", (all) => {
+    for (const d of all) d.open = true;
+  });
   const clickable = await page.$$eval("button", (buttons) =>
     buttons.map((b2) => b2.id).filter((id) => id !== "create" && id !== "close"),
   );
@@ -490,6 +497,121 @@ test(titleOf("signalling-drops"), async () => {
     return call.localStream.getTracks().filter((t) => t.readyState === "live").length;
   });
   assert.ok(live > 0, "the tracks were stopped when only signalling went away");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
+test(titleOf("diagnostics"), async () => {
+  // ⚠⚠ **The instrument the Owner will carry into the field** (`docs/FIELD-TEST.md`).
+  //
+  // ⚠ **`test/diagnostics.test.ts` checks the formatter by handing it addresses.** ⚠ **That is
+  //   ⚠ the wall; ⚠ this is the wall in place** — ⚠ **a real `RTCPeerConnection`, real ICE, real
+  //   ⚠ `getStats()`, and the collector in between that the unit test never runs.**
+  // ⚠ **The collector is where an address would actually come from, so it is checked here.**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
+  await waitForFrames(host.page, "the host");
+  await waitForFrames(guest.page, "the guest");
+
+  const shown = async (page: Page): Promise<string> => {
+    // ⚠ The panel refreshes on a timer; ⚠ waited for rather than sampled, for the same reason
+    //   ⚠ `waitForPicture` is (this suite has been bitten by sampling once already).
+    // ⚠ **Waited on a fact that only a live call produces, not on a label.** ⚠ The first version
+    //   ⚠ waited for the word "selected", ⚠ which the empty report also contains — ⚠ so it read
+    //   ⚠ the panel before it had anything in it and reported that as the instrument's output.
+    await page.waitForFunction(
+      () =>
+        /frames decoded:\s*[1-9]/.test(
+          document.getElementById("diagnostics-text")?.textContent ?? "",
+        ),
+      undefined,
+      { timeout: 20_000 },
+    );
+    return text(page, "diagnostics-text");
+  };
+  const hostReport = await shown(host.page);
+  const guestReport = await shown(guest.page);
+  console.log(`  observed: the host's report reads:\n${hostReport.replace(/^/gm, "    | ")}`);
+
+  // ⚠⚠ **The positive control, and the case turns on it.**
+  //
+  // ⚠ **Without it, "no address in the report" would also pass in a world where there were no
+  //   ⚠ addresses anywhere** — ⚠ **which is exactly how a check passes while proving nothing**
+  //   (`.claude/rules/verification.md`). ⚠ **So: addresses exist here, in this very call.**
+  const ADDRESSY = [
+    /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+    /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
+    /[0-9a-f-]{20,}\.local\b/i,
+  ];
+  const sdp = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall?: { pc: RTCPeerConnection } }).kagimaCall;
+    return call?.pc.localDescription?.sdp ?? "";
+  });
+  assert.ok(
+    ADDRESSY.some((p) => p.test(sdp)),
+    "no address anywhere in this call, so the check below would pass for the wrong reason",
+  );
+  console.log(
+    "  observed: the call's own SDP does carry addresses, so there was something to leak",
+  );
+
+  // ⚠⚠ And none of them reached what a person is invited to paste into a public issue.
+  for (const pattern of ADDRESSY) {
+    assert.doesNotMatch(
+      hostReport,
+      pattern,
+      `an address reached the host's report:\n${hostReport}`,
+    );
+    assert.doesNotMatch(
+      guestReport,
+      pattern,
+      `an address reached the guest's report:\n${guestReport}`,
+    );
+  }
+
+  // ⚠ It carries the facts the field test needs, from a real connection rather than a fixture.
+  assert.match(hostReport, /local candidates: \w+\/\w+/, "no candidate types were collected");
+  assert.doesNotMatch(hostReport, /selected pair: *none/, "no selected pair was read from stats");
+  assert.match(hostReport, /ms to 1st frame: *\d/);
+  assert.match(hostReport, /signalling socket: *open throughout/);
+  assert.match(hostReport, /transitions:\n\s+\d+ms/, "no state transitions were recorded");
+  assert.match(hostReport, /not a rate/);
+
+  // ⚠ The copy button, because a phone has no devtools and this is the only way the observation
+  //   ⚠ leaves the device. ⚠ Read back from the clipboard, never from the button's label —
+  //   ⚠ a mutation that copied nothing passed a label check once (kagima#7).
+  // ⚠ Opened first, the way a tester opens it. ⚠ The panel is collapsed on purpose — ⚠ a person
+  //   ⚠ on a call does not need it — ⚠ so clicking straight through to the button would be
+  //   ⚠ checking a path nobody takes.
+  await host.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await host.page.click("#diagnostics summary");
+  await host.page.click("#diagnostics-copy");
+  // ⚠ The write is asynchronous and the click is not. ⚠ Waited for the button to say it
+  //   ⚠ happened — ⚠ which is also the only signal a tester gets, so it is worth checking.
+  await host.page.waitForFunction(
+    // ⚠ Waited for the label to *change*. ⚠ Waiting for a substring the initial label already
+    //   ⚠ contains is waiting for nothing — ⚠ the same mistake as the panel wait above, twice in
+    //   ⚠ one case. ⚠ A wait must name a fact that is false until the thing happens.
+    () => (document.getElementById("diagnostics-copy")?.textContent ?? "") !== "この観測をコピー",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const said = await text(host.page, "diagnostics-copy");
+  assert.equal(said, "コピーしました", `the copy button reported: ${said}`);
+  const copied = await host.page.evaluate(() => navigator.clipboard.readText());
+
+  // ⚠ Not compared to the earlier text: ⚠ the panel refreshes every second and "held for" grows,
+  //   ⚠ so equality would be a race. ⚠ What matters is that a whole observation left the device,
+  //   ⚠ carrying the facts and no address.
+  assert.match(copied, /^kagima field-test observation/, `the clipboard holds: ${copied}`);
+  assert.match(copied, /frames decoded: *[1-9]/);
+  assert.doesNotMatch(copied, /selected pair: *none/);
+  for (const pattern of ADDRESSY) {
+    assert.doesNotMatch(copied, pattern, `an address reached the clipboard:\n${copied}`);
+  }
+  console.log("  observed: the clipboard holds a whole observation, and no address");
 
   await host.context.close();
   await guest.context.close();

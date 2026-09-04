@@ -185,6 +185,31 @@ test(titleOf("chromium-to-firefox"), async () => {
     `  observed: ICE candidate types the host produced: ${candidateTypes.join(", ") || "none"}`,
   );
 
+  // ⚠⚠ The field-test instrument, in the engine the Owner might actually be holding.
+  //
+  // ⚠ **The e2e tier proved the address wall in Chromium** (`e2e/call.e2e.ts` `[diagnostics]`).
+  // ⚠ **Stat field names are the engine's, not ours** — ⚠ **so "it works in Firefox" is a claim
+  //   ⚠ that has to be observed here rather than inferred from a Chromium run.**
+  const foxReport = await guest.evaluate(async () => {
+    document.getElementById("diagnostics")?.setAttribute("open", "");
+    for (let i = 0; i < 50; i++) {
+      const shown = document.getElementById("diagnostics-text")?.textContent ?? "";
+      if (/frames decoded: *[1-9]/.test(shown)) return shown;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return document.getElementById("diagnostics-text")?.textContent ?? "";
+  });
+  console.log(`  observed: firefox's report reads:\n${foxReport.replace(/^/gm, "    | ")}`);
+
+  // ⚠ The wall is ours, so it is asserted. ⚠ What ICE produced is Firefox's, so it is only read.
+  for (const pattern of [
+    /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+    /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
+    /[0-9a-f-]{20,}\.local\b/i,
+  ]) {
+    assert.doesNotMatch(foxReport, pattern, `an address reached firefox's report:\n${foxReport}`);
+  }
+
   // ⚠ The name crossed engines and arrived as text, not as markup.
   await host.waitForFunction(
     () => (document.getElementById("status")?.textContent ?? "").includes("きつね"),
