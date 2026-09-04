@@ -151,6 +151,30 @@ const CASES = [
         : { ok: false, said: `ready-for-ai-label.mjs declares "${label}", and ${f} never names it — the rule would govern a different label than the tool applies` };
     },
   },
+  {
+    name: "ci-names-every-entry-point",
+    // ⚠ Grounds: `.claude/skills/verify/SKILL.md` § 1 says which tiers exist, and CI has to say
+    //   which ones it did not run. ⚠ That statement is prose, and prose goes stale silently —
+    //   ⚠ the failure mode is a green tick that reads as covering a tier nobody ran.
+    // ⚠ This cannot check that the prose is right. ⚠ What it can check is that every tier entry
+    //   point declared in package.json is actually invoked by the workflow.
+    //   ⚠ So the day `npm run e2e` is added, CI either runs it or this case fails.
+    // ⚠ It does NOT assert that CI passes, or that the tier is meaningful. ⚠ Only that a declared
+    //   entry point is not silently absent from CI.
+    run() {
+      const wf = ".github/workflows/ci.yml";
+      if (!existsSync(join(ROOT, wf))) return { ok: false, said: `${wf} is missing` };
+      const scripts = JSON.parse(read("package.json")).scripts ?? {};
+      // ⚠ The names that mean "a verification tier", not every script.
+      const entry = Object.keys(scripts).filter((n) => /^(check|e2e|external)(:|$)/.test(n));
+      if (entry.length === 0) return { ok: false, said: "package.json declares no tier entry point — nothing to hold CI to" };
+      const yml = read(wf);
+      const missing = entry.filter((n) => !yml.includes(`npm run ${n}`));
+      return missing.length
+        ? { ok: false, said: `${wf} never runs ${missing.map((n) => `npm run ${n}`).join(", ")} — a tier would be silently absent from CI` }
+        : { ok: true, said: `${wf} runs every tier entry point package.json declares (${entry.join(", ")})` };
+    },
+  },
 ];
 
 // ── the runner ─────────────────────────────────────────────────────────────

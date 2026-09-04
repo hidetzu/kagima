@@ -51,6 +51,9 @@ node .claude/tools/docs-check.mjs --only=links # 1 ケースだけ
 ⚠ **`.claude/` は `lint` と `types` の対象外である。** ⚠ **上流と diff が取れる状態を保つため**
 (⚠ **`docs-check` が代わりに縛っている**)。
 
+CI(`.github/workflows/ci.yml`)は fast tier を走らせ、⚠ **走らせなかった tier を毎回の
+run summary に書く。** ⚠ **緑のチェックは、走った行についての証拠でしかない。**
+
 観測(⚠ **採点ではない**):
 
 ```bash
