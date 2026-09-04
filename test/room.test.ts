@@ -141,6 +141,7 @@ test("⚠ a colliding id is retried rather than overwriting", () => {
   const { room } = createRoom(store, BASE, {
     newId: () => (++calls === 1 ? taken : free),
     newPassphrase: () => "x-y-z-w",
+    newHostKey: () => "a-host-key",
     now: () => 0,
   });
   assert.equal(room.id, taken, "the first id was free, so it should have been used");
@@ -148,6 +149,7 @@ test("⚠ a colliding id is retried rather than overwriting", () => {
   const second = createRoom(store, BASE, {
     newId: () => (calls++ < 3 ? taken : free),
     newPassphrase: () => "x-y-z-w",
+    newHostKey: () => "a-host-key",
     now: () => 0,
   });
   assert.equal(second.room.id, free, "the collision was not retried past");
@@ -158,7 +160,12 @@ test("⚠ a generator that never yields a free id gives up loudly", () => {
   // ⚠ The alternative to a bound is a loop that never ends when the generator is broken.
   const store = createRoomStore();
   const same = "c".repeat(ID_LENGTH);
-  const deps = { newId: () => same, newPassphrase: () => "x-y-z-w", now: () => 0 };
+  const deps = {
+    newId: () => same,
+    newPassphrase: () => "x-y-z-w",
+    newHostKey: () => "a-host-key",
+    now: () => 0,
+  };
   createRoom(store, BASE, deps);
   assert.throws(() => createRoom(store, BASE, deps), new RegExp(String(MAX_ID_ATTEMPTS)));
   assert.equal(store.size(), 1, "a partial room was left behind");

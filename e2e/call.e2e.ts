@@ -197,3 +197,68 @@ test("⚠ a media failure says what to do, and never shows the raw error", async
   );
   await context.close();
 });
+
+test("⚠⚠ the host closing the room stops the guest's tracks, not just the picture", async () => {
+  // ⚠ `.claude/rules/security.md` § 5: a hidden video element with a live track is a camera that
+  //   ⚠ is still on. ⚠ So the assertion reads `track.readyState`, never whether anything is shown.
+  const room = (await (await fetch(`${BASE}/api/rooms`, { method: "POST" })).json()) as {
+    roomId: string;
+    passphrase: string;
+    hostKey: string;
+  };
+  const tokenFor = async (): Promise<string> =>
+    (
+      (await (
+        await fetch(`${BASE}/api/rooms/${room.roomId}/join`, {
+          method: "POST",
+          body: JSON.stringify({ passphrase: room.passphrase }),
+        })
+      ).json()) as { token: string }
+    ).token;
+
+  const openPage = async (token: string, offerer: boolean) => {
+    const context = await browser!.newContext({ permissions: ["camera", "microphone"] });
+    const page = await context.newPage();
+    await page.goto(
+      `${BASE}/dev-call.html?room=${room.roomId}&token=${encodeURIComponent(token)}&offer=${offerer ? 1 : 0}`,
+    );
+    await page.waitForFunction(() => "kagimaCall" in globalThis, undefined, { timeout: 15_000 });
+    return page;
+  };
+
+  const guest = await openPage(await tokenFor(), false);
+  const host = await openPage(await tokenFor(), true);
+
+  const liveTracks = (page: typeof guest) =>
+    page.evaluate(() => {
+      const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } })
+        .kagimaCall;
+      return call.localStream.getTracks().filter((t) => t.readyState === "live").length;
+    });
+  assert.ok((await liveTracks(guest)) > 0, "the guest had no live tracks to begin with");
+
+  const closed = await fetch(`${BASE}/api/rooms/${room.roomId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ hostKey: room.hostKey }),
+  });
+  assert.equal(closed.status, 200);
+
+  await guest.waitForFunction(
+    () => {
+      const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } })
+        .kagimaCall;
+      return call.localStream.getTracks().every((t) => t.readyState === "ended");
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  assert.equal(await liveTracks(guest), 0, "the guest still has a live track");
+
+  const said = await guest.evaluate(() => document.getElementById("status")?.textContent ?? "");
+  console.log(`  observed: the guest was told "${said}"`);
+  assert.match(said, /ended/i, `the guest was not told the call ended: ${said}`);
+  assert.ok(!/error|failed|disconnected/i.test(said), `the wording read as a fault: ${said}`);
+
+  await host.close();
+  await guest.close();
+});
