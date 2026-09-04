@@ -24,6 +24,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "what a person is told when the camera cannot be reached",
   },
   {
+    name: "host-screen",
+    sees: "the host page handing over a URL and a passphrase, and keeping them apart",
+  },
+  {
     name: "host-closes",
     sees: "the guest's tracks ending when the host closes the room",
   },

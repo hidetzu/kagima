@@ -281,3 +281,79 @@ test(titleOf("host-closes"), async () => {
   await host.close();
   await guest.close();
 });
+
+test(titleOf("host-screen"), async () => {
+  await ready();
+  const b = browser as Browser;
+  const context = await b.newContext({ permissions: ["camera", "microphone"] });
+  const page = await context.newPage();
+  await page.goto(`${BASE}/`);
+  await page.click("#create");
+  await page.waitForFunction(
+    () => (document.getElementById("share-url")?.textContent ?? "") !== "",
+    undefined,
+    { timeout: 15_000 },
+  );
+
+  const shareUrl = await page.evaluate(
+    () => document.getElementById("share-url")?.textContent ?? "",
+  );
+  const passphrase = await page.evaluate(
+    () => document.getElementById("passphrase")?.textContent ?? "",
+  );
+  console.log(
+    `  observed: the host page showed a URL and a passphrase (${passphrase.split("-").length} words)`,
+  );
+  assert.match(shareUrl, /\/r\/[0-9a-z]{16}$/, `not a share URL: ${shareUrl}`);
+  assert.ok(passphrase.length > 0, "no passphrase was shown");
+
+  // ⚠ The wall this page exists to keep standing.
+  assert.ok(!shareUrl.includes(passphrase), "the passphrase is inside the share URL");
+
+  // ⚠ Nothing that copies both. ⚠ One paste into one channel would collapse the two routes into
+  //   ⚠ one, and that separation is the only wall in front of a leaked link.
+  //
+  // ⚠ The first version of this read the buttons' LABELS, and a mutation that added a working
+  //   ⚠ "copy both" button walked straight past it — ⚠ the label says "both", not the values.
+  // ⚠ So this clicks every control and reads what actually reaches the clipboard.
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const clickable = await page.$$eval("button", (buttons) =>
+    buttons.map((b) => b.id).filter((id) => id !== "create" && id !== "close"),
+  );
+  assert.ok(clickable.length > 0, "no copy controls to check");
+  for (const id of clickable) {
+    await page.evaluate(() => navigator.clipboard.writeText(""));
+    await page.click(`#${id}`);
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    assert.equal(
+      clipboard.includes(passphrase) && clipboard.includes("/r/"),
+      false,
+      `#${id} put both the URL and the passphrase on the clipboard: ${clipboard}`,
+    );
+  }
+  console.log(`  observed: ${clickable.length} copy controls, none of them copies both`);
+
+  // ⚠ Never in the URL, never in history, never in storage (`.claude/rules/security.md` § 2).
+  const leaked = await page.evaluate((phrase) => {
+    const inStorage = [localStorage, sessionStorage].some((s) =>
+      Object.keys(s).some((k) => (s.getItem(k) ?? "").includes(phrase)),
+    );
+    return {
+      inLocation: location.href.includes(phrase),
+      inStorage,
+      cookies: document.cookie.includes(phrase),
+    };
+  }, passphrase);
+  assert.deepEqual(leaked, { inLocation: false, inStorage: false, cookies: false });
+
+  // ⚠ Waiting is waiting. ⚠ It must not read as a fault (`CLAUDE.md` § 4-1).
+  const said = await page.evaluate(() => document.getElementById("status")?.textContent ?? "");
+  console.log(`  observed: while waiting, the host page said "${said}"`);
+  assert.ok(
+    !/できません|失敗|エラー|切断/.test(said),
+    `the waiting state read as a fault: ${said}`,
+  );
+  assert.match(said, /待って|つながり/, `the waiting state did not say what is happening: ${said}`);
+
+  await context.close();
+});
