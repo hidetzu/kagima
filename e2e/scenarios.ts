@@ -36,6 +36,14 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "the host page handing over a URL and a passphrase, and keeping them apart",
   },
   {
+    name: "peer-drops",
+    sees: "the host being told the other side left, without being told the room ended",
+  },
+  {
+    name: "signalling-drops",
+    sees: "the call surviving kagima going away, and being described that way",
+  },
+  {
     name: "host-closes",
     sees: "the guest's tracks ending when the host closes the room",
   },

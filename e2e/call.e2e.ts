@@ -48,10 +48,7 @@ const launch = async (args: string[]): Promise<Browser> => {
 
 after(async () => {
   for (const b of browsers) await b.close().catch(() => {});
-  for (const s of servers) {
-    s.closeAllConnections();
-    s.close();
-  }
+  for (const s of servers) s.close();
 });
 
 /**
@@ -59,14 +56,19 @@ after(async () => {
  * ⚠ **A suite whose cases only work in one order cannot honour "run one named case"**, ⚠ **and
  * the partial run is the one people actually use.**
  */
-const ready = async (): Promise<{ browser: Browser; base: string }> => {
+const ready = async (): Promise<{
+  browser: Browser;
+  base: string;
+  server: ReturnType<typeof startServer>;
+}> => {
   process.env["JOIN_TOKEN_SECRET"] = "an-end-to-end-secret";
   const port = nextPort++;
   const base = `http://127.0.0.1:${port}`;
-  servers.push(startServer(port, base));
+  const s = startServer(port, base);
+  servers.push(s);
   await new Promise((r) => setTimeout(r, 200));
   browser ??= await launch(CHROMIUM_ARGS);
-  return { browser, base };
+  return { browser, base, server: s };
 };
 
 const text = (page: Page, id: string): Promise<string> =>
@@ -406,4 +408,89 @@ test(titleOf("host-screen"), async () => {
   );
 
   await host.context.close();
+});
+
+test(titleOf("peer-drops"), async () => {
+  // ⚠⚠ "The other side left" is not "the room ended" (kagima#11).
+  //   ⚠ One is recoverable and the room is still open; ⚠ the other is over and nothing is kept.
+  //   ⚠ Telling the host the wrong one either ends a call that was fine, or leaves them waiting
+  //   ⚠ for somebody who is not coming.
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
+  await guest.page.waitForFunction(() => "kagimaCall" in globalThis, undefined, {
+    timeout: 15_000,
+  });
+  await host.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("アン"),
+    undefined,
+    { timeout: 15_000 },
+  );
+
+  // ⚠ The guest goes away without anybody closing the room.
+  await guest.context.close();
+
+  await host.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("切れました"),
+    undefined,
+    { timeout: 15_000 },
+  );
+  const said = await text(host.page, "status");
+  console.log(`  observed: the host was told "${said}"`);
+
+  assert.ok(!/終わりました|閉じました/.test(said), `the host was told the room ended: ${said}`);
+  assert.ok(!/エラー|失敗/.test(said), `the wording read as a fault: ${said}`);
+  assert.match(
+    said,
+    /開いています|待って/,
+    `the host was not told the room is still open: ${said}`,
+  );
+
+  // ⚠ And the host's own camera is still on, because the room did not end.
+  //   ⚠ Stopping it here would be ending a call nobody ended.
+  const live = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } }).kagimaCall;
+    return call.localStream.getTracks().filter((t) => t.readyState === "live").length;
+  });
+  assert.ok(live > 0, "the host's tracks were stopped by the other side leaving");
+
+  await host.context.close();
+});
+
+test(titleOf("signalling-drops"), async () => {
+  // ⚠⚠ Signalling going away is not the call ending (`docs/adr/0003`, `docs/adr/0010`).
+  //   ⚠ Media goes browser to browser and does not need us — ⚠ so the tracks stay, and the
+  //   ⚠ wording says what we actually know rather than what would be tidy to say.
+  //
+  // ⚠ This case exists because a mutation walked past every other one: stopping the tracks when
+  //   ⚠ the socket closed broke nothing, because nothing was watching that path.
+  const { browser: b, base, server: s } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
+  await waitForFrames(host.page, "the host");
+
+  // ⚠ kagima goes away. ⚠ Not a close, not a room ending — ⚠ the process simply stops answering,
+  //   ⚠ which is what a restart looks like from a browser (`docs/adr/0010`).
+  s.stopAnswering();
+
+  await host.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("切れました"),
+    undefined,
+    { timeout: 15_000 },
+  );
+  const said = await text(host.page, "status");
+  console.log(`  observed: the host was told "${said}"`);
+
+  assert.ok(!/終わりました|閉じました/.test(said), `the host was told the call ended: ${said}`);
+  assert.match(said, /続いている/, `the host was not told the call may still be running: ${said}`);
+
+  // ⚠ The whole point. ⚠ Stopping the tracks here would be ending a call nobody ended.
+  const live = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } }).kagimaCall;
+    return call.localStream.getTracks().filter((t) => t.readyState === "live").length;
+  });
+  assert.ok(live > 0, "the tracks were stopped when only signalling went away");
+
+  await host.context.close();
+  await guest.context.close();
 });

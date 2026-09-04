@@ -93,23 +93,49 @@
       //   ⚠ the name (`.claude/skills/change-review/SKILL.md` § 4: ⚠ the same state written from
       //   ⚠ two places, with nothing deciding which is last).
       // ⚠ So the facts are held, and the line is composed from them.
+      // ⚠ ONE writer for this line, and every fact goes through it.
+      //
+      // ⚠ The first version composed from two facts and still wrote the line directly from a
+      //   ⚠ third place. ⚠ CI caught it: a `track` event landing after "the other side left"
+      //   ⚠ re-rendered "つながりました。" over it. ⚠ Locally the two never raced.
+      // ⚠ `.claude/skills/change-review/SKILL.md` § 4 — ⚠ the same state written from two places,
+      //   ⚠ with nothing deciding which is last. ⚠ Twice now, in the same file.
       let guestName = null;
       let connected = false;
+      // ⚠ Set once something happened that outranks "who is here": ⚠ it is the last thing known,
+      //   ⚠ and a later `track` must not talk over it.
+      let ending = null;
       const render = () => {
         // ⚠ textContent, never innerHTML: the name came from outside. ⚠ The other wall is
         //   ⚠ validation, in src/signaling/messages.ts.
-        status.textContent = connected
-          ? guestName === null
-            ? "つながりました。"
-            : `${guestName} さんとつながりました。`
-          : guestName === null
-            ? "相手が来るのを待っています。"
-            : `${guestName} さんが入りました。つないでいます。`;
+        status.textContent =
+          ending === "closed"
+            ? "このルームは閉じました。何も残っていません。"
+            : ending === "peer-left"
+              ? "相手の接続が切れました。まだこのルームは開いています。"
+              : ending === "detached"
+                ? "kagima とのつながりが切れました。通話は続いているかもしれません。"
+                : connected
+                  ? guestName === null
+                    ? "つながりました。"
+                    : `${guestName} さんとつながりました。`
+                  : guestName === null
+                    ? "相手が来るのを待っています。"
+                    : `${guestName} さんが入りました。つないでいます。`;
       };
 
       transport.onMessage((message) => {
-        if (message.type !== "hello") return;
-        guestName = message.nickname;
+        if (message.type === "hello") {
+          guestName = message.nickname;
+          render();
+          return;
+        }
+        if (message.type !== "peer-left") return;
+        // ⚠ The other side dropped. ⚠ Recoverable, and worded as such — ⚠ it is not the room
+        //   ⚠ ending, and it is not a fault (CLAUDE.md § 4-1).
+        ending = "peer-left";
+        connected = false;
+        guestName = null;
         render();
       });
 
@@ -121,15 +147,28 @@
       globalThis.kagimaCall = call;
 
       call.pc.addEventListener("track", () => {
-        // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other fact.
+        // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other facts:
+        //   ⚠ `render` decides, and `ending` outranks this.
         connected = true;
         render();
       });
 
+      // ⚠ Three endings, and they are not the same thing (kagima#11).
+      //   ⚠ 4005 is the room being over. ⚠ Anything else is this connection going away, which
+      //   ⚠ may come back. ⚠ Saying "ended" for the second one would be telling the person
+      //   ⚠ something we do not know.
       transport.socket.addEventListener("close", (event) => {
-        if (event.code !== 4005) return;
-        call?.hangUp();
-        status.textContent = "このルームは閉じました。何も残っていません。";
+        if (event.code === 4005) {
+          call?.hangUp();
+          ending = "closed";
+          render();
+          return;
+        }
+        // ⚠ The call itself may still be running: media goes browser to browser and does not
+        //   ⚠ need us (docs/adr/0003). ⚠ So the tracks are NOT stopped here.
+        ending = "detached";
+        connected = false;
+        render();
       });
     } catch (error) {
       console.warn("kagima: the room could not be opened", error);
@@ -162,6 +201,8 @@
     if (room === null) return;
     await closeRoom(room.roomId, room.hostKey);
     call?.hangUp();
-    status.textContent = "このルームは閉じました。何も残っていません。";
+    // ⚠ Through the one writer, like everything else on this line.
+    ending = "closed";
+    render();
   });
 </script>

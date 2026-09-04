@@ -47,7 +47,14 @@ export type RelayResult = "relayed" | "no-peer" | "stale";
 
 export type Hub = {
   join(roomId: string, peer: Peer): JoinResult;
-  leave(roomId: string, peerId: number): void;
+  /**
+   * ⚠ **Returns who is still there.**
+   *
+   * ⚠ **So the caller can tell them.** ⚠ **A peer whose partner dropped and is told nothing sits
+   * looking at a frozen picture** — ⚠ **and "the other side left" is not "the room ended", which
+   * is the distinction this whole file exists to keep** (kagima#11).
+   */
+  leave(roomId: string, peerId: number): Peer[];
   relay(roomId: string, fromPeerId: number, line: string): RelayResult;
   /** ⚠ For tests and for closing a room (kagima#10). ⚠ Never served over HTTP. */
   peerCount(roomId: string): number;
@@ -80,6 +87,7 @@ export const createHub = (): Hub => {
       const remaining = peersOf(roomId).filter((p) => p.id !== peerId);
       if (remaining.length === 0) rooms.delete(roomId);
       else rooms.set(roomId, remaining);
+      return remaining;
     },
 
     relay(roomId, fromPeerId, line) {

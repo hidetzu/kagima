@@ -24,7 +24,7 @@
 | U3 | 制御プレーンの実行環境 | 実装の着手 | ⚠ **決定済** → [`adr/0002`](adr/0002-serve-web-and-signaling-from-one-typescript-process.md) |
 | U4 | インターネット公開の経路 | 家庭内 PC から外に出せるか | ⚠ **決定済** → [`adr/0003`](adr/0003-expose-only-http-and-websocket-through-cloudflare-tunnel.md) |
 | U5 | 合言葉の生成方式と、その強度 | Security の主張が書けない | ⚠ **決定済** → [`adr/0007`](adr/0007-say-a-passphrase-in-four-words-chosen-to-be-heard-correctly.md) |
-| U6 | ルームの寿命と、閉じ方の種類 | 「残さない」の意味が定まらない | ⚠ **一部決定** → [`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md)、残りは § 5 |
+| U6 | ルームの寿命と、閉じ方の種類 | 「残さない」の意味が定まらない | ⚠ **決定済** → [`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md) / [`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) |
 | U7 | ブラウザ間の相互運用 | 「会話できる」の denominator | ⚠ **未測定**(§ 6) |
 | U8 | Raspberry Pi 等への展開 | 何も止まらない | ⚠ **v0.1.0 では測らない**(`PRODUCT.md` § 2) |
 
@@ -182,21 +182,30 @@
   ([`../.claude/rules/security.md`](../.claude/rules/security.md) § 3)。
 - ⚠ **これも Owner 判断ではない。** ⚠ **ただし決めた根拠を [`adr/`](adr/) に残すこと。**
 
-## 5. U6 — ルームの寿命(⚠ 一部未決)
+## 5. U6 — ルームの寿命(⚠ 決定済)
 
-⚠ **「永続化しない」は [`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md) で決まった。**
-⚠ **残っているのはこれである。**
+⚠ **[`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md) と
+[`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) で決まった。**
+⚠ **ここには写さない。**
+
+⚠ **4 つの問いはすべて答えが出た:**
 
 ```text
-誰も入らないまま放置されたルームは、いつ消えるか
-Host が閉じずにタブを閉じたら、どうなるか
-プロセスが再起動したら、動いているルームはどうなるか(⚠ 全部消える。それでよいか)
-Guest が入ったあとに Host が落ちたら、Guest には何と表示されるか
+誰も入らないまま放置されたルーム   ⚠ 最後に誰かが居た時刻から一定時間で消える
+Host が閉じずにタブを閉じた        ⚠ 相手には「接続が切れた」と伝わる。⚠ ルームは開いたまま
+プロセスが再起動した              ⚠ 全部消える (仕様)。⚠ 利用者には「つながりが切れた」と出る
+Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった」とは言わない — 我々に言う根拠が無い
 ```
 
-- ⚠ **最後の一つは `CLAUDE.md` § 4-1 の問題でもある。**
-  ⚠ **「接続できません」と「相手がまだ来ていません」と「合言葉が違います」を混ぜないこと。**
-- ⚠ **これらは調べて決めてよい。** ⚠ **ただし「残さない」の意味を弱める答えは Owner 判断である。**
+### ⚠ 測っていない値が 1 つ残っている
+
+| 何 | 状態 |
+|---|---|
+| ルームの寿命(20 分) | ⚠ **選んだ値であって、測った値ではない** |
+
+⚠ **URL と合言葉を別経路で渡すのに実際どれだけかかるかを、誰も測っていない。**
+⚠ **測ったら変える。** ⚠ **それまでは「選んだ値」と書いておく**
+([`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) § しないと決めた主張)。
 
 ## 6. U7 — ブラウザ間の相互運用(⚠ 未測定)
 

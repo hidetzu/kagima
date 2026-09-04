@@ -42,6 +42,14 @@ const MAX_BODY_BYTES = 1024;
  */
 const DECOY_HOST_KEY = "decoy-host-key-that-no-room-holds";
 
+/**
+ * ⚠ **How often expired rooms are collected.**
+ *
+ * ⚠ **Not the same as how long a room lives** (`ROOM_IDLE_MS`). ⚠ **A room is unreachable the
+ * moment it expires; ⚠ this is only how long the memory and the sockets hang around after.**
+ */
+const SWEEP_INTERVAL_MS = 60_000;
+
 export type Context = {
   readonly store: RoomStore;
   readonly baseUrl: string;
@@ -336,12 +344,53 @@ export const startServer = (
   });
   // ⚠ The same process, the same port (`docs/adr/0002`). ⚠ Only HTTP and WebSocket go through
   //   ⚠ the tunnel, and media goes through neither (`docs/adr/0003`).
-  attachSignaling(server, { hub: ctx.hub, secret: ctx.secret });
+  // ⚠ Kept, because an upgraded socket is no longer one of the HTTP server's connections —
+  //   ⚠ `handleUpgrade` detaches it, so `closeAllConnections()` does not reach it.
+  //   ⚠ Without a handle on this, "stop answering" cannot be asked for, and the one behaviour
+  //   ⚠ that depends on it (`docs/adr/0010`: the call survives us) cannot be checked.
+  const wss = attachSignaling(server, {
+    hub: ctx.hub,
+    secret: ctx.secret,
+    touch: (roomId) => ctx.store.touch(roomId),
+  });
+
+  // ⚠ Rooms nobody is in do not linger. ⚠ `store.get` already refuses an expired one, so this is
+  //   ⚠ about memory and about hanging up, not about correctness of the answer.
+  // ⚠ Anyone still holding a socket for a swept room is closed with the same code as a host
+  //   ⚠ closing it: ⚠ from where they sit, the room is over either way, and inventing a third
+  //   ⚠ thing to say would be telling them something we do not know.
+  const sweeper = setInterval(() => {
+    for (const roomId of ctx.store.sweep()) {
+      ctx.hub.closeRoom(roomId, CLOSE_ROOM_CLOSED, "this room was left open and has expired");
+      logger.info("a room expired", { roomId });
+    }
+  }, SWEEP_INTERVAL_MS);
+  // ⚠ Never hold the process open for the sweeper.
+  sweeper.unref?.();
   server.listen(port, () => {
     logger.info("kagima is listening", { baseUrl, port });
     logger.info("rooms live in this process only — stopping it ends every room");
   });
-  return server;
+
+  return {
+    server,
+    /**
+     * ⚠ **Stop answering, without pretending anything ended.**
+     *
+     * ⚠ **Every socket goes, HTTP and WebSocket alike.** ⚠ **No close code is sent, because
+     * there is nothing to say** — ⚠ **from the browser's side this is what a restart looks like,
+     * and a call already established carries on without us** (`docs/adr/0010`).
+     */
+    stopAnswering() {
+      for (const client of wss.clients) client.terminate();
+      server.closeAllConnections();
+    },
+    close() {
+      for (const client of wss.clients) client.terminate();
+      server.closeAllConnections();
+      server.close();
+    },
+  };
 };
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) startServer();
