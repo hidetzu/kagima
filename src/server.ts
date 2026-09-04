@@ -19,6 +19,8 @@ import {
   defaultCompare,
 } from "./room/join.ts";
 import { type RateLimiter, createRateLimiter } from "./room/rate-limit.ts";
+import { attachSignaling } from "./signaling/attach.ts";
+import { createHub } from "./signaling/hub.ts";
 import { type RoomStore, createRoomStore } from "./room/store.ts";
 
 const DEFAULT_PORT = 8787;
@@ -256,6 +258,9 @@ export const startServer = (
     // ⚠ A rejected promise here would take the process down and end every live room.
     void handle(ctx, req, res).catch(() => send(res, 500, { error: "something went wrong here" }));
   });
+  // ⚠ The same process, the same port (`docs/adr/0002`). ⚠ Only HTTP and WebSocket go through
+  //   ⚠ the tunnel, and media goes through neither (`docs/adr/0003`).
+  attachSignaling(server, { hub: createHub(), secret: ctx.secret });
   server.listen(port, () => {
     logger.info("kagima is listening", { baseUrl, port });
     logger.info("rooms live in this process only — stopping it ends every room");

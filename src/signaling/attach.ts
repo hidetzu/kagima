@@ -1,0 +1,184 @@
+// Wiring the signalling socket onto the one HTTP server (`docs/adr/0002`).
+//
+// ⚠ **`ws` carries the frames and nothing else** (`docs/adr/0009`).
+//   ⚠ **Who may join, which room they are in, and when to hang up are ours.**
+//
+// ## ⚠ Why the token is not in the URL
+//
+// ⚠ **A URL is written to history, to the referer header, and to every log in between**
+//   (`.claude/rules/security.md` § 2). ⚠ **A join token in a query string is a secret in all of them.**
+// ⚠ **A browser cannot set arbitrary headers on a WebSocket handshake** — ⚠ **the one field it can
+//   ⚠ set is the subprotocol.** ⚠ **So the token travels there.**
+//
+// ## ⚠ Why a heartbeat is not optional
+//
+// ⚠ **Cloudflare closes a WebSocket that has been quiet, and the timeout is not published**
+//   (`docs/adr/0003`, `docs/DISCOVERY.md` § 3).
+// ⚠ **And a socket through a tunnel dies quietly** — ⚠ **no close frame, no error, just silence.**
+// ⚠ **Without a ping, this process holds a room slot for a peer that left.**
+import type { Server } from "node:http";
+import { WebSocketServer, type WebSocket } from "ws";
+import { logger } from "../log.ts";
+import { verifyJoinToken } from "../token/join-token.ts";
+import { type Hub, type Peer } from "./hub.ts";
+import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.ts";
+
+/** ⚠ **The subprotocol that carries the token.** ⚠ The only field a browser can set here. */
+export const TOKEN_PROTOCOL_PREFIX = "kagima.token.";
+
+/**
+ * ⚠ **How often the server pings.**
+ *
+ * ⚠ **Well under any idle timeout worth worrying about**, ⚠ **because the number we would need to
+ * be under is not published.** ⚠ **Guessing low is the cheap direction to be wrong in.**
+ */
+export const HEARTBEAT_MS = 20_000;
+
+/** ⚠ **Missed pongs before the socket is treated as gone.** ⚠ One missed ping can be a hiccup. */
+export const MISSED_PONGS_ALLOWED = 2;
+
+export const CLOSE_UNAUTHORIZED = 4001;
+export const CLOSE_ROOM_FULL = 4002;
+export const CLOSE_BAD_MESSAGE = 4003;
+export const CLOSE_SILENT = 4004;
+
+const roomIdFromPath = (url: string): string | null => {
+  const m = /^\/api\/rooms\/([^/?]+)\/signal(?:\?|$)/.exec(url);
+  return m ? decodeURIComponent(m[1] as string) : null;
+};
+
+const tokenFromProtocols = (raw: string | undefined): string | null => {
+  if (raw === undefined) return null;
+  for (const p of raw.split(",").map((s) => s.trim())) {
+    if (p.startsWith(TOKEN_PROTOCOL_PREFIX)) return p.slice(TOKEN_PROTOCOL_PREFIX.length);
+  }
+  return null;
+};
+
+export type SignalingOptions = {
+  readonly hub: Hub;
+  readonly secret: string;
+  readonly now?: () => number;
+  readonly heartbeatMs?: number;
+};
+
+/**
+ * ⚠ **Every outcome the handshake can produce, and the ones it cannot**
+ * (`.claude/rules/evidence.md` § Outcomes are not one outcome).
+ *
+ * ```text
+ * accepted and handled            a valid token for that room
+ * ⚠ malformed                      no token, or a path that is not a room's signal endpoint
+ * ⚠ well-formed but declined       a valid token for a different room, or an expired one
+ * ⚠ we have not implemented it yet cannot occur — there is one endpoint and it exists
+ * ⚠ nothing arrived                cannot occur — this runs on an upgrade that arrived
+ * ⚠ a timer expired while waiting  ⚠ CAN occur, later: the heartbeat gives up on a silent socket
+ * ```
+ *
+ * ⚠ **A refused handshake says only that it was refused.** ⚠ **Which of the reasons above it was
+ * is not told to the caller** — ⚠ **telling them would answer "does this room exist?"**
+ * (`.claude/rules/security.md` § 3).
+ */
+export const attachSignaling = (server: Server, options: SignalingOptions): WebSocketServer => {
+  const now = options.now ?? Date.now;
+  const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
+
+  // ⚠ `noServer`, so the upgrade is ours to accept or refuse before `ws` sees it.
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_MESSAGE_BYTES,
+    // ⚠ The subprotocol must be echoed back or a browser closes the connection itself.
+    //   ⚠ Echoed verbatim, which means the token appears in the response header too — ⚠ only to
+    //   ⚠ the client that just sent it, over the same TLS connection.
+    handleProtocols: (protocols) =>
+      [...protocols].find((p) => p.startsWith(TOKEN_PROTOCOL_PREFIX)) ?? false,
+  });
+  let nextPeerId = 1;
+
+  server.on("upgrade", (req, socket, head) => {
+    const roomId = roomIdFromPath(req.url ?? "");
+    const token = tokenFromProtocols(req.headers["sec-websocket-protocol"]);
+
+    // ⚠ One answer for every refusal, exactly as the join endpoint does.
+    const refuse = (): void => {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+    };
+
+    if (roomId === null || token === null) return refuse();
+    const checked = verifyJoinToken(token, roomId, options.secret, now());
+    if (!checked.ok) return refuse();
+
+    wss.handleUpgrade(req, socket, head, (ws) => accept(ws, roomId, checked.sessionId));
+  });
+
+  const accept = (ws: WebSocket, roomId: string, sessionId: string): void => {
+    const peer: Peer = {
+      id: nextPeerId++,
+      sessionId,
+      send: (line) => ws.send(line),
+      close: (code, reason) => ws.close(code, reason),
+    };
+
+    if (options.hub.join(roomId, peer) === "room-full") {
+      // ⚠ v0.1.0 is two people. ⚠ A third is refused, not queued (`docs/PRODUCT.md` § 3).
+      ws.close(CLOSE_ROOM_FULL, "the room already has two people in it");
+      return;
+    }
+
+    // ⚠ The room id is not a secret to someone already inside it; ⚠ the passphrase is never
+    //   ⚠ mentioned again from here on (`docs/adr/0004`).
+    logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
+
+    let missed = 0;
+    const beat = setInterval(() => {
+      if (missed >= MISSED_PONGS_ALLOWED) {
+        // ⚠ A timer expiring is not an answer; it is the absence of one
+        //   (`.claude/rules/evidence.md`). ⚠ So this says "silent", not "left".
+        clearInterval(beat);
+        ws.close(CLOSE_SILENT, "no response to the heartbeat");
+        return;
+      }
+      missed += 1;
+      ws.ping();
+    }, heartbeatMs);
+    // ⚠ Never hold the process open for a heartbeat.
+    beat.unref?.();
+    ws.on("pong", () => {
+      missed = 0;
+    });
+
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) {
+        ws.close(CLOSE_BAD_MESSAGE, "signalling is text");
+        return;
+      }
+      const parsed = parseClientMessage(data.toString());
+      if (!parsed.ok) {
+        // ⚠ Told to the sender: this side is not a secret, and the sender is the one who is wrong.
+        ws.send(JSON.stringify({ type: "refused", why: parsed.why }));
+        return;
+      }
+      // ⚠ Relayed opaque, with `from` filled in here rather than taken from the client.
+      const line = JSON.stringify({ ...parsed.message, from: peer.id });
+      const result = options.hub.relay(roomId, peer.id, line);
+      if (result === "stale") {
+        // ⚠ This peer has been replaced by a reconnect. ⚠ Its message is from a connection that
+        //   ⚠ no longer represents anybody, and delivering it would apply an old answer to a
+        //   ⚠ negotiation that has moved on.
+        logger.info("a message from a replaced connection was dropped", { roomId });
+      }
+    });
+
+    ws.on("close", () => {
+      clearInterval(beat);
+      options.hub.leave(roomId, peer.id);
+      // ⚠ The room is NOT closed here. ⚠ A signalling socket dropping is not a room ending —
+      //   ⚠ an established peer-to-peer call carries on without us (`docs/adr/0003`).
+      //   ⚠ Closing a room is kagima#10, and it is the host's decision.
+      logger.info("a peer left", { roomId, peers: options.hub.peerCount(roomId) });
+    });
+  };
+
+  return wss;
+};

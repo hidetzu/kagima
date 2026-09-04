@@ -23,6 +23,9 @@ after(() => {
   for (const stop of started) stop();
 });
 
+// ⚠ **Sockets are dropped as well as the listener** — ⚠ **an open keep-alive connection keeps
+//   ⚠ `server.close()` pending and the run never finishes.**
+
 /** ⚠ **A fresh process every time.** ⚠ Shared state between cases would make an order dependence. */
 const start = async (over: Partial<Context> = {}) => {
   const ctx: Context = {
@@ -37,7 +40,10 @@ const start = async (over: Partial<Context> = {}) => {
   const server = createServer((req, res) => void handle(ctx, req, res));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  started.push(() => server.close());
+  started.push(() => {
+    server.closeAllConnections();
+    server.close();
+  });
   return { ctx, base: `http://127.0.0.1:${port}` };
 };
 

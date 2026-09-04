@@ -77,7 +77,16 @@ export const issueJoinToken = (
 export type TokenRejection = "malformed" | "bad-signature" | "expired" | "wrong-room";
 
 export type TokenCheck =
-  | { readonly ok: true }
+  /**
+   * ⚠ **`sessionId` is the token's nonce**, ⚠ returned only after the signature has been checked.
+   *
+   * ⚠ **It exists so a reconnect can be recognised as the same participant** (`src/signaling/hub.ts`).
+   * ⚠ **It is not a secret and it is not derived from the passphrase** — ⚠ **it is random per token.**
+   * ⚠ **Returned from here rather than decoded again elsewhere: ⚠ decoding it twice would be two
+   * implementations of one question, and the second one would not check the signature**
+   * (`CLAUDE.md` § 3).
+   */
+  | { readonly ok: true; readonly sessionId: string }
   | { readonly ok: false; readonly why: TokenRejection };
 
 /**
@@ -104,7 +113,7 @@ export const verifyJoinToken = (
   const parts = Buffer.from(payload, "base64url").toString("utf8").split(":");
   if (parts.length !== 3) return { ok: false, why: "malformed" };
 
-  const [roomId, expText] = parts as [string, string, string];
+  const [roomId, expText, nonce] = parts as [string, string, string];
   const exp = Number(expText);
   if (!Number.isSafeInteger(exp)) return { ok: false, why: "malformed" };
 
@@ -112,5 +121,5 @@ export const verifyJoinToken = (
   //   ⚠ and reporting the more specific fact keeps the counters meaningful.
   if (roomId !== expectedRoomId) return { ok: false, why: "wrong-room" };
   if (now >= exp) return { ok: false, why: "expired" };
-  return { ok: true };
+  return { ok: true, sessionId: nonce };
 };
