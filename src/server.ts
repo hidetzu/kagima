@@ -17,6 +17,7 @@ import {
   createRejectionCounter,
   defaultCompare,
 } from "./room/join.ts";
+import { type RateLimiter, createRateLimiter } from "./room/rate-limit.ts";
 import { type RoomStore, createRoomStore } from "./room/store.ts";
 
 const DEFAULT_PORT = 8787;
@@ -34,6 +35,37 @@ export type Context = {
   readonly baseUrl: string;
   readonly secret: string;
   readonly rejections: RejectionCounter;
+  readonly limiter: RateLimiter;
+  /**
+   * ⚠ **The header to read the caller's address from, when something we trust sets it.**
+   *
+   * ⚠ **Empty means: use the socket.** ⚠ **That is the only value that is safe by itself.**
+   * ⚠ **Naming a header trusts whoever can set it** — ⚠ **and if anything can reach this process
+   * without going through that proxy, the per-source limit is bypassed by typing a header.**
+   * ⚠ **So it is off unless the deployment says otherwise** (`src/server.ts` § sourceOf).
+   */
+  readonly trustedSourceHeader: string;
+};
+
+/**
+ * ⚠ **Who is asking.**
+ *
+ * ⚠ **Behind Cloudflare Tunnel the socket address is the tunnel's, so every caller looks like one
+ * source and the per-source limit collapses into the room limit.**
+ * ⚠ **A header fixes that, and introduces a worse problem if it is trusted without a proxy in
+ * front that always overwrites it.**
+ *
+ * ⚠ **kagima refuses to guess.** ⚠ **The header is used only when it is named explicitly.**
+ */
+export const sourceOf = (req: IncomingMessage, trustedHeader: string): string => {
+  if (trustedHeader !== "") {
+    const value = req.headers[trustedHeader.toLowerCase()];
+    const first = Array.isArray(value) ? value[0] : value;
+    // ⚠ `x-forwarded-for` is a list; the client-controlled part is on the left, so take the first
+    //   ⚠ only because a trusted proxy is assumed to have rewritten the whole header.
+    if (first) return first.split(",")[0]?.trim() ?? "unknown";
+  }
+  return req.socket.remoteAddress ?? "unknown";
 };
 
 const send = (res: ServerResponse, status: number, body: unknown): void => {
@@ -139,6 +171,27 @@ export const handle = async (
     }
 
     const roomId = decodeURIComponent(join[1] as string);
+    const source = sourceOf(req, ctx.trustedSourceHeader);
+
+    // ⚠ Ask before comparing anything. ⚠ A limit that fires after the work has been done
+    //   ⚠ still lets the work be used as a timing signal.
+    const decision = ctx.limiter.check(roomId, source);
+    if (decision !== "allow") {
+      // ⚠ The same answer as a wrong passphrase, deliberately.
+      //   ⚠ A distinguishable 429 would make the limit firing say "this room exists"
+      //   ⚠ (`.claude/rules/security.md` § 3).
+      //   ⚠ The cost is that a real guest gets no "slow down" hint. ⚠ That cost is accepted.
+      ctx.rejections.record(
+        decision === "source-limit"
+          ? "rate-limited-source"
+          : decision === "room-limit"
+            ? "rate-limited-room"
+            : "at-capacity",
+      );
+      send(res, JOIN_REFUSED.status, JOIN_REFUSED.body);
+      return;
+    }
+
     const outcome = attemptJoin(ctx.store, roomId, submitted, {
       now: Date.now,
       secret: ctx.secret,
@@ -148,6 +201,9 @@ export const handle = async (
     if (!outcome.ok) {
       // ⚠ Counted apart, answered alike. ⚠ `why` stops here and never reaches the wire.
       ctx.rejections.record(outcome.why);
+      // ⚠ Only a failure consumes budget. ⚠ A guest who gets it right first time costs nobody
+      //   ⚠ anything, and an attacker's misses are what fill the room's ledger.
+      ctx.limiter.recordFailure(roomId, source);
       send(res, JOIN_REFUSED.status, JOIN_REFUSED.body);
       return;
     }
@@ -182,11 +238,18 @@ export const startServer = (
   port = Number(process.env["PORT"] ?? DEFAULT_PORT),
   baseUrl = process.env["PUBLIC_BASE_URL"] ?? DEFAULT_BASE_URL,
 ) => {
+  const trustedSourceHeader = process.env["TRUSTED_SOURCE_HEADER"] ?? "";
+  if (trustedSourceHeader === "") {
+    console.log("⚠ TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
+    console.log("⚠ behind a tunnel that makes every caller look like one source");
+  }
   const ctx: Context = {
     store: createRoomStore(),
     baseUrl,
     secret: joinTokenSecret(),
     rejections: createRejectionCounter(),
+    limiter: createRateLimiter({ now: Date.now }),
+    trustedSourceHeader,
   };
   const server = createServer((req, res) => {
     // ⚠ A rejected promise here would take the process down and end every live room.
