@@ -24,8 +24,17 @@ export const CASES: readonly Case[] = [
     name: "types",
     // ⚠ Node strips types to run them; ⚠ it does not check them. ⚠ Without this case,
     //   a type error runs happily and is discovered by a human instead of by a machine.
-    sees: "the types, which running the code never checks",
-    command: ["node_modules/.bin/tsc", "--noEmit"],
+    sees: "the server's types, which running the code never checks",
+    command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.json"],
+  },
+  {
+    name: "types-client",
+    // ⚠ A second config, not a second build system. ⚠ The browser's code is checked against the
+    //   DOM and the server's is not — ⚠ so server code cannot reach for `navigator.mediaDevices`
+    //   ⚠ and still type-check. ⚠ The split is what keeps `docs/adr/0001` structural rather than
+    //   ⚠ a thing to remember.
+    sees: "the browser's types, checked against the DOM instead of node",
+    command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.client.json"],
   },
   {
     name: "lint",

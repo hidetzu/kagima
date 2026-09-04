@@ -16,5 +16,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src", "scripts", "test"]
+  "include": ["src", "scripts", "test"],
+  "exclude": ["src/client"]
 }

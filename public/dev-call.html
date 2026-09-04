@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>kagima — call harness</title>
+<!--
+  ⚠ This is a development harness, not a product screen.
+  ⚠ The Host screen is kagima#7 and the Guest screen is kagima#8; neither exists yet.
+  ⚠ It is here so kagima#9 can be driven by a real browser and the media path can be measured.
+  ⚠ Do not grow it into the product. ⚠ Delete it when #7 and #8 land.
+-->
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 1rem; }
+  video { width: 240px; background: #222; }
+  #state { white-space: pre; font-family: ui-monospace, monospace; }
+</style>
+<h1>kagima call harness</h1>
+<p id="status">idle</p>
+<video id="local" autoplay muted playsinline></video>
+<!--
+  ⚠ A live peer-to-peer stream has no caption track to provide, and producing one would mean
+  ⚠ transcribing the call — which docs/adr/0001 forbids.
+  ⚠ This is a real tension, not a false positive: accessibility wants captions and the privacy
+  ⚠ promise refuses transcription. ⚠ kagima chooses the promise, and suppresses the rule here
+  ⚠ with its reason rather than turning it off everywhere.
+-->
+<!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
+<video id="remote" autoplay playsinline></video>
+<div id="state"></div>
+<script type="module">
+  import { createCall, classifyMediaError } from "/client/call.ts";
+  import { connectSignaling } from "/client/transport.ts";
+
+  const params = new URLSearchParams(location.search);
+  const status = document.getElementById("status");
+
+  // ⚠ The harness takes the token from the query string because it is a harness.
+  //   ⚠ The product must not: a URL is written to history and to every log in between.
+  //   ⚠ kagima#8 exchanges the passphrase in the page and keeps the token in memory.
+  const roomId = params.get("room");
+  const token = params.get("token");
+  const isOfferer = params.get("offer") === "1";
+
+  try {
+    const transport = await connectSignaling(roomId, token);
+    const call = await createCall({ transport, isOfferer });
+    document.getElementById("local").srcObject = call.localStream;
+    document.getElementById("remote").srcObject = call.remoteStream;
+    // ⚠ Exposed for the check to read. ⚠ The check reads frames, not this.
+    globalThis.kagimaCall = call;
+    await call.start();
+    status.textContent = "in the call";
+    setInterval(() => {
+      document.getElementById("state").textContent = JSON.stringify(call.state(), null, 2);
+    }, 250);
+  } catch (error) {
+    // ⚠ Says what happened and what to do, not an error code (`CLAUDE.md` § 4).
+    //   ⚠ "you did not allow the camera" is not the same as "could not connect".
+    // ⚠ The raw error never reaches the person reading the screen (`CLAUDE.md` § 4).
+    //   ⚠ The first version of this printed `error.message`, and the browser check caught it
+    //   ⚠ saying "could not start: Not supported" at a human.
+    //   ⚠ The detail goes to the console, where whoever is debugging can find it.
+    console.warn("kagima: the call could not start", error);
+    const failure = classifyMediaError(error);
+    status.textContent =
+      failure === "denied"
+        ? "kagima needs the camera and microphone for this call. Allow them, then reload this page."
+        : failure === "no-device"
+          ? "kagima could not find a camera or microphone on this device. Connect one and reload."
+          : "kagima could not reach the camera and microphone in this browser. Try another browser, or reload.";
+  }
+</script>

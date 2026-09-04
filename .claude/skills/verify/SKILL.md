@@ -23,7 +23,8 @@ description: Run kagima's checks and return PASS / FAIL / NOT-VERIFIED with the 
 |---|---|---|
 | **Fast / inner** | `node .claude/tools/docs-check.mjs` | ⚠ **exists** |
 | **Fast / inner** | `npm run check` (types, lint, format, unit) | ⚠ **exists** |
-| **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **does not exist yet** |
+| **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **not yet a named entry point** (kagima#13) |
+| **Final gate** | `node --test 'e2e/**/*.e2e.ts'` | ⚠ **exists, and runs by hand only** — ⚠ **not in CI** |
 | **External** | a second browser engine, and a STUN server we did not write | ⚠ **does not exist yet** |
 
 - MUST: ⚠ **Confirm the row before trusting it.** `ls`, `npm run`, or read `package.json`.
@@ -70,6 +71,17 @@ npm run check                    # every case
 npm run check -- --list          # ⚠ name them, run none, load nothing heavy
 npm run check -- --only=types    # one case
 ```
+
+⚠ **A browser check exists and is NOT part of this tier:**
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright node --test 'e2e/**/*.e2e.ts'
+```
+
+⚠ **It starts the server and launches Chromium, so it is the final gate, not the fast tier.**
+⚠ **It lives outside `test/` so `npm run check` cannot launch a browser by accident.**
+⚠ **It runs by hand.** ⚠ **A run by hand is evidence about the moment it ran and nothing more** —
+⚠ **kagima#13 owns giving it a name, the partial-run obligations, and a place in CI.**
 
 ⚠ **Its cases are `types`, `lint`, `format`, `unit`.** ⚠ **`--list` says what each one can see;
 read that rather than assuming from the name.**
@@ -143,7 +155,9 @@ promise, not a wall** — ⚠ **and `security.md` says so about itself.**
 | a wrong passphrase and an unknown room are indistinguishable | ⚠ **final gate.** ⚠ Compare the two responses, ⚠ **including their shape** |
 | rate limiting actually rejects | ⚠ **final gate.** ⚠ **Drive it past the limit and read what came back** |
 | closing a room drops its state | ⚠ **final gate.** ⚠ **Rejoin afterwards and confirm it answers like a room that never existed** |
-| media never reaches the server | ⚠ **not catchable by a passing test.** ⚠ **See below** |
+| media never reaches the server | fast — `test/no-media-on-the-server.test.ts`, ⚠ **plus the type split** (`tsconfig.json` excludes `src/client` and has no DOM lib). ⚠ **See below for what that does not show** |
+| two browsers actually exchange frames | ⚠ **final gate** — `e2e/call.e2e.ts`. ⚠ **Reads `framesDecoded`, never `connectionState`** |
+| a media failure never shows the raw error | ⚠ **final gate** — same file. ⚠ **The `denied` branch specifically is unverified: this environment produces `NotSupportedError`, not `NotAllowedError`** |
 | a room never reaches disk | fast — `test/room.test.ts`. ⚠ **Asserts no persistence module is imported.** ⚠ **Not the same as "nothing remains in memory"** |
 | the room id and the passphrase come from a CSPRNG | fast — `test/room.test.ts`, `test/passphrase.test.ts`. ⚠ **A negative check plus a positive one; ⚠ the negative alone cannot show a CSPRNG *is* used** |
 | a secret is never compared with `===` | fast — `test/join.test.ts` |
