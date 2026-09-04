@@ -23,8 +23,7 @@ description: Run kagima's checks and return PASS / FAIL / NOT-VERIFIED with the 
 |---|---|---|
 | **Fast / inner** | `node .claude/tools/docs-check.mjs` | ⚠ **exists** |
 | **Fast / inner** | `npm run check` (types, lint, format, unit) | ⚠ **exists** |
-| **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **not yet a named entry point** (kagima#13) |
-| **Final gate** | `node --test 'e2e/**/*.e2e.ts'` | ⚠ **exists, and runs by hand only** — ⚠ **not in CI** |
+| **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **exists**, ⚠ **and CI runs it** |
 | **External** | a second browser engine, and a STUN server we did not write | ⚠ **does not exist yet** |
 
 - MUST: ⚠ **Confirm the row before trusting it.** `ls`, `npm run`, or read `package.json`.
@@ -72,16 +71,7 @@ npm run check -- --list          # ⚠ name them, run none, load nothing heavy
 npm run check -- --only=types    # one case
 ```
 
-⚠ **A browser check exists and is NOT part of this tier:**
-
-```bash
-PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright node --test 'e2e/**/*.e2e.ts'
-```
-
-⚠ **It starts the server and launches Chromium, so it is the final gate, not the fast tier.**
-⚠ **It lives outside `test/` so `npm run check` cannot launch a browser by accident.**
-⚠ **It runs by hand.** ⚠ **A run by hand is evidence about the moment it ran and nothing more** —
-⚠ **kagima#13 owns giving it a name, the partial-run obligations, and a place in CI.**
+⚠ **The final gate is a separate entry point** — ⚠ see § 3.
 
 ⚠ **Its cases are `types`, `lint`, `format`, `unit`.** ⚠ **`--list` says what each one can see;
 read that rather than assuming from the name.**
@@ -122,6 +112,20 @@ the host closes the room     ⚠ and the guest is told, and the tracks stop
 - MUST: ⚠ **Confirm the build under test is the one just built, and the server under test is the
   one just started** ([`../../rules/verification.md`](../../rules/verification.md)).
   ⚠ **A stale dev server on the same port measures the previous run.**
+
+```bash
+npm run e2e                        # every case
+npm run e2e -- --list              # ⚠ names them, launches no browser
+npm run e2e -- --only=frames       # one case
+```
+
+⚠ **Its cases are `frames`, `media-refused`, `host-closes`.**
+⚠ **Every one of them runs alone** — ⚠ **a suite whose cases only work in one order cannot honour
+"run one named case", and the partial run is the one people actually use.**
+
+⚠ **CI runs this, in Chromium only.** ⚠ **A green run is evidence about Chromium and nothing
+else** — ⚠ **a second engine is the external tier** ([`../../rules/verification.md`](../../rules/verification.md)),
+⚠ **and it is kagima#14.**
 
 ## 4. External — ⚠ the tier that gets skipped
 
