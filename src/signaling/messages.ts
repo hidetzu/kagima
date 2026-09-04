@@ -17,6 +17,14 @@ export const MAX_SDP_BYTES = 64 * 1024;
 /** ⚠ **An ICE candidate line is short.** */
 export const MAX_CANDIDATE_BYTES = 4 * 1024;
 
+/**
+ * ⚠ **A nickname is for one other person to read, once.**
+ *
+ * ⚠ **Short on purpose.** ⚠ **It is not a profile** (`docs/PRODUCT.md` § 4 rules those out),
+ * ⚠ **and a long one is a way to push text at somebody who cannot refuse it.**
+ */
+export const MAX_NICKNAME_CHARS = 24;
+
 /** ⚠ **Anything larger than the largest thing we accept is refused before it is parsed.** */
 export const MAX_MESSAGE_BYTES = MAX_SDP_BYTES + 1024;
 
@@ -29,7 +37,32 @@ export type ClientMessage =
       readonly sdpMid: string | null;
       readonly sdpMLineIndex: number | null;
     }
+  | { readonly type: "hello"; readonly nickname: string }
   | { readonly type: "bye" };
+
+/**
+ * ⚠ **What a nickname may be.**
+ *
+ * ⚠ **It arrives from outside, and it is put in front of the other participant** — ⚠ **so it is
+ * checked here, not where it is shown** (`.claude/rules/verification.md`: ⚠ **parsing and
+ * validating what arrives from outside is the first thing to confirm**).
+ *
+ * ⚠ **Control characters are refused rather than stripped.** ⚠ **Stripping changes what somebody
+ * typed and then shows it to a third party as though they had typed that.**
+ * ⚠ **The display side never builds markup from it either** — ⚠ **two walls, because either one
+ * alone is one mistake away from the other side of the screen.**
+ */
+export const isNickname = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_NICKNAME_CHARS) return false;
+  // ⚠ Control characters (Cc) and format characters (Cf), by Unicode property rather than by
+  //   ⚠ a hand-written range — ⚠ the hand-written version had to list C0, C1 and the bidi marks
+  //   ⚠ separately, and a range that has to be remembered is a range that goes out of date.
+  // ⚠ Cf matters as much as Cc here: ⚠ the direction-overriding marks can make a name read as
+  //   ⚠ something else entirely, which is a way to lie about who is in the room.
+  return !/[\p{Cc}\p{Cf}]/u.test(trimmed);
+};
 
 /**
  * ⚠ **Why a message was refused.**
@@ -101,6 +134,12 @@ export const parseClientMessage = (raw: string): ParseResult => {
           sdpMLineIndex: typeof sdpMLineIndex === "number" ? sdpMLineIndex : null,
         },
       };
+    }
+    case "hello": {
+      if (!isNickname(m["nickname"])) return { ok: false, why: "malformed" };
+      // ⚠ Trimmed once, here, so both sides see the same string and the comparison downstream
+      //   ⚠ is not against something that only looks the same.
+      return { ok: true, message: { type: "hello", nickname: m["nickname"].trim() } };
     }
     case "bye":
       return { ok: true, message: { type: "bye" } };

@@ -20,6 +20,14 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "two browsers in one room decoding each other's video frames",
   },
   {
+    name: "guest-refusals",
+    sees: "a wrong passphrase, an unknown room and a rate-limited attempt reading the same",
+  },
+  {
+    name: "guest-keeps-nothing",
+    sees: "the passphrase not surviving the page it was typed into",
+  },
+  {
     name: "media-refused",
     sees: "what a person is told when the camera cannot be reached",
   },

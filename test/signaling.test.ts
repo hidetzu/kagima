@@ -14,7 +14,9 @@ import {
 import { CLOSE_REPLACED, ROOM_CAPACITY, createHub, type Peer } from "../src/signaling/hub.ts";
 import {
   MAX_CANDIDATE_BYTES,
+  MAX_NICKNAME_CHARS,
   MAX_SDP_BYTES,
+  isNickname,
   parseClientMessage,
 } from "../src/signaling/messages.ts";
 import { issueJoinToken } from "../src/token/join-token.ts";
@@ -289,4 +291,57 @@ test("⚠ one peer leaving does not close the room for the other", async () => {
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(hub.peerCount("room-a"), 1, "the room was emptied by one peer leaving");
   b.close();
+});
+
+// ── the nickname ────────────────────────────────────────────────────────────
+// ⚠ **It arrives from outside and is put in front of the other participant.**
+// ⚠ **Two walls, and this is the first: ⚠ what may be a nickname at all.**
+// ⚠ **The second is that the page shows it as text and never as markup** — ⚠ **either one alone
+//   ⚠ is one mistake away from the other side of the screen.**
+
+test("an ordinary nickname is accepted", () => {
+  for (const ok of ["ふつうの名前", "a", "Ann", "x".repeat(MAX_NICKNAME_CHARS)]) {
+    assert.equal(isNickname(ok), true, ok);
+  }
+});
+
+test("⚠ an empty or over-long nickname is refused", () => {
+  // ⚠ Long is not a style question: it is a way to push text at somebody who cannot refuse it.
+  for (const bad of ["", "   ", "x".repeat(MAX_NICKNAME_CHARS + 1)]) {
+    assert.equal(isNickname(bad), false, JSON.stringify(bad));
+  }
+});
+
+test("⚠⚠ control and format characters are refused, not stripped", () => {
+  // ⚠ Stripping changes what somebody typed and then shows it to a third party as though they
+  //   ⚠ had typed that. ⚠ Refusing says no to the sender instead of lying to the receiver.
+  const bad = [
+    `tab${String.fromCharCode(0x09)}here`,
+    `nul${String.fromCharCode(0x00)}here`,
+    `c1${String.fromCharCode(0x9b)}here`,
+    // ⚠ The direction-overriding marks. ⚠ These can make a name read as something else
+    //   ⚠ entirely, which is a way to lie about who is in the room.
+    `rtl${String.fromCharCode(0x202e)}here`,
+    `iso${String.fromCharCode(0x2066)}here`,
+  ];
+  for (const b of bad) assert.equal(isNickname(b), false, JSON.stringify(b));
+});
+
+test("⚠ a nickname that is not a string is refused", () => {
+  for (const bad of [123, null, undefined, {}, ["a"]]) assert.equal(isNickname(bad), false);
+});
+
+test("⚠ hello carries a validated nickname, trimmed once", () => {
+  // ⚠ Trimmed here so both sides see the same string, and a later comparison is not against
+  //   ⚠ something that only looks the same.
+  const parsed = parseClientMessage(JSON.stringify({ type: "hello", nickname: "  Ann  " }));
+  assert.deepEqual(parsed, { ok: true, message: { type: "hello", nickname: "Ann" } });
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: "hello", nickname: "" })), {
+    ok: false,
+    why: "malformed",
+  });
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: "hello" })), {
+    ok: false,
+    why: "malformed",
+  });
 });

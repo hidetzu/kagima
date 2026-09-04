@@ -291,7 +291,7 @@ export const handle = async (
       "POST /api/rooms",
       "POST /api/rooms/{roomId}/join",
       "DELETE /api/rooms/{roomId}",
-      "GET /dev-call.html",
+      "GET /r/{roomId}",
     ],
   });
 };

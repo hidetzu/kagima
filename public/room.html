@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kagima</title>
+<!--
+  ⚠ No referrer. ⚠ A room URL in a referer header is the room URL handed to somebody who was
+  ⚠ never told it.
+-->
+<meta name="referrer" content="no-referrer" />
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 34rem; padding: 1.5rem; }
+  h1 { font-size: 1.4rem; }
+  label { display: block; margin: 1rem 0 .3rem; }
+  input { font: inherit; padding: .5rem; width: 100%; box-sizing: border-box;
+          border: 1px solid #999; border-radius: .3rem; }
+  button { font: inherit; padding: .5rem .9rem; border-radius: .3rem; border: 1px solid #999;
+           background: #fff; cursor: pointer; margin-top: 1rem; }
+  .hint { color: #555; font-size: .9rem; }
+  video { width: 100%; max-width: 16rem; background: #222; border-radius: .3rem; }
+</style>
+
+<h1>kagima</h1>
+
+<section id="before">
+  <p>この部屋に入るには、合言葉が要ります。</p>
+  <p class="hint">合言葉は、URL とは別の方法で相手から聞いてください。</p>
+
+  <form id="enter">
+    <label for="passphrase">合言葉</label>
+    <!-- ⚠ autocomplete off: the passphrase is for this room only and must not be remembered. -->
+    <input id="passphrase" name="passphrase" autocomplete="off" autocapitalize="off"
+           spellcheck="false" required />
+
+    <label for="nickname">ニックネーム</label>
+    <input id="nickname" name="nickname" autocomplete="off" maxlength="24" required />
+    <p class="hint">相手の画面に出ます。あとには残りません。</p>
+
+    <button type="submit" id="enter-button">入る</button>
+  </form>
+  <p id="error" role="status"></p>
+</section>
+
+<section id="after" hidden>
+  <p id="status">つないでいます。</p>
+  <video id="local" autoplay muted playsinline></video>
+  <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
+  <video id="remote" autoplay playsinline></video>
+</section>
+
+<script type="module">
+  import { roomIdFromPath, join, WORDING } from "/client/guest.ts";
+  import { createCall, classifyMediaError } from "/client/call.ts";
+  import { connectSignaling } from "/client/transport.ts";
+
+  const $ = (id) => document.getElementById(id);
+  const roomId = roomIdFromPath(location.pathname);
+
+  $("enter").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("enter-button").disabled = true;
+    $("error").textContent = "";
+
+    // ⚠ Read once, held in a local, never stored anywhere. ⚠ Not in the URL, not in storage.
+    const passphrase = $("passphrase").value;
+    const nickname = $("nickname").value.trim();
+
+    const result = await join(roomId, passphrase);
+
+    // ⚠ Cleared whatever happened. ⚠ The passphrase has been exchanged for a token and is never
+    //   ⚠ read again (docs/adr/0004) — ⚠ leaving it in the field keeps a secret on the screen,
+    //   ⚠ in the form, and in whatever restores that form later.
+    // ⚠ The browser check found this: it was cleared on failure and kept on success.
+    $("passphrase").value = "";
+
+    if (!result.ok) {
+      // ⚠ One sentence for every refusal the server declined to tell apart.
+      $("error").textContent = WORDING[result.why];
+      $("enter-button").disabled = false;
+      return;
+    }
+
+    try {
+      const transport = await connectSignaling(roomId, result.token);
+      // ⚠ The guest arrives second and knows the host is there, so the guest offers.
+      const call = await createCall({ transport, isOfferer: true });
+      $("local").srcObject = call.localStream;
+      $("remote").srcObject = call.remoteStream;
+      globalThis.kagimaCall = call;
+
+      $("before").hidden = true;
+      $("after").hidden = false;
+
+      // ⚠ Relayed, never stored. ⚠ The server passes it through and keeps nothing
+      //   (docs/adr/0005); ⚠ when the room ends, the name is gone with it.
+      transport.send({ type: "hello", nickname });
+      await call.start();
+
+      call.pc.addEventListener("track", () => {
+        $("status").textContent = "つながりました。";
+      });
+      transport.socket.addEventListener("close", (e) => {
+        if (e.code !== 4005) return;
+        call.hangUp();
+        $("status").textContent = "この通話は終わりました。何も残っていません。";
+      });
+    } catch (error) {
+      console.warn("kagima: the call could not start", error);
+      const failure = classifyMediaError(error);
+      // ⚠ Never the raw error, and never opening with what does not work (CLAUDE.md § 4-1).
+      $("error").textContent =
+        failure === "denied"
+          ? "カメラとマイクの使用を許可すると会話をはじめられます。許可してから、もう一度お試しください。"
+          : failure === "no-device"
+            ? "カメラまたはマイクが見つかりませんでした。接続してから、もう一度お試しください。"
+            : "カメラとマイクにつながりませんでした。別のブラウザを試すか、読み込み直してください。";
+      $("enter-button").disabled = false;
+    }
+  });
+</script>

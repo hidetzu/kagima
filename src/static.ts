@@ -30,8 +30,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string }> = new Map([
   ["/", { file: "public/index.html", type: "text/html; charset=utf-8" }],
   ["/index.html", { file: "public/index.html", type: "text/html; charset=utf-8" }],
-  ["/dev-call.html", { file: "public/dev-call.html", type: "text/html; charset=utf-8" }],
   ["/client/host.ts", { file: "src/client/host.ts", type: "text/javascript; charset=utf-8" }],
+  ["/client/guest.ts", { file: "src/client/guest.ts", type: "text/javascript; charset=utf-8" }],
   ["/client/call.ts", { file: "src/client/call.ts", type: "text/javascript; charset=utf-8" }],
   [
     "/client/transport.ts",
@@ -39,10 +39,21 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
   ],
 ]);
 
-export const isServedPath = (pathname: string): boolean => SERVED.has(pathname);
+/**
+ * ⚠ **The one path that is not a fixed name: a room's page.**
+ *
+ * ⚠ **It still builds nothing from what the caller sent.** ⚠ **The pattern is matched, and one
+ * fixed file is served** — ⚠ **the room id is never touched again on this side.**
+ * ⚠ **The page reads the id out of its own URL; ⚠ the server does not need to know it here.**
+ */
+const ROOM_PAGE = /^\/r\/[0-9a-z]{16}$/;
+const ROOM_PAGE_FILE = { file: "public/room.html", type: "text/html; charset=utf-8" } as const;
+
+export const isServedPath = (pathname: string): boolean =>
+  SERVED.has(pathname) || ROOM_PAGE.test(pathname);
 
 export const serveStatic = (pathname: string, res: ServerResponse): boolean => {
-  const entry = SERVED.get(pathname);
+  const entry = SERVED.get(pathname) ?? (ROOM_PAGE.test(pathname) ? ROOM_PAGE_FILE : undefined);
   if (entry === undefined) return false;
 
   const raw = readFileSync(join(ROOT, entry.file), "utf8");
