@@ -36,6 +36,19 @@ description: Run kagima's checks and return PASS / FAIL / NOT-VERIFIED with the 
 - MUST: ⚠ **When a change adds an entry point, add its row here in the same PR.**
   ⚠ **A table that lags the repository is worse than no table**, because it is believed.
 
+### ⚠ CI runs a subset of this table, and says which
+
+⚠ **`.github/workflows/ci.yml` runs the fast tier and writes, into every run's summary, which
+tiers it did not run.** ⚠ **A green tick is evidence about the rows it ran and nothing else.**
+
+- MUST: ⚠ **Never read a green tick as covering the final gate or the external tier.**
+  ⚠ **Neither has an entry point yet.**
+- MUST: ⚠ **When one lands, CI must run it.**
+  ⚠ **`docs-check` case `ci-names-every-entry-point` fails if `package.json` declares a tier
+  entry point that the workflow never invokes** — ⚠ **so a tier cannot go missing from CI quietly.**
+- ⚠ **That case cannot check that the workflow's prose is true.** ⚠ **It checks that a declared
+  entry point is not silently absent.** ⚠ **Those are different, and only the second is a wall.**
+
 ---
 
 ## 2. Fast / inner

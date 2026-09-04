@@ -1,0 +1,82 @@
+# ⚠ What CI can run is a property of the machine, not of this repository.
+# ⚠ So this workflow does two things, and the second matters as much as the first:
+#     1. run the tiers it can
+#     2. ⚠ say, on the PR, which tiers it did not run
+# ⚠ A green tick that hides an unrun tier is worse than a red one.
+#
+# ⚠ Green CI does not mean the spec is right. ⚠ It means nothing contradicted what was asserted
+#   (.claude/rules/verification.md).
+#
+# ⚠ No auto-merge, no merge queue. ⚠ Merge is the one human gate
+#   (docs/adr/0006-let-the-ai-apply-ready-for-ai-and-gate-on-merge-instead.md).
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# ⚠ Read-only. ⚠ This workflow never writes to the repository, and never merges anything.
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-tier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # ⚠ Node runs .ts directly here — there is no build step to fall back on,
+          #   ⚠ so the version is not incidental. ⚠ package.json `engines` is the floor.
+          node-version: "25.x"
+          cache: npm
+
+      # ⚠ `ci`, not `install`. ⚠ install would silently accept a lockfile that drifted.
+      - run: npm ci
+
+      # ⚠ Each entry point announces which subset it ran on its own first line
+      #   (.claude/rules/verification.md). ⚠ Capture that line rather than describing it.
+      - name: npm run check
+        id: check
+        run: |
+          set -o pipefail
+          npm run check --silent 2>&1 | tee /tmp/check.log
+
+      - name: docs-check
+        id: docs
+        run: |
+          set -o pipefail
+          node .claude/tools/docs-check.mjs 2>&1 | tee /tmp/docs.log
+
+      # ⚠ Runs even when something above failed. ⚠ A failing run is exactly when a reader needs
+      #   to know which tiers were never reached.
+      - name: What ran, and ⚠ what did not
+        if: always()
+        run: |
+          {
+            echo "## What this run actually covered"
+            echo ""
+            echo "⚠ Copied from what each runner announced. ⚠ Not written by hand."
+            echo ""
+            echo '```'
+            head -n 1 /tmp/check.log 2>/dev/null || echo "npm run check — did not reach it"
+            head -n 1 /tmp/docs.log  2>/dev/null || echo "docs-check — did not reach it"
+            echo '```'
+            echo ""
+            echo "## ⚠ Tiers this run did NOT cover"
+            echo ""
+            echo "| Tier | Why not |"
+            echo "|---|---|"
+            echo "| Final gate | ⚠ **No entry point exists yet** (kagima#13) |"
+            echo "| External | ⚠ **No entry point exists yet** (kagima#14) |"
+            echo ""
+            echo "⚠ **A green tick here is not evidence about those tiers.**"
+            echo "⚠ **When an entry point for one of them lands, this workflow must run it —**"
+            echo "⚠ **\`docs-check\` case \`ci-names-every-entry-point\` fails if it does not.**"
+          } >> "$GITHUB_STEP_SUMMARY"
