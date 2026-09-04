@@ -17,5 +17,5 @@
     "skipLibCheck": true
   },
   "include": ["src", "scripts", "test"],
-  "exclude": ["src/client"]
+  "exclude": ["src/client", "e2e", "external"]
 }

@@ -25,7 +25,7 @@
 | U4 | インターネット公開の経路 | 家庭内 PC から外に出せるか | ⚠ **決定済** → [`adr/0003`](adr/0003-expose-only-http-and-websocket-through-cloudflare-tunnel.md) |
 | U5 | 合言葉の生成方式と、その強度 | Security の主張が書けない | ⚠ **決定済** → [`adr/0007`](adr/0007-say-a-passphrase-in-four-words-chosen-to-be-heard-correctly.md) |
 | U6 | ルームの寿命と、閉じ方の種類 | 「残さない」の意味が定まらない | ⚠ **決定済** → [`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md) / [`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) |
-| U7 | ブラウザ間の相互運用 | 「会話できる」の denominator | ⚠ **未測定**(§ 6) |
+| U7 | ブラウザ間の相互運用 | 「会話できる」の denominator | ⚠ **一度測った**(§ 6)。⚠ **母集団は狭い** |
 | U8 | Raspberry Pi 等への展開 | 何も止まらない | ⚠ **v0.1.0 では測らない**(`PRODUCT.md` § 2) |
 
 ---
@@ -207,14 +207,32 @@ Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった�
 ⚠ **測ったら変える。** ⚠ **それまでは「選んだ値」と書いておく**
 ([`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) § しないと決めた主張)。
 
-## 6. U7 — ブラウザ間の相互運用(⚠ 未測定)
+## 6. U7 — ブラウザ間の相互運用(⚠ 一度測った)
 
-⚠ **「会話できる」と言うためには、どのブラウザとどのブラウザで測ったのかを言う必要がある。**
-⚠ **現時点で測っていないので、どのブラウザについても言えない。**
+⚠ **`npm run external` が Chromium と Firefox のあいだで通話を成立させ、⚠ CI でも走る。**
 
-- ⚠ **これは [`../.claude/skills/verify/SKILL.md`](../.claude/skills/verify/SKILL.md) の
-  External tier がやることである。** ⚠ **相手側は我々が書いていないものでなければならない。**
-- ⚠ **Chromium だけで測って「ブラウザで動く」と書かないこと。**
+⚠ **測ったこと(⚠ これは他所の値ではなく、我々が測った値である):**
+
+| 何を | 値 | いつ・どこで |
+|---|---|---|
+| Chromium(host)→ Firefox(guest) | ⚠ **双方向にフレームがデコードされた** | 2026-09-04、⚠ **1 台のマシン上、loopback、fake camera** |
+| 使ったエンジン | Chromium 151.0.7922.34 / Firefox 153.0 | 同上 |
+
+⚠ **数値は実行時にランナーが出す。** ⚠ **ここには書かない**
+([`../.claude/rules/evidence.md`](../.claude/rules/evidence.md))。
+
+### ⚠ これで言えるようになったこと / まだ言えないこと
+
+```text
+言える     この 2 つのエンジンのあいだで、⚠ この条件で、⚠ 一度、通話が成立した
+言えない   実際のネットワークで動く       ⚠ loopback しか試していない
+言えない   実際のカメラで動く             ⚠ fake device しか試していない
+言えない   NAT を越えられる               ⚠ 同一ホスト内なので越えるものが無い (hidetzu/kagima#16)
+言えない   WebKit で動く                  ⚠ 一度も走らせていない
+```
+
+⚠ **「ブラウザで動く」とは、いまも書かない。**
+⚠ **書けるのは「Chromium 151 と Firefox 153 のあいだで、loopback と fake camera で動いた」までである。**
 
 ## 7. U8 — Raspberry Pi(⚠ v0.1.0 では測らない)
 

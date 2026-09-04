@@ -30,7 +30,7 @@
 
 | 層 | 何ができるか | どの規格の、どの節か | 何が裏付けるか |
 |---|---|---|---|
-| — | — | — | — |
+| ブラウザ間 | ⚠ **2 人が、⚠ 我々が書いていない 2 つのエンジンのあいだで、映像と音声を双方向にやりとりできる** | W3C WebRTC(`RTCPeerConnection`)、Media Capture(`getUserMedia`) | ⚠ **ケース `chromium-to-firefox`**(`npm run external`)。⚠ **`framesDecoded` を両側で読む。⚠ `connectionState` では判定しない** |
 
 ## 2. 意図的に実装していないもの
 
@@ -42,7 +42,8 @@
 
 | 実装していないもの | 意図的か | 理由 |
 |---|---|---|
-| — | — | — |
+| TURN relay 経由の接続 | ⚠ **未決** | ⚠ **Owner 判断待ち。** ⚠ **実測してから別 ADR で決める**([`DISCOVERY.md`](DISCOVERY.md) § 2、hidetzu/kagima#16) |
+| WebKit での動作 | ⚠ **いいえ** | ⚠ **拒否ではない。** ⚠ **一度も走らせていないだけである** |
 
 ## 3. 測った数字
 
