@@ -37,6 +37,15 @@ export const CASES: readonly Case[] = [
     command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.client.json"],
   },
   {
+    name: "types-e2e",
+    // ⚠ The browser-driving checks were not type-checked at all until 2026-09-05 — ⚠ they were
+    //   ⚠ simply outside every `include`, and nothing said so.
+    // ⚠ They need the DOM (the callbacks inside `page.evaluate` run in a browser) and they also
+    //   ⚠ need node, so they get their own config rather than being folded into either side.
+    sees: "the types of the checks that drive a browser",
+    command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.e2e.json"],
+  },
+  {
     name: "lint",
     sees: "what the source says without running it",
     command: ["node_modules/.bin/biome", "lint", "."],

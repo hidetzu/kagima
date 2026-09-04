@@ -54,15 +54,22 @@ jobs:
           set -o pipefail
           node .claude/tools/docs-check.mjs 2>&1 | tee /tmp/docs.log
 
-      # ⚠ The browser is downloaded here rather than assumed. ⚠ Only chromium: the second engine
-      #   ⚠ is the external tier and it is kagima#14, not this job.
-      - run: npx playwright install --with-deps chromium
+      # ⚠ Both engines are downloaded here rather than assumed.
+      #   ⚠ Chromium drives the final gate; ⚠ firefox is the other end of the external tier —
+      #   ⚠ the one whose job is to be something we did not write.
+      - run: npx playwright install --with-deps chromium firefox
 
       - name: npm run e2e
         id: e2e
         run: |
           set -o pipefail
           npm run e2e 2>&1 | tee /tmp/e2e.log
+
+      - name: npm run external
+        id: external
+        run: |
+          set -o pipefail
+          npm run external 2>&1 | tee /tmp/external.log
 
       # ⚠ Runs even when something above failed. ⚠ A failing run is exactly when a reader needs
       #   to know which tiers were never reached.
@@ -78,17 +85,16 @@ jobs:
             head -n 1 /tmp/check.log 2>/dev/null || echo "npm run check — did not reach it"
             head -n 1 /tmp/docs.log  2>/dev/null || echo "docs-check — did not reach it"
             head -n 1 /tmp/e2e.log   2>/dev/null || echo "npm run e2e — did not reach it"
+            head -n 1 /tmp/external.log 2>/dev/null || echo "npm run external — did not reach it"
             echo '```'
             echo ""
             echo "## ⚠ Tiers this run did NOT cover"
             echo ""
-            echo "| Tier | Why not |"
-            echo "|---|---|"
-            echo "| External | ⚠ **No entry point exists yet** (kagima#14) |"
+            echo "⚠ **All three tiers ran here.**"
             echo ""
-            echo "⚠ **The final gate ran here, in Chromium only.**"
-            echo "⚠ **That is evidence about Chromium and nothing else** — ⚠ **a second engine is"
-            echo "⚠ the external tier, and it has not run.**"
+            echo "⚠ **What that still is not:** ⚠ two engines on one machine, over loopback,"
+            echo "⚠ with fake cameras. ⚠ Nothing here says anything about a real network,"
+            echo "⚠ a real camera, or a NAT (kagima#16). ⚠ WebKit has never been run."
             echo ""
             echo "⚠ **A green tick here is not evidence about those tiers.**"
             echo "⚠ **When an entry point for one of them lands, this workflow must run it —**"

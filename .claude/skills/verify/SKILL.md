@@ -22,9 +22,9 @@ description: Run kagima's checks and return PASS / FAIL / NOT-VERIFIED with the 
 | Tier | Entry point | State |
 |---|---|---|
 | **Fast / inner** | `node .claude/tools/docs-check.mjs` | ⚠ **exists** |
-| **Fast / inner** | `npm run check` (types, lint, format, unit) | ⚠ **exists** |
+| **Fast / inner** | `npm run check` (types, types-client, types-e2e, lint, format, unit) | ⚠ **exists** |
 | **Final gate** | `npm run e2e` (two browser contexts, fake media, a real room) | ⚠ **exists**, ⚠ **and CI runs it** |
-| **External** | a second browser engine, and a STUN server we did not write | ⚠ **does not exist yet** |
+| **External** | `npm run external` (Chromium ↔ Firefox) | ⚠ **exists**, ⚠ **and CI runs it** |
 
 - MUST: ⚠ **Confirm the row before trusting it.** `ls`, `npm run`, or read `package.json`.
   ⚠ **A row saying "exists" is a claim, and a claim gets checked** ([`../../rules/evidence.md`](../../rules/evidence.md)).
@@ -138,6 +138,16 @@ the browser's own WebRTC stack   ⚠ we do not write it. ⚠ Its ICE behaviour i
 a second browser engine          ⚠ Chromium and Firefox disagree, and that is the point
 a STUN server                    ⚠ someone else's, ⚠ so the result depends on their uptime
 ```
+
+```bash
+npm run external                                 # every case
+npm run external -- --list                       # ⚠ names them, launches no browser
+npm run external -- --only=chromium-to-firefox   # one case
+```
+
+⚠ **CI runs this.** ⚠ **What it still is not: two engines on one machine, over loopback, with
+fake cameras.** ⚠ **Nothing there says anything about a real network, a real camera, or a NAT**
+(kagima#16). ⚠ **WebKit has never been run.**
 
 - MUST NOT: ⚠ **Never assert what a STUN or TURN server will do right now.**
   ⚠ **Record what actually came back, then judge** ([`../../rules/verification.md`](../../rules/verification.md)).
