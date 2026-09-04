@@ -3,6 +3,6 @@
   "compilerOptions": {
     "lib": ["esnext", "dom"]
   },
-  "include": ["e2e", "external"],
+  "include": ["e2e", "external", "measure"],
   "exclude": []
 }
