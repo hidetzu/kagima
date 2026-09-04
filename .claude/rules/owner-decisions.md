@@ -44,7 +44,49 @@ Ask only where **being wrong cannot be walked back**.
   exists only in a comment.**
 - MUST: ⚠ **When body and comment conflict and you cannot tell which is authoritative, ask.**
 - MUST: ⚠ **When the issue, the spec, the ADRs and the code disagree, do not decide which is
-  right.** ⚠ **Return that a human must decide.**
+  right.** ⚠ **Return that a human must decide** — ⚠ **except for the one conflict below.**
+
+### ⚠ The one conflict the AI resolves itself
+
+⚠ **kagima added this on 2026-09-04, by owner decision**
+([`../../docs/adr/0008-let-product-md-outrank-an-issues-acceptance-criteria.md`](../../docs/adr/0008-let-product-md-outrank-an-issues-acceptance-criteria.md)).
+
+⚠ **When an issue's `Acceptance Criteria` contradict [`../../docs/PRODUCT.md`](../../docs/PRODUCT.md),
+`PRODUCT.md` wins.** ⚠ **Decide it, build to `PRODUCT.md`, and report what you did.**
+⚠ **Do not stop and ask.**
+
+⚠ **Grounds: `PRODUCT.md` is the product's single source, and an issue's acceptance criteria are
+drafted downstream of it — usually by the AI itself.** ⚠ **Treating a drafting slip as an owner
+question spends the owner's attention on a document they did not write.**
+
+- MUST: ⚠ **Say it in the completion report and on the PR**, ⚠ **naming the criterion, what
+  `PRODUCT.md` requires, and what was built.** ⚠ **A silent resolution is not this clause.**
+- MUST: ⚠ **Propose the corrected criterion.** ⚠ **Never edit the issue's `Acceptance Criteria`
+  to match what was built** — ⚠ **that erases the evidence that they disagreed.**
+- MUST NOT: ⚠ **Never widen scope through this clause.** ⚠ **It resolves a contradiction; it does
+  not license work `PRODUCT.md` merely permits.**
+
+⚠ **This carve-out is exactly one pair, and it does not generalise:**
+
+| Conflict | Who resolves it |
+|---|---|
+| ⚠ **an issue's `Acceptance Criteria` vs. `PRODUCT.md`** | ⚠ **the AI. Build to `PRODUCT.md`, report it** |
+| an issue's `Owner Decisions` vs. anything | ⚠ **the owner.** ⚠ **`Owner Decisions` are never overridden** |
+| `PRODUCT.md` vs. an ADR | ⚠ **the owner** |
+| an ADR vs. the code | ⚠ **the owner** |
+| `docs/SPEC.md` vs. the code | ⚠ **the owner** |
+
+⚠ **Precedence, when nothing above applies:**
+
+```text
+Owner Decisions in the issue, and any later comment   ⚠ highest. Never overridden
+docs/PRODUCT.md                                       ⚠ the product's single source
+docs/adr/                                             why it was decided that way
+docs/SPEC.md                                          what may be claimed today
+the issue's own Acceptance Criteria and body          ⚠ drafted downstream of all of the above
+```
+
+⚠ **Knowing the order is not permission to apply it.** ⚠ **Only the one pair above is yours.**
 
 ## ⚠ `ready-for-ai`
 
