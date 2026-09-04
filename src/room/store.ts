@@ -16,6 +16,16 @@ export type Room = {
   readonly id: string;
   /** ⚠ **Held to be compared against, and never logged** (`.claude/rules/security.md` § 2). */
   readonly passphrase: Passphrase;
+  /**
+   * ⚠ **The one thing only the host is given.**
+   *
+   * ⚠ **Not a role and not an account** — ⚠ **a capability, handed over once at creation and
+   * never again** (`docs/PRODUCT.md` § 4 forbids accounts; ⚠ **this identifies nobody and dies
+   * with the room**).
+   * ⚠ **It exists because closing a room is the host's, and the server has no other way to tell
+   * the two participants apart.**
+   */
+  readonly hostKey: string;
   readonly createdAt: number;
 };
 

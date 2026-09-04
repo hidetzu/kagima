@@ -41,6 +41,8 @@ export const CLOSE_UNAUTHORIZED = 4001;
 export const CLOSE_ROOM_FULL = 4002;
 export const CLOSE_BAD_MESSAGE = 4003;
 export const CLOSE_SILENT = 4004;
+/** ⚠ **The host ended the room.** ⚠ Not an error, and the wording the guest sees says so. */
+export const CLOSE_ROOM_CLOSED = 4005;
 
 const roomIdFromPath = (url: string): string | null => {
   const m = /^\/api\/rooms\/([^/?]+)\/signal(?:\?|$)/.exec(url);

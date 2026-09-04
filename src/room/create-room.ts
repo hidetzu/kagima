@@ -3,6 +3,7 @@
 // ⚠ **Everything this needs is injected.** ⚠ **Not for elegance** — ⚠ **because the two properties
 //   ⚠ that matter (a collision is handled; the id comes from a CSPRNG) cannot be shown against a
 //   ⚠ real generator.** ⚠ **A collision would have to be waited for, and waiting is not a test.**
+import { randomBytes } from "node:crypto";
 import { generatePassphrase } from "../passphrase/passphrase.ts";
 import { buildShareUrl, generateRoomId } from "./room-id.ts";
 import type { Room, RoomStore } from "./store.ts";
@@ -21,6 +22,8 @@ export const MAX_ID_ATTEMPTS = 8;
 export type CreateRoomDeps = {
   readonly newId: () => string;
   readonly newPassphrase: () => string;
+  /** ⚠ **CSPRNG.** ⚠ A guessable host key lets anyone end anyone's call. */
+  readonly newHostKey: () => string;
   readonly now: () => number;
 };
 
@@ -28,6 +31,7 @@ export type CreateRoomDeps = {
 export const defaultDeps: CreateRoomDeps = {
   newId: generateRoomId,
   newPassphrase: generatePassphrase,
+  newHostKey: () => randomBytes(32).toString("base64url"),
   now: Date.now,
 };
 
@@ -48,10 +52,11 @@ export const createRoom = (
   deps: CreateRoomDeps = defaultDeps,
 ): CreatedRoom => {
   const passphrase = asPassphrase(deps.newPassphrase());
+  const hostKey = deps.newHostKey();
 
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
     const id = deps.newId();
-    const room: Room = { id, passphrase, createdAt: deps.now() };
+    const room: Room = { id, passphrase, hostKey, createdAt: deps.now() };
     // ⚠ `add` refuses rather than overwrites, so a collision cannot silently steal a live room.
     if (store.add(room)) return { room, shareUrl: buildShareUrl(baseUrl, id) };
   }

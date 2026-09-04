@@ -16,6 +16,7 @@ import { after, test } from "node:test";
 import { type Context, handle } from "../src/server.ts";
 import { createRejectionCounter } from "../src/room/join.ts";
 import { createRateLimiter } from "../src/room/rate-limit.ts";
+import { createHub } from "../src/signaling/hub.ts";
 import { createRoomStore } from "../src/room/store.ts";
 
 const started: Array<() => void> = [];
@@ -34,6 +35,7 @@ const start = async (over: Partial<Context> = {}) => {
     secret: "a-secret-for-this-test",
     rejections: createRejectionCounter(),
     limiter: createRateLimiter({ now: Date.now }),
+    hub: createHub(),
     trustedSourceHeader: "",
     ...over,
   };
@@ -63,7 +65,12 @@ const join = (base: string, roomId: string, passphrase: string) =>
 
 const makeRoom = async (base: string) => {
   const res = await fetch(`${base}/api/rooms`, { method: "POST" });
-  return (await res.json()) as { roomId: string; passphrase: string; shareUrl: string };
+  return (await res.json()) as {
+    roomId: string;
+    passphrase: string;
+    shareUrl: string;
+    hostKey: string;
+  };
 };
 
 test("a room is created, and the passphrase is not in the share URL", async () => {
@@ -183,4 +190,61 @@ test("⚠ a room-creation response is never cached", async () => {
   const { base } = await start();
   const res = await fetch(`${base}/api/rooms`, { method: "POST" });
   assert.equal(res.headers.get("cache-control"), "no-store");
+});
+
+// ── closing a room ──────────────────────────────────────────────────────────
+
+const closeRoom = (base: string, roomId: string, hostKey: string) =>
+  fetch(`${base}/api/rooms/${roomId}`, { method: "DELETE", body: JSON.stringify({ hostKey }) });
+
+test("the host closes the room with the key it was given", async () => {
+  const { base } = await start();
+  const room = await makeRoom(base);
+  assert.equal((await closeRoom(base, room.roomId, room.hostKey)).status, 200);
+});
+
+test("⚠⚠ after closing, the room answers exactly like one that never existed", async () => {
+  // ⚠ `docs/adr/0005`: a closed room and an absent room are the same thing from outside.
+  const { base } = await start();
+  const room = await makeRoom(base);
+  await closeRoom(base, room.roomId, room.hostKey);
+
+  const closed = await observable(await join(base, room.roomId, room.passphrase));
+  const neverExisted = await observable(await join(base, "z".repeat(16), room.passphrase));
+  assert.deepEqual(closed, neverExisted, "a closed room is distinguishable from an absent one");
+});
+
+test("⚠ a wrong host key and an absent room give the same answer", async () => {
+  // ⚠ Otherwise this endpoint answers "does this room exist?" too.
+  const { base } = await start();
+  const room = await makeRoom(base);
+  const wrongKey = await observable(await closeRoom(base, room.roomId, "not-the-host-key"));
+  const absent = await observable(await closeRoom(base, "z".repeat(16), "not-the-host-key"));
+  assert.deepEqual(absent, wrongKey, "an absent room answers differently");
+  // ⚠ And the room is still there: a refused close must not close anything.
+  assert.equal((await join(base, room.roomId, room.passphrase)).status, 200);
+});
+
+test("⚠ the host key is not in the share URL, and is given only at creation", async () => {
+  const { base } = await start();
+  const room = await makeRoom(base);
+  assert.ok(!room.shareUrl.includes(room.hostKey), "the host key is in the share URL");
+  // ⚠ Joining gives a join token, never the host key.
+  const joined = (await (await join(base, room.roomId, room.passphrase)).json()) as Record<
+    string,
+    unknown
+  >;
+  assert.equal(joined["hostKey"], undefined, "joining handed out the host key");
+});
+
+test("⚠ closing drops what the room was holding", async () => {
+  // ⚠ The list is individual on purpose (kagima#10 AC 3): the passphrase, the host key and the
+  //   ⚠ participant list all go, and the way to see that is that nothing about the room answers.
+  const { base, ctx } = await start();
+  const room = await makeRoom(base);
+  assert.notEqual(ctx.store.get(room.roomId), undefined);
+  await closeRoom(base, room.roomId, room.hostKey);
+  assert.equal(ctx.store.get(room.roomId), undefined, "the room is still held");
+  assert.equal(ctx.store.size(), 0);
+  assert.equal(ctx.hub.peerCount(room.roomId), 0);
 });

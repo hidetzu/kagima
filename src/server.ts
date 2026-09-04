@@ -12,6 +12,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { logger } from "./log.ts";
 import { randomBytes } from "node:crypto";
 import { createRoom } from "./room/create-room.ts";
+import { isRoomId } from "./room/room-id.ts";
 import {
   type RejectionCounter,
   attemptJoin,
@@ -19,9 +20,9 @@ import {
   defaultCompare,
 } from "./room/join.ts";
 import { type RateLimiter, createRateLimiter } from "./room/rate-limit.ts";
-import { attachSignaling } from "./signaling/attach.ts";
+import { CLOSE_ROOM_CLOSED, attachSignaling } from "./signaling/attach.ts";
 import { serveStatic } from "./static.ts";
-import { createHub } from "./signaling/hub.ts";
+import { type Hub, createHub } from "./signaling/hub.ts";
 import { type RoomStore, createRoomStore } from "./room/store.ts";
 
 const DEFAULT_PORT = 8787;
@@ -34,12 +35,20 @@ const DEFAULT_BASE_URL = `http://localhost:${DEFAULT_PORT}`;
  */
 const MAX_BODY_BYTES = 1024;
 
+/**
+ * ⚠ **Compared against when there is no room to compare against.**
+ * ⚠ **Same trick as the join endpoint's decoy**: ⚠ **it keeps the unknown-room path costing the
+ * same as the wrong-key path.** ⚠ **It is not a secret and no room ever holds it.**
+ */
+const DECOY_HOST_KEY = "decoy-host-key-that-no-room-holds";
+
 export type Context = {
   readonly store: RoomStore;
   readonly baseUrl: string;
   readonly secret: string;
   readonly rejections: RejectionCounter;
   readonly limiter: RateLimiter;
+  readonly hub: Hub;
   /**
    * ⚠ **The header to read the caller's address from, when something we trust sets it.**
    *
@@ -94,6 +103,17 @@ const JOIN_REFUSED = {
   body: { error: "the room and passphrase did not match" },
 } as const;
 
+/**
+ * ⚠ **The one answer to every refused close.**
+ *
+ * ⚠ **Same reasoning as `JOIN_REFUSED`: a wrong host key and a room that is not there must not be
+ * distinguishable**, ⚠ **or this endpoint answers "does this room exist?" as well.**
+ */
+const CLOSE_REFUSED = {
+  status: 401,
+  body: { error: "that room could not be closed" },
+} as const;
+
 const readBody = async (req: IncomingMessage): Promise<string | null> => {
   let size = 0;
   const chunks: Buffer[] = [];
@@ -141,11 +161,57 @@ export const handle = async (
       // ⚠ The passphrase is returned here and nowhere else, ever. ⚠ The host cannot learn it any
       //   ⚠ other way (`docs/PRODUCT.md` § 3), and after this the server only compares it.
       //   ⚠ It is NOT in shareUrl — see room-id.ts.
-      send(res, 201, { roomId: room.id, shareUrl, passphrase: room.passphrase });
+      // ⚠ The host key is handed over here and never again, like the passphrase.
+      send(res, 201, {
+        roomId: room.id,
+        shareUrl,
+        passphrase: room.passphrase,
+        hostKey: room.hostKey,
+      });
     } catch {
       // ⚠ Nothing from the error reaches the response or a log line (`.claude/rules/security.md` § 2).
       send(res, 503, { error: "could not create a room just now, please try again" });
     }
+    return;
+  }
+
+  const roomPath = /^\/api\/rooms\/([^/]+)$/.exec(url.pathname);
+  if (roomPath && req.method === "DELETE") {
+    const raw = await readBody(req);
+    if (raw === null) {
+      send(res, 413, { error: "that request body is too large to be a close" });
+      return;
+    }
+    let hostKey: unknown;
+    try {
+      hostKey = (JSON.parse(raw) as { hostKey?: unknown }).hostKey;
+    } catch {
+      send(res, 400, { error: "the body is not JSON" });
+      return;
+    }
+    if (typeof hostKey !== "string") {
+      send(res, 400, { error: "the body needs a hostKey, as a string" });
+      return;
+    }
+
+    const roomId = decodeURIComponent(roomPath[1] as string);
+    const room = isRoomId(roomId) ? ctx.store.get(roomId) : undefined;
+    // ⚠ Exactly one comparison whatever the path, for the same reason the join endpoint has one:
+    //   ⚠ returning early for an unknown room makes the time saved the answer.
+    const matched = defaultCompare(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
+    if (room === undefined || !matched) {
+      send(res, CLOSE_REFUSED.status, CLOSE_REFUSED.body);
+      return;
+    }
+
+    // ⚠ The sockets first, so nobody is left holding a room that no longer exists.
+    ctx.hub.closeRoom(roomId, CLOSE_ROOM_CLOSED, "the host ended this room");
+    // ⚠ Then the room, and with it the passphrase, the host key and the participant list.
+    //   ⚠ `docs/adr/0005`: what is not held cannot leak.
+    ctx.store.close(roomId);
+    // ⚠ Says the room is over, and says nothing about who was in it.
+    logger.info("a room was closed by its host", { roomId });
+    send(res, 200, { closed: true });
     return;
   }
 
@@ -221,7 +287,12 @@ export const handle = async (
 
   send(res, 404, {
     error: "no such endpoint",
-    endpoints: ["POST /api/rooms", "POST /api/rooms/{roomId}/join", "GET /dev-call.html"],
+    endpoints: [
+      "POST /api/rooms",
+      "POST /api/rooms/{roomId}/join",
+      "DELETE /api/rooms/{roomId}",
+      "GET /dev-call.html",
+    ],
   });
 };
 
@@ -256,6 +327,7 @@ export const startServer = (
     secret: joinTokenSecret(),
     rejections: createRejectionCounter(),
     limiter: createRateLimiter({ now: Date.now }),
+    hub: createHub(),
     trustedSourceHeader,
   };
   const server = createServer((req, res) => {
@@ -264,7 +336,7 @@ export const startServer = (
   });
   // ⚠ The same process, the same port (`docs/adr/0002`). ⚠ Only HTTP and WebSocket go through
   //   ⚠ the tunnel, and media goes through neither (`docs/adr/0003`).
-  attachSignaling(server, { hub: createHub(), secret: ctx.secret });
+  attachSignaling(server, { hub: ctx.hub, secret: ctx.secret });
   server.listen(port, () => {
     logger.info("kagima is listening", { baseUrl, port });
     logger.info("rooms live in this process only — stopping it ends every room");

@@ -46,6 +46,17 @@
     document.getElementById("remote").srcObject = call.remoteStream;
     // ⚠ Exposed for the check to read. ⚠ The check reads frames, not this.
     globalThis.kagimaCall = call;
+
+    // ⚠ 4005 is the host ending the room. ⚠ It is not an error, and the wording says so
+    //   ⚠ (`CLAUDE.md` § 4-1: say what happened and what to do, not what broke).
+    transport.socket.addEventListener("close", (event) => {
+      if (event.code !== 4005) return;
+      // ⚠ Stop the tracks, not just the display. ⚠ A hidden video with a live track is a camera
+      //   ⚠ that is still on, and the tally light is all the user can see.
+      call.hangUp();
+      status.textContent = "the host ended this call. Nothing was kept. You can close this tab.";
+    });
+
     await call.start();
     status.textContent = "in the call";
     setInterval(() => {
