@@ -36,7 +36,10 @@ const deps = (over: Partial<Parameters<typeof attemptJoin>[3]> = {}) => ({
 
 test("a fresh token verifies for its own room", () => {
   const token = issueJoinToken("room-a", SECRET, NOW);
-  assert.deepEqual(verifyJoinToken(token, "room-a", SECRET, NOW), { ok: true });
+  const checked = verifyJoinToken(token, "room-a", SECRET, NOW);
+  assert.equal(checked.ok, true);
+  // ⚠ The session id comes back only after the signature has been checked.
+  if (checked.ok) assert.ok(checked.sessionId.length > 0);
 });
 
 test("⚠ a token is refused by a room it was not issued for", () => {
@@ -99,6 +102,14 @@ test("⚠ two tokens for one room in one millisecond differ", () => {
   assert.notEqual(issueJoinToken("room-a", SECRET, NOW), issueJoinToken("room-a", SECRET, NOW));
 });
 
+test("⚠ two tokens carry different session ids", () => {
+  // ⚠ A shared session id would make two participants replace each other on reconnect
+  //   (`src/signaling/hub.ts`).
+  const a = verifyJoinToken(issueJoinToken("room-a", SECRET, NOW), "room-a", SECRET, NOW);
+  const b = verifyJoinToken(issueJoinToken("room-a", SECRET, NOW), "room-a", SECRET, NOW);
+  assert.equal(a.ok && b.ok && a.sessionId !== b.sessionId, true);
+});
+
 test("⚠ nothing of the passphrase is inside the token", () => {
   const store = createRoomStore();
   const { room } = createRoom(store, BASE);
@@ -126,7 +137,7 @@ test("the right passphrase is exchanged for a token that verifies", () => {
   const outcome = attemptJoin(store, room.id, room.passphrase, deps());
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
-  assert.deepEqual(verifyJoinToken(outcome.token, room.id, SECRET, NOW), { ok: true });
+  assert.equal(verifyJoinToken(outcome.token, room.id, SECRET, NOW).ok, true);
 });
 
 test("the passphrase is normalised before comparing", () => {
