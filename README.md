@@ -21,8 +21,9 @@
 
 ```text
 CLAUDE.md                    どう働くか(English)
-package.json                 ⚠ npm run check の入口。⚠ ビルドステップは無い
-scripts/                     check runner(⚠ Node が .ts をそのまま実行する)
+package.json                 ⚠ npm run check の入口
+scripts/                     check runner / ⚠ build(⚠ ブラウザへはビルドした JS を配る)
+spike/                       ⚠ 測るためだけの Worker。⚠ 答え終わったら消える
 test/                        unit
 docs/
   PRODUCT.md                 ⚠ プロダクトの正本。何を作り、何を作らないか
