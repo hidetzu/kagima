@@ -128,8 +128,67 @@
 
     try {
       const transport = await connectSignaling(roomId, result.token);
+
+      // ⚠⚠ **Listen BEFORE anything slow. ⚠ The host page already says this; ⚠ this page did not.**
+      //
+      // ⚠ **`createCall` awaits `getUserMedia`, ⚠ which on a real phone waits for a person to tap
+      //   ⚠ "allow" — ⚠ seconds.** ⚠ **A refused join arrives about 5ms after the socket opens**
+      //   (⚠ measured: a third peer gets close 4002 at 5ms).
+      // ⚠ **So every listener attached after `createCall` misses it, ⚠ and the page carries on as
+      //   ⚠ though the socket were alive.**
+      // ⚠ **The diagnostics then reported `open throughout`** — ⚠ **which was not "it stayed open"
+      //   ⚠ but "we never saw it close".** ⚠ **Found on a real device** (kagima#40); ⚠ **fake
+      //   ⚠ cameras grant instantly, ⚠ so no browser check could ever have shown it.**
+      let connected = false;
+      let ending = null;
+      let call = null;
+      const render = () => {
+        // ⚠ The sentence is decided in src/status/status.ts (`CLAUDE.md` § 3: ⚠ one place).
+        $("status").textContent = guestStatus({ ending, connected });
+      };
+      // ⚠⚠ **Remembered, ⚠ not just forwarded.**
+      // ⚠ **Moving the listener earlier was half the fix.** ⚠ **The diagnostics is created after
+      //   ⚠ `getUserMedia`, ⚠ so a close that already happened has nobody to tell.**
+      // ⚠ **A browser check caught this: ⚠ the wording was right and the record was still empty.**
+      let noteSocketClosed = () => {};
+      let closedCode = null;
+
+      transport.socket.addEventListener("close", (e) => {
+        closedCode ??= e.code;
+        noteSocketClosed(e.code);
+        if (e.code === 4005) {
+          call?.hangUp();
+          ending = outranks(ending, "closed");
+          render();
+          return;
+        }
+        // ⚠⚠ **A refused join is not a dropped connection.**
+        // ⚠ **Rolling 4002 into "detached" told a person who never got in that "the call may still
+        //   ⚠ be running" — ⚠ it was not, ⚠ and it never started.** ⚠ **Their next move changes:**
+        //   ⚠ **waiting does not help; ⚠ the room is full** (`CLAUDE.md` § 4-1).
+        // ⚠ **This is the one refusal whose reason may be named: ⚠ the server said it outright,
+        //   ⚠ in the close code.** ⚠ **Nothing is being inferred.**
+        if (e.code === 4002) {
+          ending = outranks(ending, "room-full");
+          render();
+          return;
+        }
+        // ⚠ Not the room ending — ⚠ this connection went away, and the call may still be running.
+        //   ⚠ The tracks stay: media goes browser to browser and does not need us.
+        ending = outranks(ending, "detached");
+        render();
+      });
+
+      transport.onMessage((message) => {
+        if (message.type !== "peer-left") return;
+        // ⚠ Recoverable, and worded as such. ⚠ "切断されました" would read as a fault.
+        ending = outranks(ending, "peer-left");
+        connected = false;
+        render();
+      });
+
       // ⚠ The guest arrives second and knows the host is there, so the guest offers.
-      const call = await createCall({ transport, isOfferer: true });
+      call = await createCall({ transport, isOfferer: true });
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;
@@ -142,26 +201,18 @@
       transport.send({ type: "hello", nickname });
       await call.start();
 
-      // ⚠ ONE writer for this line, and every fact goes through it.
-      //   ⚠ Four handlers wrote it directly before, and nothing decided which was last —
-      //   ⚠ a `track` landing after "the other side left" would talk over it.
-      //   ⚠ CI caught exactly that on the host page; ⚠ this page had the same shape.
-      //   ⚠ `.claude/skills/change-review/SKILL.md` § 4.
-      let connected = false;
-      // ⚠ The endings, and they are not the same thing (kagima#11, kagima#16).
-      //   ⚠ Once one has happened it outranks "are we connected" — ⚠ it is the last thing known.
-      let ending = null;
-      const render = () => {
-        // ⚠ The sentence is decided in src/status/status.ts (`CLAUDE.md` § 3: ⚠ one place).
-        $("status").textContent = guestStatus({ ending, connected });
-      };
-
 
 
 
       // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.
       const diagnostics = createDiagnostics(call.pc);
-      transport.socket.addEventListener("close", (e) => diagnostics.noteSocketClosed(e.code));
+      // ⚠ Handed to the listener that was attached before `getUserMedia`. ⚠ Attaching a second
+      //   ⚠ listener here would miss exactly what the first one was moved up to catch.
+      noteSocketClosed = (code) => diagnostics.noteSocketClosed(code);
+      // ⚠ Replayed if it happened while the camera prompt was up. ⚠ The time it carries is when
+      //   ⚠ this started looking, ⚠ not when it happened — ⚠ which is honest: ⚠ it says the socket
+      //   ⚠ was already closed before there was anything to observe with.
+      if (closedCode !== null) diagnostics.noteSocketClosed(closedCode);
       const refreshDiagnostics = async () => {
         document.getElementById("diagnostics-text").textContent = await diagnostics.report();
       };
@@ -205,31 +256,23 @@
         render();
       });
 
-      call.pc.addEventListener("track", () => {
+      // ⚠⚠ **A frame, ⚠ not a negotiation event.**
+      //
+      // ⚠ **This used to hang off `track`.** ⚠ **`track` fires when the transceiver is created —
+      //   ⚠ in the middle of negotiation, ⚠ before any media moves.** ⚠ **So the screen could say
+      //   ⚠ "つながりました。" with zero frames decoded** — ⚠ **which is exactly the failure the
+      //   ⚠ final gate exists to catch** (`.claude/skills/verify/SKILL.md` § 3).
+      // ⚠ **The instrument was fixed for this same reason** (kagima#37). ⚠ **The screen was not.**
+      // ⚠ **The screen is the half a person believes.**
+      //
+      // ⚠ `loadeddata` on the element means a frame is there to show. ⚠ It is what the person
+      //   ⚠ actually sees, ⚠ and it is what the browser checks already assert (`videoWidth > 0`).
+      $("remote").addEventListener("loadeddata", () => {
+        // ⚠ `render` decides, and `ending` outranks this.
         connected = true;
         render();
       });
 
-      transport.socket.addEventListener("close", (e) => {
-        if (e.code === 4005) {
-          call.hangUp();
-          ending = outranks(ending, "closed");
-          render();
-          return;
-        }
-        // ⚠ Not the room ending — ⚠ this connection went away, and the call may still be running.
-        //   ⚠ The tracks stay: media goes browser to browser and does not need us.
-        ending = outranks(ending, "detached");
-        render();
-      });
-
-      transport.onMessage((message) => {
-        if (message.type !== "peer-left") return;
-        // ⚠ Recoverable, and worded as such. ⚠ "切断されました" would read as a fault.
-        ending = outranks(ending, "peer-left");
-        connected = false;
-        render();
-      });
     } catch (error) {
       console.warn("kagima: the call could not start", error);
       const failure = classifyMediaError(error);

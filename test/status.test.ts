@@ -11,6 +11,7 @@ import { type Ending, guestStatus, hostStatus, outranks } from "../src/status/st
 
 const ENDINGS: readonly Exclude<Ending, null>[] = [
   "closed",
+  "room-full",
   "peer-left",
   "detached",
   "unreachable",
@@ -83,6 +84,69 @@ test("⚠ every ending has its own sentence, and no two are the same", () => {
     const said = ENDINGS.map(status);
     assert.equal(new Set(said).size, said.length, `two endings read the same: ${said.join(" / ")}`);
     for (const one of said) assert.notEqual(one.trim(), "", "an ending has no sentence");
+  }
+});
+
+test("⚠⚠ a connection that was never admitted is not called a dropped one", () => {
+  // ⚠⚠ **Measured on a real device** (kagima#40): ⚠ **a third person opened the shared URL, ⚠ was
+  //   ⚠ refused with close 4002, ⚠ and was told "通話は続いているかもしれません。"**
+  // ⚠ **It was not. ⚠ It never started.** ⚠ **Waiting does not help; ⚠ the room is full.**
+  for (const said of [
+    guestStatus({ ending: "room-full", connected: false }),
+    hostStatus({ ending: "room-full", connected: false, guestName: null }),
+  ]) {
+    assert.match(said, /もう 2 人/, said);
+    assert.doesNotMatch(said, /続いているかもしれません/, said);
+    // ⚠ And it is not the room ending either.
+    assert.doesNotMatch(said, /終わりました|閉じました/, said);
+    // ⚠ It leaves a reason to come back: ⚠ the room may empty.
+    assert.match(said, /もう一度/, said);
+  }
+  // ⚠ It outranks `detached`, ⚠ because a drop cannot mask never having been let in.
+  assert.equal(outranks("room-full", "detached"), "room-full");
+  assert.equal(outranks("detached", "room-full"), "room-full");
+});
+
+// ── ⚠ the screen must not say connected before a frame ──────────────────────
+
+test("⚠⚠ neither page decides connected from a negotiation event", async () => {
+  // ⚠⚠ **`track` fires when the transceiver is created — ⚠ before any media moves.**
+  // ⚠ **The instrument was fixed for this reason** (kagima#37); ⚠ **the screen was not, ⚠ and the
+  //   ⚠ screen is the half a person believes.**
+  // ⚠ **A screen saying "つながりました。" with zero frames decoded is exactly the failure the
+  //   ⚠ final gate exists to catch.**
+  for (const page of ["public/index.html", "public/room.html"]) {
+    const code = (await readFile(page, "utf8")).replace(/^\s*\/\/.*$/gm, "");
+    assert.doesNotMatch(
+      code,
+      /addEventListener\("track"/,
+      `${page} still decides connected from the track event`,
+    );
+    assert.match(code, /addEventListener\("loadeddata"/, `${page} waits for no frame at all`);
+  }
+});
+
+test("⚠⚠ both pages listen before the camera prompt, and remember what arrived", async () => {
+  // ⚠⚠ **Measured on a real device** (kagima#40): ⚠ **a refused join arrives ~5ms after the
+  //   ⚠ socket opens, ⚠ while `getUserMedia` is still waiting for a person to tap "allow".**
+  // ⚠ **Every listener attached after that misses it, ⚠ and the page carries on as though the
+  //   ⚠ socket were alive.** ⚠ **The diagnostics then said `open throughout`** — ⚠ **which meant
+  //   ⚠ "we never saw it close", ⚠ not "it stayed open".**
+  // ⚠⚠ **Fake cameras grant instantly, ⚠ so no browser check could have found this.**
+  //   ⚠ **This one is held in source, ⚠ by order.**
+  for (const page of ["public/index.html", "public/room.html"]) {
+    const code = (await readFile(page, "utf8")).replace(/^\s*\/\/.*$/gm, "");
+    const listen = code.indexOf('socket.addEventListener("close"');
+    const slow = code.indexOf("await createCall");
+    assert.ok(listen >= 0, `${page} never listens for the socket closing`);
+    assert.ok(slow >= 0, `${page} does not await createCall — this check needs rewriting`);
+    assert.ok(
+      listen < slow,
+      `${page} listens for the close only after getUserMedia (${listen} > ${slow})`,
+    );
+    // ⚠ Moving the listener is half of it. ⚠ ⚠ The diagnostics is built after `createCall`, ⚠ so
+    //   ⚠ a close that already happened has nobody to tell unless it was remembered.
+    assert.match(code, /closedCode/, `${page} forwards the close but does not remember it`);
   }
 });
 

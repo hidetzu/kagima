@@ -52,6 +52,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "the retired debug mode staying gone even when its flag is set",
   },
   {
+    name: "third-person",
+    sees: "a third person being told the room is full, and the two already in it carrying on",
+  },
+  {
     name: "host-closes",
     sees: "the guest's tracks ending when the host closes the room",
   },
