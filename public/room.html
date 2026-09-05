@@ -28,8 +28,16 @@
   <form id="enter">
     <label for="passphrase">合言葉</label>
     <!-- ⚠ autocomplete off: the passphrase is for this room only and must not be remembered. -->
+    <!--
+      ⚠⚠ inputmode / autocorrect: ⚠ the words are romaji (`akikaze`, `amagumo`), ⚠ and a phone
+        ⚠ sitting in a Japanese IME turns them into kana. ⚠ Normalisation drops everything that is
+        ⚠ not a-z, ⚠ so kana does not become a wrong passphrase — ⚠ it becomes an empty one, ⚠ and
+        ⚠ the refusal is deliberately indistinguishable from any other (`rules/security.md` § 3).
+      ⚠ **So the person is told nothing, and there is nothing to work out.**
+      ⚠ These two attributes ask for a Latin keyboard before that happens.
+    -->
     <input id="passphrase" name="passphrase" autocomplete="off" autocapitalize="off"
-           spellcheck="false" required />
+           autocorrect="off" inputmode="latin" spellcheck="false" required />
 
     <label for="nickname">ニックネーム</label>
     <input id="nickname" name="nickname" autocomplete="off" maxlength="24" required />
@@ -67,6 +75,7 @@
   import { createCall, classifyMediaError } from "/client/call.ts";
   import { createDiagnostics } from "/client/diagnostics.ts";
   import { guestStatus, outranks } from "/status/status.ts";
+  import { normalizePassphrase } from "/passphrase/normalize.ts";
   import { connectSignaling } from "/client/transport.ts";
 
   const $ = (id) => document.getElementById(id);
@@ -80,6 +89,27 @@
     // ⚠ Read once, held in a local, never stored anywhere. ⚠ Not in the URL, not in storage.
     const passphrase = $("passphrase").value;
     const nickname = $("nickname").value.trim();
+
+    // ⚠⚠ **Said here, ⚠ before anything is sent, ⚠ and only about what this person typed.**
+    //
+    // ⚠ **Grounds: the server's refusal is deliberately the same for a wrong passphrase, an
+    //   ⚠ unknown room and a rate limit** (`.claude/rules/security.md` § 3). ⚠ **That is right,
+    //   ⚠ and it means the server can never say "you typed kana".**
+    // ⚠ **A phone left in a Japanese IME produces exactly that**, ⚠ and normalisation drops it to
+    //   ⚠ nothing — ⚠ so the person gets the one flat refusal and no way to work out why.
+    //
+    // ⚠ **This leaks nothing: ⚠ it tells the person about their own keystrokes, ⚠ which they
+    //   ⚠ already know.** ⚠ **Nothing has been sent at this point, ⚠ and nothing is sent if this
+    //   ⚠ fires** — ⚠ **which also means a mistyped alphabet never spends the room's rate limit.**
+    // ⚠ **The rule is the server's own** (`/passphrase/normalize.ts`), ⚠ **imported, not copied** —
+    //   ⚠ a second copy would drift and then lie.
+    if (normalizePassphrase(passphrase) === "") {
+      $("error").textContent =
+        "合言葉は英字で入力します。キーボードを英字に切り替えて、もう一度お試しください。";
+      $("passphrase").value = "";
+      $("enter-button").disabled = false;
+      return;
+    }
 
     const result = await join(roomId, passphrase);
 
