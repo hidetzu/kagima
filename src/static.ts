@@ -36,6 +36,7 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
     "/client/diagnostics.ts",
     { file: "src/client/diagnostics.ts", type: "text/javascript; charset=utf-8" },
   ],
+  ["/status/status.ts", { file: "src/status/status.ts", type: "text/javascript; charset=utf-8" }],
   [
     "/diagnostics/report.ts",
     { file: "src/diagnostics/report.ts", type: "text/javascript; charset=utf-8" },
