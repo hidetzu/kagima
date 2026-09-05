@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, test } from "node:test";
 import { type Browser, type Page, chromium } from "playwright";
+import { WORD_COUNT } from "../src/passphrase/passphrase.ts";
 import { startServer } from "../src/server.ts";
 import { titleOf } from "./scenarios.ts";
 
@@ -644,35 +645,27 @@ test(titleOf("diagnostics"), async () => {
   await guest.context.close();
 });
 
-test(titleOf("field-test-mode"), async () => {
-  // ⚠⚠ **A mode that costs two promises** (`docs/adr/0011`). ⚠ **So this case checks both what it
-  //   ⚠ does when asked for, ⚠ and that it is absent when it was not.**
+test(titleOf("field-test-mode-is-gone"), async () => {
+  // ⚠⚠ **A time-limited feature is only time-limited if something notices when the time is up.**
   //
-  // ⚠ **Started as a child process, ⚠ not in this one.** ⚠ **The flag is read once at startup on
-  //   ⚠ purpose — ⚠ a mode that can turn itself on mid-run is one nobody can reason about — ⚠ so
-  //   ⚠ the only honest way to exercise it is through the real entry point.**
-  const { browser: b, base: offBase } = await ready();
-
-  // ⚠⚠ First: without the flag, ⚠ these paths do not exist at all.
-  //   ⚠ Not "exist and refuse" — ⚠ that would answer "is this a field-test server?" for free.
-  for (const path of ["/api/field-test", "/api/observations"]) {
-    const status = await b
-      .newContext()
-      .then((c) => c.request.get(`${offBase}${path}`))
-      .then((r) => r.status());
-    assert.equal(status, 404, `${path} exists on a server that was not asked for the mode`);
-  }
-  console.log("  observed: without the flag, neither field-test path exists");
-
+  // ⚠ **`docs/adr/0011` turned on a mode that cost two promises, ⚠ for the kagima#16 field test.**
+  // ⚠ **It said, in its own text, ⚠ that "消し忘れたので残った" is not a reason to keep it.**
+  // ⚠ **kagima#16 is closed** (`docs/adr/0013`), ⚠ **so the mode is gone** (`docs/adr/0014`).
+  //
+  // ⚠⚠ **This case is the proof, ⚠ and it is deliberately hostile: ⚠ it sets the flag.**
+  // ⚠ **Checking that the mode is off by default would prove nothing** — ⚠ **it was always off by
+  //   ⚠ default.** ⚠ **What must be true now is that the flag does nothing at all.**
+  const { base: plainBase } = await ready();
   const port = nextPort++;
-  const fieldBase = `http://127.0.0.1:${port}`;
+  const flaggedBase = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["src/server.ts"], {
     env: {
       ...process.env,
+      // ⚠ The retired flag, set on purpose.
       KAGIMA_FIELD_TEST: "1",
       PORT: String(port),
-      PUBLIC_BASE_URL: fieldBase,
-      JOIN_TOKEN_SECRET: "a-field-test-secret",
+      PUBLIC_BASE_URL: flaggedBase,
+      JOIN_TOKEN_SECRET: "a-secret-for-a-mode-that-is-gone",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -683,55 +676,38 @@ test(titleOf("field-test-mode"), async () => {
     for (let i = 0; i < 100 && !said.join("").includes("listening"); i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
+    const startup = said.join("");
+    assert.match(startup, /listening/, `the server did not start:\n${startup}`);
 
-    // ⚠ The banner, ⚠ because a mode that costs a promise must announce itself rather than wait
-    //   ⚠ to be discovered by whoever reads the passphrase.
-    const banner = said.join("");
-    assert.match(banner, /KAGIMA_FIELD_TEST=1/, `no banner in:\n${banner}`);
-    assert.match(banner, /passphrase is 2 characters/, "the banner hides the short passphrase");
-    assert.match(banner, /collected in memory/, "the banner hides that reports are collected");
+    // ⚠ Nothing announces a mode, ⚠ because there is no mode to announce.
+    assert.doesNotMatch(startup, /KAGIMA_FIELD_TEST/, `the flag still speaks:\n${startup}`);
+    assert.doesNotMatch(startup, /NOT how kagima is meant to run/, startup);
 
-    const host = await openHost(b, fieldBase);
-    // ⚠ The whole reason the mode exists: ⚠ this is what a person types on a phone.
-    assert.match(host.passphrase, /^[a-z]{2}$/, `not a short passphrase: ${host.passphrase}`);
-    console.log(`  observed: the passphrase is ${host.passphrase.length} characters`);
+    // ⚠⚠ The passphrase is the promise the mode was spending. ⚠ It is back to four words.
+    const rooms = await fetch(`${flaggedBase}/api/rooms`, { method: "POST" });
+    const made = (await rooms.json()) as { passphrase: string };
+    assert.equal(
+      made.passphrase.split("-").length,
+      WORD_COUNT,
+      `the flag still shortens the passphrase: ${made.passphrase.length} characters`,
+    );
+    console.log(`  observed: with the flag set, the passphrase is still ${WORD_COUNT} words`);
 
-    const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
-    await waitForFrames(host.page, "the host");
-    await waitForFrames(guest.page, "the guest");
-
-    // ⚠⚠ Both sides, collected without anybody copying anything.
-    //   ⚠ The last run recorded one end because copying by hand is what stopped it.
-    const collected = async (): Promise<string> => {
-      const context = await b.newContext();
-      const r = await context.request.get(`${fieldBase}/api/observations`);
-      return r.text();
-    };
-    let text = "";
-    for (let i = 0; i < 60; i++) {
-      text = await collected();
-      if (text.includes("── host") && text.includes("── guest")) break;
-      await new Promise((r) => setTimeout(r, 500));
+    // ⚠⚠ And the routes it added are gone — ⚠ with the flag set, on both a flagged and a plain
+    //   ⚠ server. ⚠ A route that answers anything but 404 is a route that still exists.
+    for (const origin of [flaggedBase, plainBase]) {
+      for (const path of ["/api/field-test", "/api/observations"]) {
+        const got = await fetch(`${origin}${path}`);
+        assert.equal(got.status, 404, `${path} still exists on ${origin}`);
+        const posted = await fetch(`${origin}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ roomId: "x", side: "host", report: "x" }),
+        });
+        assert.equal(posted.status, 404, `POST ${path} still exists on ${origin}`);
+      }
     }
-    // ⚠ The server's own log goes into the failure, ⚠ so a refusal says why rather than
-    //   ⚠ leaving the next reader to reproduce it.
-    const detail = `${text}\n      ── what the server said ──\n      ${said.join("").split("\n").slice(-12).join("\n      ")}`;
-    assert.match(text, /── host/, `the host's observation was not collected:\n${detail}`);
-    assert.match(text, /── guest/, `the guest's observation was not collected:\n${text}`);
-    assert.match(text, /kagima field-test observation/);
-    console.log("  observed: both sides' reports were collected, with nobody copying anything");
-
-    // ⚠ And the collected text is still the thing that may be pasted in public.
-    for (const pattern of [
-      /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
-      /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
-      /[0-9a-f-]{20,}\.local\b/i,
-    ]) {
-      assert.doesNotMatch(text, pattern, `an address reached the collected reports:\n${text}`);
-    }
-
-    await host.context.close();
-    await guest.context.close();
+    console.log("  observed: with the flag set, neither route exists, for GET or POST");
   } finally {
     child.kill();
   }

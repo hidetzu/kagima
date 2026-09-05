@@ -48,8 +48,8 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "the field-test report carrying candidate types out of a real call, and no address",
   },
   {
-    name: "field-test-mode",
-    sees: "the debug mode's short passphrase and collected reports, and its absence without the flag",
+    name: "field-test-mode-is-gone",
+    sees: "the retired debug mode staying gone even when its flag is set",
   },
   {
     name: "host-closes",

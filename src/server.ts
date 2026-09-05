@@ -11,15 +11,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { logger } from "./log.ts";
 import { randomBytes } from "node:crypto";
-import { createRoom, defaultDeps } from "./room/create-room.ts";
-import {
-  FIELD_TEST,
-  FIELD_TEST_ENV,
-  type ObservationStore,
-  createObservationStore,
-  fieldTestBanner,
-  generateShortPassphrase,
-} from "./field-test.ts";
+import { createRoom } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
 import {
   type RejectionCounter,
@@ -44,15 +36,6 @@ const DEFAULT_BASE_URL = `http://localhost:${DEFAULT_PORT}`;
 const MAX_BODY_BYTES = 1024;
 
 /**
- * ⚠ **A diagnostic report is longer than anything the product itself accepts** (`docs/adr/0011`).
- *
- * ⚠ **It is a separate number rather than a raised `MAX_BODY_BYTES`** — ⚠ **raising the shared one
- * would widen every route to suit a debug route, ⚠ and the join route's small body is part of how
- * little it can be made to do.**
- */
-const MAX_OBSERVATION_BYTES = 8192;
-
-/**
  * ⚠ **Compared against when there is no room to compare against.**
  * ⚠ **Same trick as the join endpoint's decoy**: ⚠ **it keeps the unknown-room path costing the
  * same as the wrong-key path.** ⚠ **It is not a secret and no room ever holds it.**
@@ -74,8 +57,6 @@ export type Context = {
   readonly rejections: RejectionCounter;
   readonly limiter: RateLimiter;
   readonly hub: Hub;
-  /** ⚠ **Field-test only.** ⚠ In-process memory, ⚠ never a file (`docs/adr/0011`). */
-  readonly observations: ObservationStore;
   /**
    * ⚠ **The header to read the caller's address from, when something we trust sets it.**
    *
@@ -147,7 +128,7 @@ const readBody = async (req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<s
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
     // ⚠ Stop reading, rather than read it all and then object.
-    if (size > limit) return null;
+    if (size > MAX_BODY_BYTES) return null;
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -177,12 +158,6 @@ export const handle = async (
   // ⚠ Only GET reaches the static map, and only by an exact name from a closed list.
   if (req.method === "GET" && serveStatic(url.pathname, res)) return;
 
-  // ⚠ How a page learns the mode is on. ⚠ Absent when it is off, ⚠ so nothing is announced.
-  if (FIELD_TEST && req.method === "GET" && url.pathname === "/api/field-test") {
-    send(res, 200, { on: true });
-    return;
-  }
-
   if (url.pathname === "/api/rooms") {
     if (req.method !== "POST") {
       res.setHeader("allow", "POST");
@@ -190,12 +165,7 @@ export const handle = async (
       return;
     }
     try {
-      // ⚠ The only place the generator is swapped, ⚠ and only when the flag was read at startup.
-      const { room, shareUrl } = createRoom(
-        ctx.store,
-        ctx.baseUrl,
-        FIELD_TEST ? { ...defaultDeps, newPassphrase: generateShortPassphrase } : defaultDeps,
-      );
+      const { room, shareUrl } = createRoom(ctx.store, ctx.baseUrl);
       // ⚠ The passphrase is returned here and nowhere else, ever. ⚠ The host cannot learn it any
       //   ⚠ other way (`docs/PRODUCT.md` § 3), and after this the server only compares it.
       //   ⚠ It is NOT in shareUrl — see room-id.ts.
@@ -210,70 +180,6 @@ export const handle = async (
       // ⚠ Nothing from the error reaches the response or a log line (`.claude/rules/security.md` § 2).
       send(res, 503, { error: "could not create a room just now, please try again" });
     }
-    return;
-  }
-
-  // ⚠⚠ **Field-test only.** ⚠ **When the flag is off these paths do not exist at all** —
-  //   ⚠ **not "exist and refuse", ⚠ which would answer "is this a field-test server?" for free.**
-  if (FIELD_TEST && url.pathname === "/api/observations") {
-    if (req.method === "GET") {
-      // ⚠ Plain text, ⚠ because the point is that the owner reads both devices in one place.
-      res.writeHead(200, {
-        "content-type": "text/plain; charset=utf-8",
-        "cache-control": "no-store",
-      });
-      const held = ctx.observations.all();
-      res.end(
-        held.length === 0
-          ? "no observations yet\n"
-          : held
-              .map((o) => `── ${o.side} — room ${o.roomId} — held at ${o.at}\n${o.report}\n`)
-              .join("\n"),
-      );
-      return;
-    }
-    if (req.method !== "POST") {
-      res.setHeader("allow", "GET, POST");
-      send(res, 405, { error: "an observation is sent with POST" });
-      return;
-    }
-    const body = await readBody(req, MAX_OBSERVATION_BYTES);
-    if (body === null) {
-      send(res, 413, { error: "that request body is too large to be an observation" });
-      return;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      send(res, 400, { error: "the body is not JSON" });
-      return;
-    }
-    const o = parsed as { roomId?: unknown; side?: unknown; report?: unknown };
-    if (
-      typeof o.roomId !== "string" ||
-      typeof o.side !== "string" ||
-      typeof o.report !== "string"
-    ) {
-      send(res, 400, { error: "an observation needs roomId, side and report, as strings" });
-      return;
-    }
-    // ⚠ The side is a label the page chose, ⚠ so it goes through a closed set rather than
-    //   ⚠ straight into a log line and a page of text.
-    const side = o.side === "host" || o.side === "guest" ? o.side : "other";
-    const refused = ctx.observations.put({
-      roomId: isRoomId(o.roomId) ? o.roomId : "not-a-room-id",
-      side,
-      report: o.report,
-      at: Date.now(),
-    });
-    if (refused !== null) {
-      // ⚠ Says what was wrong, ⚠ never what was sent.
-      logger.warn("an observation was refused", { why: refused, side });
-      send(res, 400, { error: refused });
-      return;
-    }
-    send(res, 200, { kept: true });
     return;
   }
 
@@ -430,7 +336,6 @@ export const startServer = (
     rejections: createRejectionCounter(),
     limiter: createRateLimiter({ now: Date.now }),
     hub: createHub(),
-    observations: createObservationStore(),
     trustedSourceHeader,
   };
   const server = createServer((req, res) => {
@@ -465,9 +370,6 @@ export const startServer = (
   server.listen(port, () => {
     logger.info("kagima is listening", { baseUrl, port });
     logger.info("rooms live in this process only — stopping it ends every room");
-    // ⚠⚠ Said last, ⚠ so it is the line still on screen. ⚠ A mode that costs a promise announces
-    //   ⚠ itself; ⚠ it does not wait to be discovered by whoever reads the passphrase.
-    for (const line of FIELD_TEST ? fieldTestBanner() : []) logger.warn(line);
   });
 
   return {
