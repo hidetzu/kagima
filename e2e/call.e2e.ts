@@ -13,6 +13,7 @@
 //   ⚠ `framesDecoded` off the receiver's own stats, and the video element's `videoWidth`.**
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { type Socket, createConnection, createServer as createTcpServer } from "node:net";
 import { after, test } from "node:test";
 import { type Browser, type Page, chromium } from "playwright";
 import { WORD_COUNT } from "../src/passphrase/passphrase.ts";
@@ -41,6 +42,7 @@ let browser: Browser | undefined;
 //   ⚠ failing assertion keeps the process alive, and the run hangs instead of reporting.
 const browsers: Browser[] = [];
 const servers: Array<ReturnType<typeof startServer>> = [];
+const proxies: Array<ReturnType<typeof createTcpServer>> = [];
 
 const launch = async (args: string[]): Promise<Browser> => {
   const b = await chromium.launch({ args });
@@ -51,6 +53,7 @@ const launch = async (args: string[]): Promise<Browser> => {
 after(async () => {
   for (const b of browsers) await b.close().catch(() => {});
   for (const s of servers) s.close();
+  for (const p of proxies) p.close();
 });
 
 /**
@@ -71,6 +74,65 @@ const ready = async (): Promise<{
   await new Promise((r) => setTimeout(r, 200));
   browser ??= await launch(CHROMIUM_ARGS);
   return { browser, base, server: s };
+};
+
+/**
+ * ⚠⚠ **A server with the network in front of it, ⚠ so the network can be taken away.**
+ *
+ * ⚠ **Grounds: signalling going away is one of kagima's central claims** (`docs/adr/0010`) —
+ * ⚠ **media goes browser to browser and does not need us, ⚠ so the tracks must stay.**
+ *
+ * ⚠ **It used to be checked by calling `stopAnswering()` on the server object, ⚠ from inside the
+ * same process.** ⚠ **That works only while the server is a Node object this process is holding**
+ * — ⚠ **and kagima is moving to Worker + Durable Objects** (`docs/adr/0015`, kagima#49).
+ * ⚠ **A check that cannot survive the port would have quietly stopped covering the claim.**
+ *
+ * ⚠ **So the drop happens in front of the server instead: ⚠ a plain TCP proxy the browsers connect
+ * through, ⚠ closed on demand.** ⚠ **Nothing inside the server is reached, ⚠ nothing is added to
+ * the product for the sake of a test** (⚠ **the trap `docs/adr/0011` and `0014` already cost us**),
+ * ⚠ **and it is closer to what actually happens: ⚠ the network goes, not the process.**
+ *
+ * ⚠ **Media does not pass through here.** ⚠ **It never touches us at all** (`docs/adr/0001`).
+ */
+const behindAProxy = async (): Promise<{ base: string; dropTheNetwork: () => void }> => {
+  const upstream = nextPort++;
+  const front = nextPort++;
+  const base = `http://127.0.0.1:${front}`;
+
+  // ⚠ The server is told the front's address, ⚠ so the URL a host hands over points at the proxy.
+  process.env["JOIN_TOKEN_SECRET"] = "an-end-to-end-secret";
+  const s = startServer(upstream, base);
+  servers.push(s);
+
+  const live: Socket[] = [];
+  const proxy = createTcpServer((from) => {
+    const to = createConnection({ host: "127.0.0.1", port: upstream });
+    live.push(from, to);
+    from.pipe(to);
+    to.pipe(from);
+    // ⚠ Both halves die together, ⚠ or a half-open socket keeps the run alive.
+    const bothGo = () => {
+      from.destroy();
+      to.destroy();
+    };
+    from.on("error", bothGo);
+    to.on("error", bothGo);
+    from.on("close", bothGo);
+    to.on("close", bothGo);
+  });
+  proxies.push(proxy);
+  await new Promise<void>((r) => proxy.listen(front, "127.0.0.1", r));
+  await new Promise((r) => setTimeout(r, 200));
+
+  return {
+    base,
+    dropTheNetwork() {
+      // ⚠ Stop accepting, ⚠ and take away what is already open. ⚠ No close frame, no code —
+      //   ⚠ from the browser this is the network going, ⚠ which is what it is.
+      proxy.close();
+      for (const socket of live) socket.destroy();
+    },
+  };
 };
 
 const text = (page: Page, id: string): Promise<string> =>
@@ -473,14 +535,17 @@ test(titleOf("signalling-drops"), async () => {
   //
   // ⚠ This case exists because a mutation walked past every other one: stopping the tracks when
   //   ⚠ the socket closed broke nothing, because nothing was watching that path.
-  const { browser: b, base, server: s } = await ready();
+  const { browser: b } = await ready();
+  const { base, dropTheNetwork } = await behindAProxy();
   const host = await openHost(b, base);
   const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
   await waitForFrames(host.page, "the host");
 
-  // ⚠ kagima goes away. ⚠ Not a close, not a room ending — ⚠ the process simply stops answering,
-  //   ⚠ which is what a restart looks like from a browser (`docs/adr/0010`).
-  s.stopAnswering();
+  // ⚠ kagima goes away. ⚠ Not a close, not a room ending — ⚠ the network in front of it is taken
+  //   ⚠ away, which is what a restart or a dropped link looks like from a browser
+  //   (`docs/adr/0010`). ⚠ Nothing inside the server is touched, ⚠ so this survives the port
+  //   ⚠ to Worker + Durable Objects (kagima#49).
+  dropTheNetwork();
 
   await host.page.waitForFunction(
     () => (document.getElementById("status")?.textContent ?? "").includes("切れました"),

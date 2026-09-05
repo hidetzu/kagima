@@ -373,6 +373,58 @@ Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった�
 | **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **ブラウザに配る `.ts` をどう作るか** — ⚠ **第二のビルドシステムを受け入れる形を決める** | AI + Owner |
 | **3** | [#49](https://github.com/hidetzu/kagima/issues/49) | ⚠ **`signalling-drops` 相当をどう検査するか** — ⚠ **検証可能性を落として移らない** | AI |
 
+### ⚠⚠ 調べて分かった、⚠ spike が見落としていたこと(2026-09-05)
+
+⚠ **出所: Cloudflare の公開ドキュメント。⚠ 参照日 2026-09-05。**
+⚠ **kagima についての測定ではない。**
+
+| 引用元 | ⚠ 書かれていること |
+|---|---|
+| Durable Objects lifecycle | ⚠ **10 秒アイドルで hibernate し、⚠ in-memory state は破棄される。** ⚠ **hibernate できない状態でも 70〜140 秒で完全に evict される** |
+| 同 | ⚠ **「Durable Objects may shut down at any time due to deployments, inactivity, or runtime decisions」** |
+| WebSocket Hibernation | ⚠ **「In-memory state is reset」。** ⚠ 残すなら `serializeAttachment` か Storage API |
+| Pricing | ⚠ **Free plan でも DO は使える**(⚠ **ただし SQLite-backed のみ**)。⚠ Requests 100,000/day、⚠ Duration 13,000 GB-s/day |
+| 同 | ⚠ **hibernation を使わないと、⚠ 接続 1 本につき最大 15 分、⚠ 入力が無くても duration が課金される** |
+
+### ⚠⚠ これが意味すること
+
+⚠ **「DO のインスタンスメモリだけに置く」は、⚠ 「1 つの Node プロセスのメモリに置く」と等価ではない。**
+
+```text
+Node    ⚠ プロセスが生きているあいだ、⚠ 状態は必ずある
+DO      ⚠ 10 秒で消えうる。⚠ 「いつでも落ちうる」と明記されている
+```
+
+⚠ **kagima はルームを作ってから合言葉が入るまで数分かかる**
+(⚠ **実測: `waited alone` が 4〜5 分**、[kagima#40](https://github.com/hidetzu/kagima/issues/40))。
+⚠ **その間に DO は消える。** ⚠ **ルームごと消える。**
+
+⚠⚠ **spike で create → join が通ったのは、⚠ 数秒で叩いたからである。**
+⚠ **速すぎて、⚠ この欠陥を踏まなかった。** ⚠ **「動いた」は「正しい」ではない。**
+
+### ⚠ so #47 の答えは金額ではない
+
+⚠ **問いは「いくらか」ではなく、⚠ 「duration を払うか、⚠ 何かを書くか」である。**
+
+| 選ぶもの | ⚠ 代償 |
+|---|---|
+| ⚠ **hibernate しない** | ⚠ **通話のあいだ duration が課金される。** ⚠ **そして create → join の待ち時間には効かない** — ⚠ **WebSocket がまだ無いので、⚠ 70〜140 秒で evict される** |
+| ⚠ **Storage に書く** | ⚠ **[`adr/0005`](adr/0005-keep-room-state-in-process-memory-only.md) に正面から反する** |
+| ⚠ **合言葉を持たない設計にする** | ⚠ **後述。** ⚠ **素朴な案は security を壊す** |
+
+⚠ **1 番目は「金を払えば済む」ではない。** ⚠ **待ち時間の evict は、⚠ 払っても防げない。**
+
+### ⚠ 却下した案(⚠ 素朴で、⚠ そして危険なので先に書く)
+
+⚠ **「ルーム id に合言葉の署名を埋め込み、⚠ DO は何も持たない」。**
+
+⚠ **これは駄目である。** ⚠ **URL を持つ者が、⚠ 合言葉のダイジェストをオフラインで総当たりできる。**
+⚠ **合言葉は 28 bit しかなく、⚠ それが安全なのはレート制限が前に立っているからである**
+([`../.claude/rules/security.md`](../.claude/rules/security.md) § 1)。
+⚠ **オフラインにした瞬間、⚠ レート制限は無関係になる。**
+
+⚠ **「合言葉の長さで安全性を論じない」という規則が、⚠ そのままここに効く。**
+
 ### ⚠ 測っていないこと
 - ⚠ **本番の Cloudflare 上での挙動。** ⚠ **ローカルの `workerd` で見たことしか知らない。**
 - ⚠ **DO が退避されたときルームがどう見えるか。** ⚠ **強制する方法を用意していない。**
