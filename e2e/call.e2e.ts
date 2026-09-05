@@ -12,6 +12,7 @@
 //   ⚠ exists to catch** (`.claude/skills/verify/SKILL.md` § 3). ⚠ **So the assertion reads
 //   ⚠ `framesDecoded` off the receiver's own stats, and the video element's `videoWidth`.**
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { after, test } from "node:test";
 import { type Browser, type Page, chromium } from "playwright";
 import { startServer } from "../src/server.ts";
@@ -364,6 +365,13 @@ test(titleOf("host-screen"), async () => {
   // ⚠ Nothing that copies both. ⚠ Read off the clipboard, not off the labels — ⚠ a mutation that
   //   ⚠ added a working "copy both" button walked straight past the label version of this.
   await host.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // ⚠ Every `<details>` opened first, so a control hidden inside one is still swept.
+  //   ⚠ The diagnostics panel is collapsed, ⚠ and its copy button was invisible to this check
+  //   ⚠ the moment it was added — ⚠ a new copy control appearing in exactly the place this
+  //   ⚠ check cannot see is how the check quietly stops covering the page.
+  await page.$$eval("details", (all) => {
+    for (const d of all) d.open = true;
+  });
   const clickable = await page.$$eval("button", (buttons) =>
     buttons.map((b2) => b2.id).filter((id) => id !== "create" && id !== "close"),
   );
@@ -493,4 +501,238 @@ test(titleOf("signalling-drops"), async () => {
 
   await host.context.close();
   await guest.context.close();
+});
+
+test(titleOf("diagnostics"), async () => {
+  // ⚠⚠ **The instrument the Owner will carry into the field** (`docs/FIELD-TEST.md`).
+  //
+  // ⚠ **`test/diagnostics.test.ts` checks the formatter by handing it addresses.** ⚠ **That is
+  //   ⚠ the wall; ⚠ this is the wall in place** — ⚠ **a real `RTCPeerConnection`, real ICE, real
+  //   ⚠ `getStats()`, and the collector in between that the unit test never runs.**
+  // ⚠ **The collector is where an address would actually come from, so it is checked here.**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+
+  // ⚠⚠ **The host is left alone on purpose, and the number below is why.**
+  //
+  // ⚠ **A first real observation reported `ms to 1st frame: 341889`** — ⚠ **which was the host
+  //   ⚠ waiting nearly six minutes for a guest, ⚠ not anything about the connection.**
+  // ⚠ **Without this wait, host and guest join within milliseconds of each other and the defect
+  //   ⚠ is invisible** — ⚠ **which is exactly why it survived to the field.**
+  const ALONE_MS = 3_000;
+  await host.page.waitForTimeout(ALONE_MS);
+
+  const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
+  await waitForFrames(host.page, "the host");
+  await waitForFrames(guest.page, "the guest");
+
+  const shown = async (page: Page): Promise<string> => {
+    // ⚠ The panel refreshes on a timer; ⚠ waited for rather than sampled, for the same reason
+    //   ⚠ `waitForPicture` is (this suite has been bitten by sampling once already).
+    // ⚠ **Waited on a fact that only a live call produces, not on a label.** ⚠ The first version
+    //   ⚠ waited for the word "selected", ⚠ which the empty report also contains — ⚠ so it read
+    //   ⚠ the panel before it had anything in it and reported that as the instrument's output.
+    await page.waitForFunction(
+      () =>
+        /frames decoded:\s*[1-9]/.test(
+          document.getElementById("diagnostics-text")?.textContent ?? "",
+        ),
+      undefined,
+      { timeout: 20_000 },
+    );
+    return text(page, "diagnostics-text");
+  };
+  const hostReport = await shown(host.page);
+  const guestReport = await shown(guest.page);
+  console.log(`  observed: the host's report reads:\n${hostReport.replace(/^/gm, "    | ")}`);
+
+  // ⚠⚠ **The positive control, and the case turns on it.**
+  //
+  // ⚠ **Without it, "no address in the report" would also pass in a world where there were no
+  //   ⚠ addresses anywhere** — ⚠ **which is exactly how a check passes while proving nothing**
+  //   (`.claude/rules/verification.md`). ⚠ **So: addresses exist here, in this very call.**
+  const ADDRESSY = [
+    /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+    /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
+    /[0-9a-f-]{20,}\.local\b/i,
+  ];
+  const sdp = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall?: { pc: RTCPeerConnection } }).kagimaCall;
+    return call?.pc.localDescription?.sdp ?? "";
+  });
+  assert.ok(
+    ADDRESSY.some((p) => p.test(sdp)),
+    "no address anywhere in this call, so the check below would pass for the wrong reason",
+  );
+  console.log(
+    "  observed: the call's own SDP does carry addresses, so there was something to leak",
+  );
+
+  // ⚠⚠ And none of them reached what a person is invited to paste into a public issue.
+  for (const pattern of ADDRESSY) {
+    assert.doesNotMatch(
+      hostReport,
+      pattern,
+      `an address reached the host's report:\n${hostReport}`,
+    );
+    assert.doesNotMatch(
+      guestReport,
+      pattern,
+      `an address reached the guest's report:\n${guestReport}`,
+    );
+  }
+
+  // ⚠ It carries the facts the field test needs, from a real connection rather than a fixture.
+  assert.match(hostReport, /local candidates: \w+\/\w+/, "no candidate types were collected");
+  assert.doesNotMatch(hostReport, /selected pair: *none/, "no selected pair was read from stats");
+  assert.match(hostReport, /ms to 1st frame: *\d/);
+  assert.match(hostReport, /signalling socket: *open throughout/);
+  assert.match(hostReport, /transitions:\n\s+\d+ms/, "no state transitions were recorded");
+  assert.match(hostReport, /not a rate/);
+
+  // ⚠⚠ The two numbers, kept apart. ⚠ The wait belongs to the host's patience; ⚠ the frame time
+  //   ⚠ belongs to the connection. ⚠ Folding them together is the defect this case walls off.
+  const numberOn = (label: string): number => {
+    const found = new RegExp(`${label}: *(\\d+)`).exec(hostReport);
+    assert.ok(found !== null, `no ${label} in the report:\n${hostReport}`);
+    return Number(found[1]);
+  };
+  const waited = numberOn("waited alone");
+  const toFrame = numberOn("ms to 1st frame");
+  console.log(`  observed: the host waited ${waited}ms alone, then saw a frame ${toFrame}ms later`);
+  assert.ok(waited >= ALONE_MS, `the wait was not recorded: ${waited}ms for a ${ALONE_MS}ms wait`);
+  assert.ok(
+    toFrame < ALONE_MS,
+    `the frame time still carries the wait: ${toFrame}ms after a ${ALONE_MS}ms wait`,
+  );
+
+  // ⚠ The copy button, because a phone has no devtools and this is the only way the observation
+  //   ⚠ leaves the device. ⚠ Read back from the clipboard, never from the button's label —
+  //   ⚠ a mutation that copied nothing passed a label check once (kagima#7).
+  // ⚠ Opened first, the way a tester opens it. ⚠ The panel is collapsed on purpose — ⚠ a person
+  //   ⚠ on a call does not need it — ⚠ so clicking straight through to the button would be
+  //   ⚠ checking a path nobody takes.
+  await host.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await host.page.click("#diagnostics summary");
+  await host.page.click("#diagnostics-copy");
+  // ⚠ The write is asynchronous and the click is not. ⚠ Waited for the button to say it
+  //   ⚠ happened — ⚠ which is also the only signal a tester gets, so it is worth checking.
+  await host.page.waitForFunction(
+    // ⚠ Waited for the label to *change*. ⚠ Waiting for a substring the initial label already
+    //   ⚠ contains is waiting for nothing — ⚠ the same mistake as the panel wait above, twice in
+    //   ⚠ one case. ⚠ A wait must name a fact that is false until the thing happens.
+    () => (document.getElementById("diagnostics-copy")?.textContent ?? "") !== "この観測をコピー",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const said = await text(host.page, "diagnostics-copy");
+  assert.equal(said, "コピーしました", `the copy button reported: ${said}`);
+  const copied = await host.page.evaluate(() => navigator.clipboard.readText());
+
+  // ⚠ Not compared to the earlier text: ⚠ the panel refreshes every second and "held for" grows,
+  //   ⚠ so equality would be a race. ⚠ What matters is that a whole observation left the device,
+  //   ⚠ carrying the facts and no address.
+  assert.match(copied, /^kagima field-test observation/, `the clipboard holds: ${copied}`);
+  assert.match(copied, /frames decoded: *[1-9]/);
+  assert.doesNotMatch(copied, /selected pair: *none/);
+  for (const pattern of ADDRESSY) {
+    assert.doesNotMatch(copied, pattern, `an address reached the clipboard:\n${copied}`);
+  }
+  console.log("  observed: the clipboard holds a whole observation, and no address");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
+test(titleOf("field-test-mode"), async () => {
+  // ⚠⚠ **A mode that costs two promises** (`docs/adr/0011`). ⚠ **So this case checks both what it
+  //   ⚠ does when asked for, ⚠ and that it is absent when it was not.**
+  //
+  // ⚠ **Started as a child process, ⚠ not in this one.** ⚠ **The flag is read once at startup on
+  //   ⚠ purpose — ⚠ a mode that can turn itself on mid-run is one nobody can reason about — ⚠ so
+  //   ⚠ the only honest way to exercise it is through the real entry point.**
+  const { browser: b, base: offBase } = await ready();
+
+  // ⚠⚠ First: without the flag, ⚠ these paths do not exist at all.
+  //   ⚠ Not "exist and refuse" — ⚠ that would answer "is this a field-test server?" for free.
+  for (const path of ["/api/field-test", "/api/observations"]) {
+    const status = await b
+      .newContext()
+      .then((c) => c.request.get(`${offBase}${path}`))
+      .then((r) => r.status());
+    assert.equal(status, 404, `${path} exists on a server that was not asked for the mode`);
+  }
+  console.log("  observed: without the flag, neither field-test path exists");
+
+  const port = nextPort++;
+  const fieldBase = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["src/server.ts"], {
+    env: {
+      ...process.env,
+      KAGIMA_FIELD_TEST: "1",
+      PORT: String(port),
+      PUBLIC_BASE_URL: fieldBase,
+      JOIN_TOKEN_SECRET: "a-field-test-secret",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const said: string[] = [];
+  child.stdout.on("data", (d: Buffer) => said.push(d.toString()));
+  child.stderr.on("data", (d: Buffer) => said.push(d.toString()));
+  try {
+    for (let i = 0; i < 100 && !said.join("").includes("listening"); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // ⚠ The banner, ⚠ because a mode that costs a promise must announce itself rather than wait
+    //   ⚠ to be discovered by whoever reads the passphrase.
+    const banner = said.join("");
+    assert.match(banner, /KAGIMA_FIELD_TEST=1/, `no banner in:\n${banner}`);
+    assert.match(banner, /passphrase is 2 characters/, "the banner hides the short passphrase");
+    assert.match(banner, /collected in memory/, "the banner hides that reports are collected");
+
+    const host = await openHost(b, fieldBase);
+    // ⚠ The whole reason the mode exists: ⚠ this is what a person types on a phone.
+    assert.match(host.passphrase, /^[a-z]{2}$/, `not a short passphrase: ${host.passphrase}`);
+    console.log(`  observed: the passphrase is ${host.passphrase.length} characters`);
+
+    const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
+    await waitForFrames(host.page, "the host");
+    await waitForFrames(guest.page, "the guest");
+
+    // ⚠⚠ Both sides, collected without anybody copying anything.
+    //   ⚠ The last run recorded one end because copying by hand is what stopped it.
+    const collected = async (): Promise<string> => {
+      const context = await b.newContext();
+      const r = await context.request.get(`${fieldBase}/api/observations`);
+      return r.text();
+    };
+    let text = "";
+    for (let i = 0; i < 60; i++) {
+      text = await collected();
+      if (text.includes("── host") && text.includes("── guest")) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    // ⚠ The server's own log goes into the failure, ⚠ so a refusal says why rather than
+    //   ⚠ leaving the next reader to reproduce it.
+    const detail = `${text}\n      ── what the server said ──\n      ${said.join("").split("\n").slice(-12).join("\n      ")}`;
+    assert.match(text, /── host/, `the host's observation was not collected:\n${detail}`);
+    assert.match(text, /── guest/, `the guest's observation was not collected:\n${text}`);
+    assert.match(text, /kagima field-test observation/);
+    console.log("  observed: both sides' reports were collected, with nobody copying anything");
+
+    // ⚠ And the collected text is still the thing that may be pasted in public.
+    for (const pattern of [
+      /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+      /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
+      /[0-9a-f-]{20,}\.local\b/i,
+    ]) {
+      assert.doesNotMatch(text, pattern, `an address reached the collected reports:\n${text}`);
+    }
+
+    await host.context.close();
+    await guest.context.close();
+  } finally {
+    child.kill();
+  }
 });

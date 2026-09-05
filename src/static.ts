@@ -32,6 +32,14 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
   ["/index.html", { file: "public/index.html", type: "text/html; charset=utf-8" }],
   ["/client/host.ts", { file: "src/client/host.ts", type: "text/javascript; charset=utf-8" }],
   ["/client/guest.ts", { file: "src/client/guest.ts", type: "text/javascript; charset=utf-8" }],
+  [
+    "/client/diagnostics.ts",
+    { file: "src/client/diagnostics.ts", type: "text/javascript; charset=utf-8" },
+  ],
+  [
+    "/diagnostics/report.ts",
+    { file: "src/diagnostics/report.ts", type: "text/javascript; charset=utf-8" },
+  ],
   ["/client/call.ts", { file: "src/client/call.ts", type: "text/javascript; charset=utf-8" }],
   [
     "/client/transport.ts",

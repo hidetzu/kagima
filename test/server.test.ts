@@ -17,6 +17,7 @@ import { type Context, handle } from "../src/server.ts";
 import { createRejectionCounter } from "../src/room/join.ts";
 import { createRateLimiter } from "../src/room/rate-limit.ts";
 import { createHub } from "../src/signaling/hub.ts";
+import { createObservationStore } from "../src/field-test.ts";
 import { createRoomStore } from "../src/room/store.ts";
 
 const started: Array<() => void> = [];
@@ -36,6 +37,7 @@ const start = async (over: Partial<Context> = {}) => {
     rejections: createRejectionCounter(),
     limiter: createRateLimiter({ now: Date.now }),
     hub: createHub(),
+    observations: createObservationStore(),
     trustedSourceHeader: "",
     ...over,
   };

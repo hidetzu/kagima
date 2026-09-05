@@ -56,11 +56,28 @@
   <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
   <video id="remote" autoplay playsinline></video>
   <p><button id="close" type="button">ルームを閉じる</button></p>
+<!--
+  ⚠ For the field test (docs/FIELD-TEST.md), not for the product.
+  ⚠ Collapsed, because a person on a call does not need it — ⚠ a person recording an
+  ⚠ observation does, and they cannot open devtools on a phone.
+  ⚠ It shows types and protocols. ⚠ It cannot show an address: see src/diagnostics/report.ts.
+-->
+<details id="diagnostics">
+  <summary>診断(実証実験用)</summary>
+  <pre id="diagnostics-text">まだ通話が始まっていません。</pre>
+  <button id="diagnostics-copy" type="button">この観測をコピー</button>
+  <p class="hint">
+    ⚠ IP アドレスは含まれません。⚠ candidate の型とプロトコルだけです。<br />
+    ⚠ そのまま Issue に貼れます。
+  </p>
+</details>
+
 </section>
 
 <script type="module">
   import { createRoom, joinOwnRoom, closeRoom, copyOne } from "/client/host.ts";
   import { createCall, classifyMediaError } from "/client/call.ts";
+  import { createDiagnostics } from "/client/diagnostics.ts";
   import { connectSignaling } from "/client/transport.ts";
 
   const $ = (id) => document.getElementById(id);
@@ -145,6 +162,54 @@
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;
+
+
+      // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.
+      const diagnostics = createDiagnostics(call.pc);
+      transport.socket.addEventListener("close", (e) => diagnostics.noteSocketClosed(e.code));
+      const refreshDiagnostics = async () => {
+        document.getElementById("diagnostics-text").textContent = await diagnostics.report();
+      };
+      // ⚠ 250ms, ⚠ because this refresh is also what times the first decoded frame
+      //   (src/client/diagnostics.ts). ⚠ A slower refresh would coarsen the measurement.
+      setInterval(refreshDiagnostics, 250);
+      await refreshDiagnostics();
+
+      // ⚠⚠ **Field-test only** (`docs/adr/0011`). ⚠ **Absent unless the server says the mode is on**,
+      //   ⚠ and the server only says so when it was started with the flag.
+      // ⚠ **Why: copying a report off two devices by hand is what stopped the last run being
+      //   ⚠ two-sided.** ⚠ **A field test that only records one end cannot say "both ends".**
+      // ⚠ **What goes over the wire is the same text the panel shows** — ⚠ **it cannot carry an
+      //   ⚠ address, and the server refuses it if it somehow does.**
+      void (async () => {
+        const on = await fetch("/api/field-test").then((r) => r.ok).catch(() => false);
+        if (!on) return;
+        document.getElementById("diagnostics").open = true;
+        let lastSent = "";
+        setInterval(async () => {
+          const report = document.getElementById("diagnostics-text").textContent;
+          if (report === lastSent) return;
+          lastSent = report;
+          await fetch("/api/observations", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ roomId: room.roomId, side: "host", report }),
+          }).catch(() => {});
+        }, 2000);
+      })();
+
+      document.getElementById("diagnostics-copy").addEventListener("click", async () => {
+        await refreshDiagnostics();
+        const text = document.getElementById("diagnostics-text").textContent;
+        const button = document.getElementById("diagnostics-copy");
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = "コピーしました";
+        } catch {
+          // ⚠ Says what to do instead. ⚠ A button that silently does nothing is worse.
+          button.textContent = "コピーできません。上の文字を選んでください";
+        }
+      });
 
       call.pc.addEventListener("track", () => {
         // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other facts:
