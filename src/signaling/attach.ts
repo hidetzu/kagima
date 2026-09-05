@@ -91,6 +91,19 @@ export type SignalingOptions = {
  */
 export const attachSignaling = (server: Server, options: SignalingOptions): WebSocketServer => {
   const now = options.now ?? Date.now;
+
+  /**
+   * ⚠ **When each room first had a socket open.** ⚠ **Removed the moment it has none.**
+   *
+   * ⚠ **Per server, ⚠ not per module.** ⚠ **A module-level map would be shared by every
+   * `attachSignaling` in the process** — ⚠ **which is one in production and several in the
+   * checks, ⚠ where it leaked one room's line into another's measurement.**
+   *
+   * ⚠ **In memory, ⚠ like everything else** (`docs/adr/0005`). ⚠ **It never outlives the room,
+   * ⚠ and no total is kept across rooms** — ⚠ **a running total would be a record, ⚠ and a record
+   * is exactly what kagima does not keep.**
+   */
+  const roomOpenedAt = new Map<string, number>();
   const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
 
   // ⚠ `noServer`, so the upgrade is ours to accept or refuse before `ws` sees it.
@@ -139,6 +152,29 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
     // ⚠ The room id is not a secret to someone already inside it; ⚠ the passphrase is never
     //   ⚠ mentioned again from here on (`docs/adr/0004`).
     logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
+
+    // ⚠⚠ **How long a WebSocket kept this room's object awake** (`docs/adr/0015`, kagima#47).
+    //
+    // ⚠ **On Durable Objects, ⚠ an accepted WebSocket keeps the object active for the whole time
+    //   ⚠ it is connected** (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
+    // ⚠ **Under kagima's current shape** — ⚠ **a host holding a socket open while the URL is
+    //   ⚠ handed over, ⚠ then a call** — ⚠ **this is expected to be the main part of duration.**
+    //
+    // ⚠⚠ **It is NOT the same as Cloudflare's total billable duration.**
+    //   ⚠ **Handling requests, ⚠ running event handlers and ⚠ idle time that does not qualify for
+    //   ⚠ hibernation all add duration too.** ⚠ **This measures one part** — ⚠ **the part this
+    //   ⚠ design controls** — ⚠ **and it must not be quoted as a bill.**
+    //
+    // ⚠⚠ **And it is per ROOM, ⚠ not per socket.** ⚠ **Two people for thirty minutes is thirty
+    //   ⚠ minutes of an awake object, ⚠ not sixty.** ⚠ **Summing sockets would double it, ⚠ and we
+    //   ⚠ would plan against a number twice the truth.**
+    //
+    // ⚠ **Held in this process's memory for the life of the room and nowhere else**
+    //   (`docs/adr/0005`). ⚠ **Nothing is written, ⚠ nothing is served, ⚠ no total accumulates
+    //   ⚠ across rooms** — ⚠ **this project has already paid once for collecting things "just to
+    //   ⚠ measure"** (`docs/adr/0011`, `docs/adr/0014`).
+    const openedAt = now();
+    if (!roomOpenedAt.has(roomId)) roomOpenedAt.set(roomId, openedAt);
 
     let missed = 0;
     const beat = setInterval(() => {
@@ -191,7 +227,28 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
       // ⚠ The room is NOT closed here. ⚠ A signalling socket dropping is not a room ending —
       //   ⚠ an established peer-to-peer call carries on without us (`docs/adr/0003`).
       //   ⚠ Closing a room is kagima#10, and it is the host's decision.
-      logger.info("a peer left", { roomId, peers: options.hub.peerCount(roomId) });
+      const stillThere = options.hub.peerCount(roomId);
+      logger.info("a peer left", {
+        roomId,
+        peers: stillThere,
+        // ⚠ This socket's own time. ⚠ Useful for reading one session; ⚠ NOT the room's figure.
+        heldMs: Math.round(now() - openedAt),
+      });
+
+      // ⚠⚠ The room's own span, ⚠ announced the moment it is known and then forgotten.
+      //   ⚠ A room with nobody in it is no longer held awake by a socket.
+      if (stillThere === 0) {
+        const from = roomOpenedAt.get(roomId);
+        roomOpenedAt.delete(roomId);
+        if (from !== undefined) {
+          logger.info("a room stopped holding sockets", {
+            roomId,
+            // ⚠ Named for exactly what it is: ⚠ wall-clock with at least one socket open.
+            //   ⚠ ⚠ Not "the duration charged" — ⚠ see the note where this starts.
+            socketOpenMs: Math.round(now() - from),
+          });
+        }
+      }
     });
   };
 
