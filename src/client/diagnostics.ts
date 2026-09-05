@@ -11,11 +11,9 @@
 //   ⚠ the fast tier can check them** — ⚠ **`test/diagnostics.test.ts` hands them addresses on
 //   ⚠ purpose and confirms none come out.**
 import type { CandidateFact, PairFact, Snapshot, Transition } from "../diagnostics/report.ts";
-import { HOLD_TARGET_MS, formatReport } from "../diagnostics/report.ts";
+import { HOLD_TARGET_MS, firstFrameAt, formatReport } from "../diagnostics/report.ts";
 
 export type Diagnostics = {
-  /** ⚠ **Called when a frame is first seen.** ⚠ The clock for "held for" starts here. */
-  noteFirstFrame(): void;
   noteSocketClosed(code: number): void;
   /** ⚠ Reads the connection as it is now. ⚠ Never stores anything between calls but the notes. */
   snapshot(): Promise<Snapshot>;
@@ -67,10 +65,6 @@ export const createDiagnostics = (
   pc.addEventListener("signalingstatechange", () => note("signalingState", pc.signalingState));
 
   return {
-    noteFirstFrame() {
-      if (msToFirstFrame !== null) return;
-      msToFirstFrame = Math.round(now() - startedAt);
-    },
     noteSocketClosed(code) {
       if (socketClosed !== null) return;
       socketClosed = { code, at: Math.round(now() - startedAt) };
@@ -108,6 +102,17 @@ export const createDiagnostics = (
               local: factOf(byId.get(pair.localCandidateId ?? "")),
               remote: factOf(byId.get(pair.remoteCandidateId ?? "")),
             };
+
+      // ⚠⚠ **The moment a frame was actually decoded, ⚠ observed here and nowhere else.**
+      //
+      // ⚠ **This used to hang off the `track` event.** ⚠ **`track` fires when the transceiver is
+      //   ⚠ created, ⚠ which is in the middle of negotiation** — ⚠ **a first real observation
+      //   ⚠ reported a "first frame" that predated `iceConnectionState -> connected`.**
+      // ⚠ **A "time to first frame" that can precede the connection is not measuring a frame.**
+      // ⚠ **`framesDecoded` is what the verdict already turns on, ⚠ so it is what the clock
+      //   ⚠ turns on too.** ⚠ **Resolution is however often this is called** — ⚠ **the panel
+      //   ⚠ refreshes fast enough for the question being asked, and no second timer is started.**
+      msToFirstFrame = firstFrameAt(msToFirstFrame, framesDecoded, Math.round(now() - startedAt));
 
       return {
         localCandidates,

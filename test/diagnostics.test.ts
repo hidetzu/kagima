@@ -8,7 +8,10 @@ import { test } from "node:test";
 import {
   HOLD_TARGET_MS,
   type Snapshot,
+  arrivedAt,
+  firstFrameAt,
   formatReport,
+  msToFrameSinceArrival,
   verdictOf,
 } from "../src/diagnostics/report.ts";
 
@@ -91,6 +94,12 @@ test("⚠⚠ the collector never reads an address either", async () => {
   assert.doesNotMatch(code, /\baddress\b/i, "the collector names an address field");
   assert.doesNotMatch(code, /\.candidate\b/, "the collector reads a raw candidate string");
   assert.doesNotMatch(code, /\brelatedAddress\b/i, "the collector reads a related address");
+  // ⚠ The `track` event is a negotiation event. ⚠ It must never be what times a frame again.
+  assert.doesNotMatch(
+    code,
+    /"track"/,
+    "the collector listens for track — that is a negotiation event",
+  );
   // ⚠ `getStats()` is the safe door: ⚠ it hands over `candidateType` and `protocol` already
   //   ⚠ separated from the address. ⚠ Reading the SDP or the event's candidate line is not.
   assert.match(code, /candidateType/, "the collector does not read candidate types at all");
@@ -136,6 +145,47 @@ test("⚠ a relay candidate counts as reflexive for the purpose of that split", 
     selected: null,
   });
   assert.match(verdictOf(s), /NAT was not traversed/);
+});
+
+// ── ⚠ what "time to first frame" is measured from, and what starts it ───────
+//
+// ⚠ **Both of these are walls around a defect a real observation found**, ⚠ **and both of them
+//   ⚠ were absent when it happened** (`docs/FIELD-TEST.md`).
+
+test("⚠⚠ a negotiation event never starts the clock — only a decoded frame does", () => {
+  // ⚠ The original bug, in one line: ⚠ the clock hung off `track`, ⚠ which fires mid-negotiation.
+  //   ⚠ The reported "first frame" arrived BEFORE `iceConnectionState -> connected`.
+  //   ⚠ ⚠ A time to first frame that can precede the connection is not measuring a frame.
+  assert.equal(firstFrameAt(null, 0, 341_889), null, "a frameless moment started the clock");
+  assert.equal(firstFrameAt(null, 1, 342_300), 342_300);
+});
+
+test("⚠ the first frame is the first one, and later frames do not move it", () => {
+  assert.equal(firstFrameAt(342_300, 900, 999_999), 342_300);
+});
+
+test("⚠⚠ the time is measured from the other side arriving, not from the page opening", () => {
+  // ⚠ The first real observation reported `ms to 1st frame: 341889`.
+  //   ⚠ ⚠ That was mostly the host sitting alone. ⚠ It answered a question nobody asked.
+  const s = snapshot({
+    msToFirstFrame: 342_300,
+    transitions: [
+      { at: 341_887, what: "signalingState", value: "have-remote-offer" },
+      { at: 342_155, what: "connectionState", value: "connected" },
+    ],
+  });
+  assert.equal(arrivedAt(s), 341_887);
+  assert.equal(msToFrameSinceArrival(s), 413);
+
+  const said = formatReport(s);
+  assert.match(said, /ms to 1st frame: *413/);
+  assert.match(said, /from the other side arriving/, "the number does not say what it is from");
+  assert.match(said, /waited alone: *341887/, "the wait is folded into the frame time");
+});
+
+test("⚠ with nobody having arrived, the wait says so rather than printing a zero", () => {
+  const s = snapshot({ msToFirstFrame: null, heldMs: null, framesDecoded: 0, transitions: [] });
+  assert.match(formatReport(s), /waited alone: *nobody arrived/);
 });
 
 // ── ⚠ frames are the verdict, never a state name ────────────────────────────

@@ -120,6 +120,43 @@ const countByType = (candidates: readonly CandidateFact[]): string => {
 };
 
 /**
+ * ⚠ **When the other side arrived**, ⚠ **read from the transitions rather than kept separately.**
+ *
+ * ⚠ **Grounds: the clock starts when the page does, ⚠ and the host's page starts long before
+ * anybody arrives.** ⚠ **A first real observation reported `ms to 1st frame: 341889` — ⚠ which
+ * was mostly the host sitting alone waiting for a guest.** ⚠ **That number answered a question
+ * nobody asked.**
+ *
+ * ⚠ **`signalingState` moving is the first moment the two sides are talking**, ⚠ **for whichever
+ * end this is.** ⚠ **Before that there is nothing to time.**
+ */
+export const arrivedAt = (s: Snapshot): number | null => {
+  const first = s.transitions.find((t) => t.what === "signalingState");
+  return first === undefined ? null : first.at;
+};
+
+/**
+ * ⚠ **When the clock for "first frame" may start: ⚠ on a decoded frame, ⚠ and on nothing else.**
+ *
+ * ⚠ **This lives here, ⚠ away from the browser, ⚠ so the fast tier can hold it.**
+ * ⚠ **It used to live in the page as a `track` listener** — ⚠ **and `track` fires during
+ * negotiation, ⚠ so the first observation reported a frame arriving before the connection did.**
+ * ⚠ **`framesDecoded` is what the verdict turns on; ⚠ so it is what the clock turns on.**
+ */
+export const firstFrameAt = (
+  previous: number | null,
+  framesDecoded: number,
+  at: number,
+): number | null => (previous !== null ? previous : framesDecoded > 0 ? at : null);
+
+/** ⚠ **From the other side arriving to a frame actually decoded.** ⚠ Not from the page opening. */
+export const msToFrameSinceArrival = (s: Snapshot): number | null => {
+  const from = arrivedAt(s);
+  if (s.msToFirstFrame === null) return null;
+  return from === null ? s.msToFirstFrame : s.msToFirstFrame - from;
+};
+
+/**
  * ⚠ **What a caller may conclude, split into the three failures the field test keeps apart**
  * (`docs/FIELD-TEST.md` § 5).
  *
@@ -150,7 +187,13 @@ export const formatReport = (s: Snapshot): string => {
   lines.push("kagima field-test observation");
   lines.push(`  verdict:          ${verdictOf(s)}`);
   lines.push(`  frames decoded:   ${num(s.framesDecoded, "0")}`);
-  lines.push(`  ms to 1st frame:  ${num(s.msToFirstFrame, "no frame arrived")}`);
+  // ⚠ **Named for what it is measured from.** ⚠ An unqualified "ms to 1st frame" was read as
+  //   ⚠ "how long until you see something" ⚠ and was in fact "how long the host waited alone".
+  lines.push(
+    `  ms to 1st frame:  ${num(msToFrameSinceArrival(s), "no frame arrived")}` +
+      (msToFrameSinceArrival(s) === null ? "" : "  (from the other side arriving)"),
+  );
+  lines.push(`  waited alone:     ${num(arrivedAt(s), "nobody arrived")}`);
   lines.push(
     `  held for:         ${s.heldMs === null ? "n/a" : `${num(s.heldMs / 1000, "n/a")}s`}` +
       (s.heldMs !== null && s.heldMs < HOLD_TARGET_MS ? "  ⚠ short of the target" : ""),

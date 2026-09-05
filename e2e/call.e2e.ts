@@ -511,6 +511,16 @@ test(titleOf("diagnostics"), async () => {
   // ⚠ **The collector is where an address would actually come from, so it is checked here.**
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
+
+  // ⚠⚠ **The host is left alone on purpose, and the number below is why.**
+  //
+  // ⚠ **A first real observation reported `ms to 1st frame: 341889`** — ⚠ **which was the host
+  //   ⚠ waiting nearly six minutes for a guest, ⚠ not anything about the connection.**
+  // ⚠ **Without this wait, host and guest join within milliseconds of each other and the defect
+  //   ⚠ is invisible** — ⚠ **which is exactly why it survived to the field.**
+  const ALONE_MS = 3_000;
+  await host.page.waitForTimeout(ALONE_MS);
+
   const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
   await waitForFrames(host.page, "the host");
   await waitForFrames(guest.page, "the guest");
@@ -578,6 +588,22 @@ test(titleOf("diagnostics"), async () => {
   assert.match(hostReport, /signalling socket: *open throughout/);
   assert.match(hostReport, /transitions:\n\s+\d+ms/, "no state transitions were recorded");
   assert.match(hostReport, /not a rate/);
+
+  // ⚠⚠ The two numbers, kept apart. ⚠ The wait belongs to the host's patience; ⚠ the frame time
+  //   ⚠ belongs to the connection. ⚠ Folding them together is the defect this case walls off.
+  const numberOn = (label: string): number => {
+    const found = new RegExp(`${label}: *(\\d+)`).exec(hostReport);
+    assert.ok(found !== null, `no ${label} in the report:\n${hostReport}`);
+    return Number(found[1]);
+  };
+  const waited = numberOn("waited alone");
+  const toFrame = numberOn("ms to 1st frame");
+  console.log(`  observed: the host waited ${waited}ms alone, then saw a frame ${toFrame}ms later`);
+  assert.ok(waited >= ALONE_MS, `the wait was not recorded: ${waited}ms for a ${ALONE_MS}ms wait`);
+  assert.ok(
+    toFrame < ALONE_MS,
+    `the frame time still carries the wait: ${toFrame}ms after a ${ALONE_MS}ms wait`,
+  );
 
   // ⚠ The copy button, because a phone has no devtools and this is the only way the observation
   //   ⚠ leaves the device. ⚠ Read back from the clipboard, never from the button's label —
