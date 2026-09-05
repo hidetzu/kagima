@@ -75,11 +75,11 @@
 </section>
 
 <script type="module">
-  import { classifyMediaError, createCall } from "/client/call.ts";
-  import { createDiagnostics } from "/client/diagnostics.ts";
-  import { closeRoom, copyOne, createRoom } from "/client/host.ts";
-  import { connectSignaling } from "/client/transport.ts";
-  import { hostStatus, outranks } from "/status/status.ts";
+  import { classifyMediaError, createCall } from "/client/call.js";
+  import { createDiagnostics } from "/client/diagnostics.js";
+  import { closeRoom, copyOne, createRoom } from "/client/host.js";
+  import { connectSignaling } from "/client/transport.js";
+  import { hostStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const status = $("status");

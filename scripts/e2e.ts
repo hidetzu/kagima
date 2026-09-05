@@ -15,6 +15,7 @@
 //   (⚠ the external tier — a second engine — is kagima#14, and it is not this).
 import { spawnSync } from "node:child_process";
 import { SCENARIOS, scenarioNames, titleOf } from "../e2e/scenarios.ts";
+import { build } from "./build.ts";
 
 const argv = process.argv.slice(2);
 const only = argv.find((a) => a.startsWith("--only="))?.slice("--only=".length) ?? null;
@@ -31,6 +32,16 @@ if (only !== null && only !== "" && !scenarioNames().includes(only)) {
   console.error(`e2e: no case named "${only}". ⚠ --list names them: ${scenarioNames().join(", ")}`);
   process.exit(1);
 }
+
+// ⚠⚠ **Build before the gate runs** (`docs/adr/0016`).
+//
+// ⚠ **The browser is served `dist/`, ⚠ not `src/`.** ⚠ **A gate run against a stale `dist/`
+//   ⚠ measures the previous run** (`.claude/rules/verification.md`: ⚠ **am I measuring what I
+//   ⚠ think I am measuring**).
+// ⚠ **It is built here rather than being required of the caller** — ⚠ **a step every caller has
+//   ⚠ to remember is not a step, it is a hope.**
+// ⚠ **After `--list`, ⚠ because counting must not do work.**
+console.log(`e2e: built ${build().length} files into dist/ first`);
 
 const chosen = only ? [only] : scenarioNames();
 // ⚠ Announce the subset on the first line, before anything else.

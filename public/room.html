@@ -70,11 +70,11 @@
 </section>
 
 <script type="module">
-  import { classifyMediaError, createCall } from "/client/call.ts";
-  import { createDiagnostics } from "/client/diagnostics.ts";
-  import { knock, readKnock, roomIdFromPath, WORDING } from "/client/guest.ts";
-  import { connectSignaling } from "/client/transport.ts";
-  import { guestStatus, outranks } from "/status/status.ts";
+  import { classifyMediaError, createCall } from "/client/call.js";
+  import { createDiagnostics } from "/client/diagnostics.js";
+  import { knock, readKnock, roomIdFromPath, WORDING } from "/client/guest.js";
+  import { connectSignaling } from "/client/transport.js";
+  import { guestStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const roomId = roomIdFromPath(location.pathname);

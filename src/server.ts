@@ -23,7 +23,7 @@ import { createRoomStore, type RoomStore } from "./room/store.ts";
 import { attachSignaling, CLOSE_ROOM_CLOSED } from "./signaling/attach.ts";
 import { createHub, type Hub } from "./signaling/hub.ts";
 import { parseClientMessage } from "./signaling/messages.ts";
-import { serveStatic } from "./static.ts";
+import { missingServedFiles, serveStatic } from "./static.ts";
 import { constantTimeEqual, issueJoinToken } from "./token/join-token.ts";
 
 const DEFAULT_PORT = 8787;
@@ -314,6 +314,19 @@ export const startServer = (
   port = Number(process.env["PORT"] ?? DEFAULT_PORT),
   baseUrl = process.env["PUBLIC_BASE_URL"] ?? DEFAULT_BASE_URL,
 ) => {
+  // ⚠⚠ **The build has to have run** (`docs/adr/0016`).
+  //
+  // ⚠ **Said here, at startup, ⚠ naming the command** — ⚠ **not as a stack trace on one request.**
+  // ⚠ **`existsSync` says the file is there; ⚠ it says nothing about it being current.**
+  //   ⚠ **Freshness is the gate runners' job, ⚠ and they build rather than check.**
+  const missing = missingServedFiles();
+  if (missing.length > 0) {
+    // ⚠ `warn`, ⚠ because `error` is not a level this logger has (`src/log.ts`), ⚠ and
+    //   ⚠ adding one for a startup line is wider than this change.
+    logger.warn("the browser's files have not been built — run `npm run build`", { missing });
+    throw new Error("the browser's files have not been built — run `npm run build`");
+  }
+
   const trustedSourceHeader = process.env["TRUSTED_SOURCE_HEADER"] ?? "";
   if (trustedSourceHeader === "") {
     logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
