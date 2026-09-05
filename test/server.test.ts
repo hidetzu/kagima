@@ -9,6 +9,7 @@
 // ⚠ **It is at the edge of the fast tier**: ⚠ **it builds no environment and depends on nothing
 //   ⚠ outside this process, but it does open a port.** ⚠ **It is not the final gate, and it does
 //   ⚠ not pretend to be** (`.claude/skills/verify/SKILL.md` § 3 — ⚠ **that tier needs a browser**).
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -247,4 +248,23 @@ test("⚠ closing drops what the room was holding", async () => {
   assert.equal(ctx.store.get(room.roomId), undefined, "the room is still held");
   assert.equal(ctx.store.size(), 0);
   assert.equal(ctx.hub.peerCount(room.roomId), 0);
+});
+
+test("⚠⚠ nothing exists on the server only so that a check can call it", async () => {
+  // ⚠⚠ **`stopAnswering()` was here for exactly one caller: ⚠ the browser check for
+  //   ⚠ "signalling can go away and the call carries on"** (`docs/adr/0010`).
+  // ⚠ **It reached inside the running server from the same process, ⚠ which the port to
+  //   ⚠ Worker + Durable Objects makes impossible** (`docs/adr/0015`, kagima#49).
+  // ⚠ **The check now takes the network away in front of the server instead** — ⚠ **closer to
+  //   ⚠ what actually happens, ⚠ and it reaches into nothing.**
+  //
+  // ⚠⚠ **So the product lost a method it only had for a test.** ⚠ **That direction is the point:**
+  //   ⚠ **this project has already paid for a mode added to make testing easier**
+  //   (`docs/adr/0011` and `docs/adr/0014`).
+  const source = await readFile("src/server.ts", "utf8");
+  assert.doesNotMatch(
+    source.replace(/^\s*\/\/.*$/gm, ""),
+    /stopAnswering/,
+    "the server carries a method that exists only for a check",
+  );
 });

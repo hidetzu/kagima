@@ -374,17 +374,6 @@ export const startServer = (
 
   return {
     server,
-    /**
-     * ⚠ **Stop answering, without pretending anything ended.**
-     *
-     * ⚠ **Every socket goes, HTTP and WebSocket alike.** ⚠ **No close code is sent, because
-     * there is nothing to say** — ⚠ **from the browser's side this is what a restart looks like,
-     * and a call already established carries on without us** (`docs/adr/0010`).
-     */
-    stopAnswering() {
-      for (const client of wss.clients) client.terminate();
-      server.closeAllConnections();
-    },
     close() {
       for (const client of wss.clients) client.terminate();
       server.closeAllConnections();
