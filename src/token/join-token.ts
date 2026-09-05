@@ -56,8 +56,19 @@ const hmac = async (key: string, message: string): Promise<Uint8Array> => {
  *
  * ⚠ **The key is per process and random.** ⚠ **It never leaves memory and is never persisted;
  * it exists only so the two digests cannot be precomputed by anyone watching.**
+ *
+ * ⚠⚠ **Drawn on first use, ⚠ not at module load.**
+ * ⚠ **A Worker refuses to generate random values in global scope** — ⚠ **`Disallowed operation
+ * called within global scope`, ⚠ measured in `wrangler dev --local` on 2026-09-06.**
+ * ⚠ **Loading this module was enough to kill the isolate**, ⚠ **so nothing kagima has would have
+ * started there.**
+ * ⚠ **The property is unchanged: ⚠ once per process, ⚠ random, ⚠ never written down.**
  */
-const COMPARE_KEY = base64url(randomBytes(32));
+let compareKey: string | undefined;
+const compareKeyOf = (): string => {
+  compareKey ??= base64url(randomBytes(32));
+  return compareKey;
+};
 
 /**
  * ⚠⚠ **Two digests compared without the time taken saying anything about where they differ.**
@@ -82,7 +93,7 @@ const equalDigests = (a: Uint8Array, b: Uint8Array): boolean => {
 
 /** ⚠ **The only string comparison a secret may go through.** ⚠ Never `===` (`.claude/rules/security.md` § 1). */
 export const constantTimeEqual = async (a: string, b: string): Promise<boolean> =>
-  equalDigests(await hmac(COMPARE_KEY, a), await hmac(COMPARE_KEY, b));
+  equalDigests(await hmac(compareKeyOf(), a), await hmac(compareKeyOf(), b));
 
 const sign = async (payload: string, secret: string): Promise<string> =>
   base64url(await hmac(secret, payload));

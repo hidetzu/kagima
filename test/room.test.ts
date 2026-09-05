@@ -330,3 +330,39 @@ test("⚠ a closed room and an expired room are both simply gone", () => {
   assert.equal(store.get(closed.id), undefined);
   assert.equal(store.get(expired.id), undefined);
 });
+
+test("⚠⚠ nothing under src/ draws randomness while the module is loading", async () => {
+  // ⚠⚠ **Measured in `wrangler dev --local` on 2026-09-06:**
+  //   ⚠ **`Uncaught Error: Disallowed operation called within global scope. Asynchronous I/O
+  //   ⚠ (ex: fetch() or connect()), setting a timeout, and generating random values are not
+  //   ⚠ allowed within global scope.`**
+  // ⚠ **`src/token/join-token.ts` drew its comparison key at module load, ⚠ so loading it killed
+  //   ⚠ the isolate** — ⚠ **nothing kagima has would have started there** (`docs/adr/0015`).
+  //
+  // ⚠ **What this is: ⚠ a proxy.** ⚠ **Indentation stands in for "inside a function", ⚠ which
+  //   ⚠ holds because this tree is formatted** (`npm run check`, case `format`).
+  // ⚠ **What it is NOT: ⚠ a parser, ⚠ and not the runtime itself.** ⚠ **The claim about the
+  //   ⚠ runtime is a Worker actually starting, ⚠ and that is `spike/` today.**
+  const DRAWS = /\b(randomBytes|randomToken|getRandomValues|randomUUID)\s*\(/;
+
+  const offenders: string[] = [];
+  for (const file of await sourceFiles()) {
+    for (const line of codeOf(await readFile(file, "utf8")).split("\n")) {
+      // ⚠ Column 0 and a declaration: ⚠ this runs when the module is loaded, not when it is used.
+      if (!/^(export\s+)?(const|let|var)\s/.test(line)) continue;
+      const draw = line.search(DRAWS);
+      if (draw === -1) continue;
+
+      // ⚠⚠ **A declaration whose value is a function is not a draw** — ⚠ **`export const
+      //   ⚠ randomBytes = (n) => crypto.getRandomValues(...)` runs when it is called.**
+      // ⚠ **The first attempt missed this and named four innocent lines**, ⚠ **which is how a
+      //   ⚠ wall gets turned off rather than fixed.**
+      const arrow = line.indexOf("=>");
+      if (line.includes("function")) continue;
+      if (arrow !== -1 && arrow < draw) continue;
+
+      offenders.push(`${file}: ${line.trim()}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `randomness is drawn at module load in: ${offenders.join(", ")}`);
+});
