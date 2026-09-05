@@ -179,6 +179,48 @@ const CASES = [
     },
   },
   {
+    name: "retired-mechanism-is-absent",
+    // ⚠ Grounds: a time-limited feature is only time-limited if something notices when the time
+    //   ⚠ is up, ⚠ and that something must not be a person remembering.
+    // ⚠ **The ADR that retires a feature lists what must no longer exist, ⚠ in a fenced block.**
+    //   ⚠ This reads that list and looks for it in the source.
+    // ⚠ **The record and the wall point at each other**: ⚠ the ADR cannot quietly become untrue,
+    //   ⚠ and the source cannot quietly grow the thing back.
+    run() {
+      const MARKER = "retired-mechanism-is-absent";
+      const adrs = markdownFiles().filter((f) => f.startsWith("docs/adr/"));
+      const listed = [];
+      for (const f of adrs) {
+        const text = read(f);
+        if (!text.includes(MARKER)) continue;
+        // ⚠ The block right after the case is named. ⚠ One block, ⚠ so a stray fence elsewhere
+        //   ⚠ in the ADR cannot silently become the list.
+        const after = text.slice(text.indexOf(MARKER));
+        const block = /```text\n([\s\S]*?)```/.exec(after);
+        if (!block) return { ok: false, said: `${f} names ${MARKER} but has no list after it` };
+        for (const line of block[1].split("\n").map((l) => l.trim()).filter(Boolean)) {
+          listed.push({ f, needle: line });
+        }
+      }
+      if (!listed.length) {
+        return { ok: true, said: `no ADR retires a mechanism (nothing to hold absent)` };
+      }
+      // ⚠ Only what ships. ⚠ The checks that prove it is gone must be free to name it.
+      const files = execFileSync("git", ["ls-files", "src", "public"], { cwd: ROOT, encoding: "utf8" })
+        .trim().split("\n").filter(Boolean);
+      const found = [];
+      for (const file of files) {
+        const body = read(file);
+        for (const { f, needle } of listed) {
+          if (body.includes(needle)) found.push(`${file}: ${needle} (retired by ${f})`);
+        }
+      }
+      return found.length
+        ? { ok: false, said: `a retired mechanism is still in the source (${found.length}):\n      ` + found.join("\n      ") }
+        : { ok: true, said: `${listed.length} retired mechanisms are absent from src/ and public/` };
+    },
+  },
+  {
     name: "label-attribution",
     // ⚠ Grounds: who applied `ready-for-ai` used to be a subtraction, and a subtraction reads like
     //   ⚠ a measurement. ⚠ It is now read off the timeline, and THAT reading is the part that can
