@@ -131,6 +131,46 @@ a room stopped holding sockets ⚠ ルームの実時間 (socketOpenMs)
 ⚠ **合計を持てばそれは記録であり、⚠ 記録こそ kagima が持たないものである**(`0005`)。
 ⚠ **serve もしない** — ⚠ **`0011` / `0014` で一度払った道である。**
 
+## ⚠ 移植の切り方(2026-09-06、⚠ 実施しながら分かったこと)
+
+⚠ **「Node 版と Worker 版を並べて書く」ことはしない。** ⚠ **`CLAUDE.md` § 3 が禁じている
+「同じ問いに答える実装を 2 つ持つ」に、⚠ 移植は最も嵌りやすい。**
+
+⚠ **so 各段で、⚠ 先に *継ぎ目* を Node 版のまま作り、⚠ いまの検査で押さえる。**
+⚠ **Worker が来たときに書くのはアダプタ 1 枚だけになる。**
+
+```text
+3/n  ルーティング   handle(ctx, Request) -> Response      ⚠ Node は アダプタ に痩せた
+4/n  静的配信       ビルド成果物を配る                     ⚠ node:module が要らなくなった
+5/n  signalling     authorize / session / socket に割った  ⚠ ws を触るのは attach.ts だけ
+```
+
+### ⚠ 5/n で割った線
+
+| ファイル | 何を持つ | ⚠ Worker で |
+|---|---|---|
+| `signaling/protocol.ts` | ⚠ **両端が合意する定数** — subprotocol、close コード | ⚠ そのまま |
+| `signaling/socket.ts` | ⚠ **kagima が話す唯一のソケットの形** | ⚠ そのまま |
+| `signaling/authorize.ts` | ⚠ **ハンドシェイクを通すかどうか** | ⚠ そのまま |
+| `signaling/session.ts` | ⚠ **繋がった 1 人が何をするか** | ⚠ そのまま |
+| `signaling/attach.ts` | ⚠ **`ws` と `node:http`。⚠ 何も決めない** | ⚠ **これだけ書き換える** |
+
+⚠ **`protocol.ts` はブラウザからも読む。** ⚠ **subprotocol の前置きが、⚠ サーバとクライアントに
+1 つずつ書かれていた** — ⚠ **食い違っても静かに壊れる形だった**(⚠ ブラウザが知らない
+subprotocol を出し、⚠ サーバが拒否し、⚠ その拒否は不正トークンと見分けがつかない)。
+
+### ⚠ まだ測っていないこと — ⚠ ping
+
+⚠ **`ws` は protocol レベルの ping を出せる。** ⚠ **Worker のサーバ側 WebSocket が出せるかは、
+⚠ このリポジトリでは測っていない**(⚠ wrangler がまだ無い)。
+⚠ **「出せない」とは書かない** — ⚠ **それは測っていない主張である**
+([`../../.claude/rules/evidence.md`](../../.claude/rules/evidence.md))。
+
+⚠ **どちらであっても継ぎ目は `SignalingSocket.ping` である。**
+⚠ **protocol ping を持たないアダプタは、⚠ 約束を別の方法で果たさねばならず、⚠ 黙って
+何もしないことだけは許されない** — ⚠ **静かに死んだソケットが誰にも気づかれなくなり、
+⚠ ルームが、去った人のために席を持ち続ける。**
+
 ## ⚠ 移植のときに越えてはならない境界
 
 ```text

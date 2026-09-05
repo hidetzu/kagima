@@ -43,6 +43,10 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
   ],
   ["/client/call.js", { file: "dist/client/call.js", type: "text/javascript; charset=utf-8" }],
   [
+    "/signaling/protocol.js",
+    { file: "dist/signaling/protocol.js", type: "text/javascript; charset=utf-8" },
+  ],
+  [
     "/client/transport.js",
     { file: "dist/client/transport.js", type: "text/javascript; charset=utf-8" },
   ],
