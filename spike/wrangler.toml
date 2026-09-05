@@ -1,0 +1,5 @@
+# ⚠ A spike's configuration (`spike/worker.ts` says what for, ⚠ and that it gets deleted).
+# ⚠ **`wrangler dev --local` only.** ⚠ **No account, ⚠ no deploy, ⚠ nothing that costs anything.**
+name = "kagima-spike"
+main = "worker.ts"
+compatibility_date = "2026-09-01"
