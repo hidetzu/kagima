@@ -79,18 +79,16 @@ sequenceDiagram
 ⚠ **断られた / 部屋が閉じた / 待つ間に終わった、は Guest には 1 つの答えである**
 ([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md))。
 
-> ⚠⚠ **この図を描いていて見つけた。** ⚠ **ノックの通知は、⚠ その部屋の socket 全部に送られる**
-> (`hub.announce`)。⚠ **so 既に中に居る Guest のブラウザにも、⚠ 3 人目の `nickname` と
-> `knockId` が届く。** ⚠ **ページは無視するが、⚠ 無視することは 届いていないことではない。**
+> ⚠⚠ **この図を描いていて 1 つ見つかり、⚠ その先に もう 1 つ 在った**
+> ([kagima#64](https://github.com/hidetzu/kagima/issues/64)、
+> [`adr/0018`](adr/0018-give-the-host-a-short-lived-role-inside-one-room.md) で直した)。
 >
-> ⚠ **`admit` は「中継しない」と決めてある** — ⚠ **`src/signaling/session.ts` に
-> 「the other participant has no business learning who knocked or what was decided about them」
-> と書いてある。** ⚠ **`knock` のほうは、⚠ その原則の逆をしている。**
+> ⚠ **ノックの通知が部屋の socket 全部に送られており、⚠ さらに `admit` が送り主を見ていなかった。**
+> ⚠ **前者が `knockId` を配り、⚠ 後者が それを受け付けていた** — ⚠ **so 既に中に居る Guest が、
+> ⚠ Host の代わりに 3 人目を入れられた。**
 >
-> ⚠ **観測(2026-09-06): host と guest の両方が
-> `{"type":"knock","knockId":"…","nickname":"さんにんめ"}` を受け取った。**
-> ⚠ **プライバシーに触るので、⚠ 直さずに出した** —
-> ⚠ **[kagima#64](https://github.com/hidetzu/kagima/issues/64)。**
+> ⚠ **いまは、⚠ 通知は `role=host` の peer にだけ届き、⚠ `admit` も そこからしか受けない。**
+> ⚠ **役割は、⚠ `hostKey` を一度だけ交換した短命な token が運ぶ。**
 
 ### 1-3. ⚠ 通話そのもの — ⚠ 我々を通らない
 

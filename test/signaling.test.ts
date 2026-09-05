@@ -19,6 +19,7 @@ import {
   MAX_SDP_BYTES,
   parseClientMessage,
 } from "../src/signaling/messages.ts";
+import type { Role } from "../src/token/join-token.ts";
 import { issueJoinToken } from "../src/token/join-token.ts";
 
 // ── what may cross ──────────────────────────────────────────────────────────
@@ -78,12 +79,13 @@ test("⚠ a candidate's optional fields are checked, not trusted", async () => {
 
 // ── the hub ─────────────────────────────────────────────────────────────────
 
-const fakePeer = (id: number, sessionId: string) => {
+const fakePeer = (id: number, sessionId: string, role: Role = "guest") => {
   const sent: string[] = [];
   const closed: Array<[number, string]> = [];
   const peer: Peer = {
     id,
     sessionId,
+    role,
     send: (line) => sent.push(line),
     close: (code, reason) => closed.push([code, reason]),
   };

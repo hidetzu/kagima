@@ -12,8 +12,17 @@
 export type CreatedRoom = {
   readonly roomId: string;
   readonly shareUrl: string;
-  /** ⚠ **The Host's own way in.** ⚠ Handed over once, ⚠ at creation, ⚠ and never again. */
+  /**
+   * ⚠ **A token with no role** (`docs/adr/0018`).
+   *
+   * ⚠⚠ **Not what the Host connects with.** ⚠ **A connection made with this cannot open its own
+   * door** — ⚠ **`hostSession` below is what the Host uses.**
+   */
   readonly token: string;
+  /**
+   * ⚠ **The room's own key.** ⚠ **It closes the room, ⚠ and it buys a host session.**
+   * ⚠ **It stays in this page and goes on the wire only to those two endpoints.**
+   */
   readonly hostKey: string;
 };
 
@@ -21,6 +30,28 @@ export const createRoom = async (origin: string = location.origin): Promise<Crea
   const res = await fetch(new URL("/api/rooms", origin), { method: "POST" });
   if (!res.ok) throw new Error("the room could not be made");
   return (await res.json()) as CreatedRoom;
+};
+
+/**
+ * ⚠⚠ **Exchange the room's key for a short-lived role inside that room** (`docs/adr/0018`).
+ *
+ * ⚠ **Done once, before connecting.** ⚠ **Nothing after this reads `hostKey` again**
+ * (`.claude/rules/security.md` § 4).
+ *
+ * ⚠ **Every refusal looks the same** — ⚠ **a wrong key and a room that is not there are one
+ * answer** — ⚠ **so there is nothing to tell apart here either.**
+ */
+export const hostSession = async (
+  roomId: string,
+  hostKey: string,
+  origin: string = location.origin,
+): Promise<string> => {
+  const res = await fetch(new URL(`/api/rooms/${roomId}/host-session`, origin), {
+    method: "POST",
+    body: JSON.stringify({ hostKey }),
+  });
+  if (!res.ok) throw new Error("this room could not be opened as its host");
+  return ((await res.json()) as { token: string }).token;
 };
 
 export const closeRoom = async (

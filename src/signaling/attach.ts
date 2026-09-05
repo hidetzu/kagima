@@ -92,7 +92,7 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
       .then((checked) => {
         if (!checked.ok) return refuse();
         wss.handleUpgrade(req, socket, head, (ws) =>
-          sessions.open(asSignalingSocket(ws), checked.roomId, checked.sessionId),
+          sessions.open(asSignalingSocket(ws), checked.roomId, checked.sessionId, checked.role),
         );
       })
       .catch(() => refuse());

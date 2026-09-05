@@ -13,6 +13,8 @@
 // ⚠ **The way to check that is not to read.** ⚠ **It is to reorder** — ⚠ **and `test/hub.test.ts`
 //   ⚠ does exactly that: it joins, replaces, and then delivers from the old peer.**
 
+import type { Role } from "../token/join-token.ts";
+
 /** ⚠ **v0.1.0 is two people** (`docs/PRODUCT.md` § 3). ⚠ **A third is refused, not queued.** */
 export const ROOM_CAPACITY = 2;
 
@@ -28,6 +30,14 @@ export type Peer = {
    * ⚠ **which is exactly what happens through a tunnel, where the old socket dies quietly.**
    */
   readonly sessionId: string;
+  /**
+   * ⚠⚠ **What this connection may do in this room**
+   * ([`../../docs/adr/0018`](../../docs/adr/0018-give-the-host-a-short-lived-role-inside-one-room.md)).
+   *
+   * ⚠ **Read out of the signed token, ⚠ never out of the order people connected in.**
+   * ⚠ **It is a role in a room, ⚠ not an identity** — ⚠ **nothing here says who anybody is.**
+   */
+  readonly role: Role;
   send(line: string): void;
   close(code: number, reason: string): void;
 };
@@ -57,12 +67,20 @@ export type Hub = {
   leave(roomId: string, peerId: number): Peer[];
   relay(roomId: string, fromPeerId: number, line: string): RelayResult;
   /**
-   * ⚠ **Say something to everyone in a room, ⚠ from us rather than from a peer.**
+   * ⚠⚠ **Say something to the room's Host, ⚠ and to nobody else.**
    *
    * ⚠ **Used to tell the Host that somebody is at the door** (`docs/adr/0017`).
    * ⚠ **`relay` cannot do it: ⚠ it excludes the sender and there is no sender here.**
+   *
+   * ⚠⚠ **It used to go to every socket in the room** — ⚠ **so a Guest was handed the knocker's
+   * name and their `knockId`, ⚠ which was half of how a Guest could open the door**
+   * ([`../../docs/adr/0018`](../../docs/adr/0018-give-the-host-a-short-lived-role-inside-one-room.md),
+   * [kagima#64](https://github.com/hidetzu/kagima/issues/64)).
+   *
+   * ⚠ **Silent when no Host is connected.** ⚠ **That silence must never be observable from
+   * outside** — ⚠ **the knock's answer is the same either way** (`docs/adr/0017`).
    */
-  announce(roomId: string, line: string): void;
+  announceToHost(roomId: string, line: string): void;
   /** ⚠ For tests and for closing a room (kagima#10). ⚠ Never served over HTTP. */
   peerCount(roomId: string): number;
   /** ⚠ **Every peer in the room, so a room can be closed.** */
@@ -90,8 +108,10 @@ export const createHub = (): Hub => {
       return "joined";
     },
 
-    announce(roomId, line) {
-      for (const peer of peersOf(roomId)) peer.send(line);
+    announceToHost(roomId, line) {
+      for (const peer of peersOf(roomId)) {
+        if (peer.role === "host") peer.send(line);
+      }
     },
 
     leave(roomId, peerId) {

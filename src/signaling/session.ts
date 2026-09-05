@@ -14,7 +14,7 @@
 // ⚠ **Without it, this process holds a room slot for a peer that left.**
 import type { Knocks } from "../knock/knocks.ts";
 import { logger } from "../log.ts";
-import { issueJoinToken } from "../token/join-token.ts";
+import { issueJoinToken, type Role } from "../token/join-token.ts";
 import type { Hub, Peer } from "./hub.ts";
 import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.ts";
 import { CLOSE_BAD_MESSAGE, CLOSE_ROOM_FULL, CLOSE_SILENT } from "./protocol.ts";
@@ -74,10 +74,18 @@ export const createSessions = (options: SessionOptions) => {
   const roomOpenedAt = new Map<string, number>();
   let nextPeerId = 1;
 
-  const open = (socket: SignalingSocket, roomId: string, sessionId: string): void => {
+  const open = (
+    socket: SignalingSocket,
+    roomId: string,
+    sessionId: string,
+    role: Role = "guest",
+  ): void => {
     const peer: Peer = {
       id: nextPeerId++,
       sessionId,
+      // ⚠ Out of the signed token, ⚠ never out of the order people connected in
+      //   (`docs/adr/0018`). ⚠ The default is the powerless one — ⚠ fail closed.
+      role,
       send: (line) => socket.send(line),
       close: (code, reason) => socket.close(code, reason),
     };
@@ -156,6 +164,17 @@ export const createSessions = (options: SessionOptions) => {
         // ⚠ **Nothing is said back on success either** — ⚠ **the Host learns the outcome by the
         //   ⚠ knock leaving its list, ⚠ which is what it already watches.**
         if (parsed.message.type === "admit") {
+          // ⚠⚠ **Only the Host opens the door** (`docs/adr/0018`, kagima#64).
+          //
+          // ⚠ **Until 2026-09-06 this was not checked, ⚠ and a Guest already in the room could
+          //   ⚠ admit a stranger** — ⚠ **a join token was minted, ⚠ it passed the handshake, ⚠ and
+          //   ⚠ the stranger walked in the moment a seat came free.** ⚠ **The Host never decided.**
+          //
+          // ⚠⚠ **Dropped in silence.** ⚠ **Answering would say that this `knockId` is a real one**
+          //   (`.claude/rules/security.md` § 3) — ⚠ **which is exactly why an id we do not know is
+          //   ⚠ ignored too, ⚠ a few lines down.**
+          if (peer.role !== "host") return;
+
           const { knockId, allow } = parsed.message;
           void (async () => {
             const token = allow ? await issueJoinToken(roomId, options.secret, now()) : null;
