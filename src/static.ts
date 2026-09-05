@@ -14,7 +14,6 @@
 // ⚠ **No path is ever built from what the caller sent** — ⚠ **that is how a path traversal starts,
 //   ⚠ and the caller here is anyone at all.**
 import { readFileSync } from "node:fs";
-import type { ServerResponse } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,10 +34,6 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
   [
     "/client/diagnostics.ts",
     { file: "src/client/diagnostics.ts", type: "text/javascript; charset=utf-8" },
-  ],
-  [
-    "/passphrase/normalize.ts",
-    { file: "src/passphrase/normalize.ts", type: "text/javascript; charset=utf-8" },
   ],
   ["/status/status.ts", { file: "src/status/status.ts", type: "text/javascript; charset=utf-8" }],
   [
@@ -65,21 +60,29 @@ const ROOM_PAGE_FILE = { file: "public/room.html", type: "text/html; charset=utf
 export const isServedPath = (pathname: string): boolean =>
   SERVED.has(pathname) || ROOM_PAGE.test(pathname);
 
-export const serveStatic = (pathname: string, res: ServerResponse): boolean => {
+/**
+ * ⚠ **A `Response`, ⚠ or `null` when the path is not one of ours** (`docs/adr/0015`).
+ *
+ * ⚠ **Returning a `Response` rather than writing to a Node object is what lets the same routing
+ * run in a Worker** — ⚠ **and it keeps one implementation rather than two** (`CLAUDE.md` § 3).
+ */
+export const serveStatic = (pathname: string): Response | null => {
   const entry = SERVED.get(pathname) ?? (ROOM_PAGE.test(pathname) ? ROOM_PAGE_FILE : undefined);
-  if (entry === undefined) return false;
+  if (entry === undefined) return null;
 
   const raw = readFileSync(join(ROOT, entry.file), "utf8");
   // ⚠ TypeScript out, JavaScript in. ⚠ The browser never sees a type annotation, and there is
   //   ⚠ no build output to go stale against the source.
+  // ⚠⚠ **This half is Node's** (`node:module`). ⚠ **A Worker has no such thing, ⚠ and
+  //   ⚠ `docs/adr/0016` decided the answer there is a build step.**
   const body = entry.file.endsWith(".ts") ? stripTypeScriptTypes(raw, { mode: "strip" }) : raw;
 
-  res.writeHead(200, {
-    "content-type": entry.type,
-    // ⚠ Nothing here is a secret, but nothing here is stable either while v0.1.0 moves.
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
+  return new Response(body, {
+    headers: {
+      "content-type": entry.type,
+      // ⚠ Nothing here is a secret, but nothing here is stable either while v0.1.0 moves.
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
   });
-  res.end(body);
-  return true;
 };

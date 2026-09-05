@@ -81,26 +81,45 @@ export type Context = {
  *
  * ⚠ **kagima refuses to guess.** ⚠ **The header is used only when it is named explicitly.**
  */
-export const sourceOf = (req: IncomingMessage, trustedHeader: string): string => {
+/**
+ * ⚠ **Where the Node adapter puts the socket's address.**
+ *
+ * ⚠ **A `Request` does not carry a socket.** ⚠ **So when no proxy header is trusted, the adapter
+ * writes the address here and `sourceOf` reads it** — ⚠ **one name, ⚠ in one place, ⚠ rather than
+ * two ways of finding out who called.**
+ */
+export const NODE_SOURCE_HEADER = "x-kagima-node-source";
+
+const sourceOf = (request: Request, trustedHeader: string): string => {
   if (trustedHeader !== "") {
-    const value = req.headers[trustedHeader.toLowerCase()];
-    const first = Array.isArray(value) ? value[0] : value;
+    const value = request.headers.get(trustedHeader);
     // ⚠ `x-forwarded-for` is a list; the client-controlled part is on the left, so take the first
     //   ⚠ only because a trusted proxy is assumed to have rewritten the whole header.
-    if (first) return first.split(",")[0]?.trim() ?? "unknown";
+    if (value) return value.split(",")[0]?.trim() ?? "unknown";
   }
-  return req.socket.remoteAddress ?? "unknown";
+  // ⚠ Otherwise whatever the adapter knew. ⚠ In a Worker there is no adapter and no socket,
+  //   ⚠ so this is "unknown" — ⚠ which is honest. ⚠ Inventing one would be worse than having none.
+  return request.headers.get(NODE_SOURCE_HEADER) ?? "unknown";
 };
 
-const send = (res: ServerResponse, status: number, body: unknown): void => {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    // ⚠ Never let a room-creation response sit in a cache. ⚠ It carries the host key.
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
+/**
+ * ⚠ **One JSON answer.**
+ *
+ * ⚠ **A `Response`, ⚠ not a write to a Node object** (`docs/adr/0015`) — ⚠ **so the same routing
+ * runs in a Worker and in Node, ⚠ and there is one implementation of it rather than two**
+ * (`CLAUDE.md` § 3).
+ */
+const json = (status: number, body: unknown, extra: Record<string, string> = {}): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // ⚠ Never let a room-creation response sit in a cache. ⚠ It carries the host key.
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      ...extra,
+    },
   });
-  res.end(JSON.stringify(body));
-};
 
 /**
  * ⚠ **The one answer to every refused close.**
@@ -112,16 +131,18 @@ const CLOSE_REFUSED = {
   body: { error: "that room could not be closed" },
 } as const;
 
-const readBody = async (req: IncomingMessage): Promise<string | null> => {
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    // ⚠ Stop reading, rather than read it all and then object.
-    if (size > MAX_BODY_BYTES) return null;
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+/**
+ * ⚠ **The body, ⚠ or `null` when it is too large to be one of ours.**
+ *
+ * ⚠ **`content-length` is checked first so an oversized body is refused before it is held.**
+ * ⚠ **A body with no length is still read, ⚠ and measured as it arrives.**
+ */
+const readBody = async (request: Request): Promise<string | null> => {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null;
+  const text = await request.text();
+  // ⚠ Measured after decoding: ⚠ the cap is about what we hold, not about bytes on the wire.
+  return text.length > MAX_BODY_BYTES ? null : text;
 };
 
 /**
@@ -138,28 +159,25 @@ const readBody = async (req: IncomingMessage): Promise<string | null> => {
  * ⚠ a timer expired while waiting  cannot occur — nothing here waits on anything
  * ```
  */
-export const handle = async (
-  ctx: Context,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> => {
-  const url = new URL(req.url ?? "/", ctx.baseUrl);
+export const handle = async (ctx: Context, request: Request): Promise<Response> => {
+  const url = new URL(request.url, ctx.baseUrl);
 
   // ⚠ Only GET reaches the static map, and only by an exact name from a closed list.
-  if (req.method === "GET" && serveStatic(url.pathname, res)) return;
+  if (request.method === "GET") {
+    const asset = serveStatic(url.pathname);
+    if (asset !== null) return asset;
+  }
 
   if (url.pathname === "/api/rooms") {
-    if (req.method !== "POST") {
-      res.setHeader("allow", "POST");
-      send(res, 405, { error: "rooms are created with POST" });
-      return;
+    if (request.method !== "POST") {
+      return json(405, { error: "rooms are created with POST" }, { allow: "POST" });
     }
     try {
       const { room, shareUrl } = createRoom(ctx.store, ctx.baseUrl);
       // ⚠⚠ **The host key and the host's own token are handed over here and never again.**
       // ⚠ **There is no passphrase** (`docs/adr/0017`) — ⚠ **who comes in is the Host's decision,
       //   ⚠ and the Host is the one asking.**
-      send(res, 201, {
+      return json(201, {
         roomId: room.id,
         shareUrl,
         token: await issueJoinToken(room.id, ctx.secret, Date.now()),
@@ -167,9 +185,8 @@ export const handle = async (
       });
     } catch {
       // ⚠ Nothing from the error reaches the response or a log line (`.claude/rules/security.md` § 2).
-      send(res, 503, { error: "could not create a room just now, please try again" });
+      return json(503, { error: "could not create a room just now, please try again" });
     }
-    return;
   }
 
   // ⚠⚠ **The door** (`docs/adr/0017`).
@@ -179,29 +196,24 @@ export const handle = async (
   // ⚠ **Anything else answers "does this room exist?" for free** (`.claude/rules/security.md` § 3).
   const knockPath = /^\/api\/rooms\/([^/]+)\/knock$/.exec(url.pathname);
   if (knockPath) {
-    if (req.method !== "POST") {
-      res.setHeader("allow", "POST");
-      send(res, 405, { error: "knocking is a POST" });
-      return;
+    if (request.method !== "POST") {
+      return json(405, { error: "knocking is a POST" }, { allow: "POST" });
     }
-    const raw = await readBody(req);
+    const raw = await readBody(request);
     if (raw === null) {
-      send(res, 413, { error: "that request body is too large to be a knock" });
-      return;
+      return json(413, { error: "that request body is too large to be a knock" });
     }
     let nickname: unknown;
     try {
       nickname = (JSON.parse(raw) as { nickname?: unknown }).nickname;
     } catch {
-      send(res, 400, { error: "the body is not JSON" });
-      return;
+      return json(400, { error: "the body is not JSON" });
     }
     // ⚠ The same rule the signalling side uses. ⚠ One place, ⚠ not two (`CLAUDE.md` § 3).
     const checked = parseClientMessage(JSON.stringify({ type: "hello", nickname }));
     if (!checked.ok || checked.message.type !== "hello") {
       // ⚠ Malformed is the caller's own mistake and says nothing about any room.
-      send(res, 400, { error: "that name cannot be used" });
-      return;
+      return json(400, { error: "that name cannot be used" });
     }
     const roomId = decodeURIComponent(knockPath[1] as string);
     const { id, refused } = ctx.knocks.knock(roomId, checked.message.nickname, Date.now());
@@ -217,42 +229,35 @@ export const handle = async (
       ctx.knockRejections.record(refused);
     }
     // ⚠⚠ The same body either way.
-    send(res, 200, { knockId: id });
-    return;
+    return json(200, { knockId: id });
   }
 
   const knockState = /^\/api\/rooms\/([^/]+)\/knock\/([^/]+)$/.exec(url.pathname);
   if (knockState) {
-    if (req.method !== "GET") {
-      res.setHeader("allow", "GET");
-      send(res, 405, { error: "reading a knock is a GET" });
-      return;
+    if (request.method !== "GET") {
+      return json(405, { error: "reading a knock is a GET" }, { allow: "GET" });
     }
     const roomId = decodeURIComponent(knockState[1] as string);
     const knockId = decodeURIComponent(knockState[2] as string);
     // ⚠ Unknown ids read as waiting, ⚠ exactly like a Host who has not answered.
     const read = ctx.knocks.read(roomId, knockId);
-    send(res, 200, read.token === undefined ? { state: read.state } : read);
-    return;
+    return json(200, read.token === undefined ? { state: read.state } : read);
   }
 
   const roomPath = /^\/api\/rooms\/([^/]+)$/.exec(url.pathname);
-  if (roomPath && req.method === "DELETE") {
-    const raw = await readBody(req);
+  if (roomPath && request.method === "DELETE") {
+    const raw = await readBody(request);
     if (raw === null) {
-      send(res, 413, { error: "that request body is too large to be a close" });
-      return;
+      return json(413, { error: "that request body is too large to be a close" });
     }
     let hostKey: unknown;
     try {
       hostKey = (JSON.parse(raw) as { hostKey?: unknown }).hostKey;
     } catch {
-      send(res, 400, { error: "the body is not JSON" });
-      return;
+      return json(400, { error: "the body is not JSON" });
     }
     if (typeof hostKey !== "string") {
-      send(res, 400, { error: "the body needs a hostKey, as a string" });
-      return;
+      return json(400, { error: "the body needs a hostKey, as a string" });
     }
 
     const roomId = decodeURIComponent(roomPath[1] as string);
@@ -261,8 +266,7 @@ export const handle = async (
     //   ⚠ returning early for an unknown room makes the time saved the answer.
     const matched = await constantTimeEqual(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
     if (room === undefined || !matched) {
-      send(res, CLOSE_REFUSED.status, CLOSE_REFUSED.body);
-      return;
+      return json(CLOSE_REFUSED.status, CLOSE_REFUSED.body);
     }
 
     // ⚠ The sockets first, so nobody is left holding a room that no longer exists.
@@ -276,11 +280,10 @@ export const handle = async (
     ctx.knocks.endRoom(roomId);
     // ⚠ Says the room is over, and says nothing about who was in it.
     logger.info("a room was closed by its host", { roomId });
-    send(res, 200, { closed: true });
-    return;
+    return json(200, { closed: true });
   }
 
-  send(res, 404, {
+  return json(404, {
     error: "no such endpoint",
     endpoints: [
       "POST /api/rooms",
@@ -330,9 +333,39 @@ export const startServer = (
     }),
     trustedSourceHeader,
   };
+  /**
+   * ⚠⚠ **The Node adapter, ⚠ and the only Node-shaped code left in the request path.**
+   *
+   * ⚠ **`handle` speaks `Request` and `Response`** (`docs/adr/0015`) — ⚠ **so a Worker can call
+   * the same function.** ⚠ **This turns Node's objects into those and back.**
+   */
   const server = createServer((req, res) => {
-    // ⚠ A rejected promise here would take the process down and end every live room.
-    void handle(ctx, req, res).catch(() => send(res, 500, { error: "something went wrong here" }));
+    void (async () => {
+      const url = new URL(req.url ?? "/", baseUrl);
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === "string") headers.set(k, v);
+        else if (Array.isArray(v)) headers.set(k, v.join(", "));
+      }
+      // ⚠ The socket's address, put where `handle` can read it. ⚠ A `Request` does not carry one,
+      //   ⚠ and inventing one later would be worse than having none (`sourceOf`).
+      if (trustedSourceHeader === "" && req.socket.remoteAddress) {
+        headers.set(NODE_SOURCE_HEADER, req.socket.remoteAddress);
+      }
+      const hasBody = req.method !== "GET" && req.method !== "HEAD";
+      const request = new Request(url, {
+        method: req.method ?? "GET",
+        headers,
+        ...(hasBody ? { body: req as unknown as ReadableStream, duplex: "half" } : {}),
+      } as RequestInit);
+      const answer = await handle(ctx, request);
+      res.writeHead(answer.status, Object.fromEntries(answer.headers));
+      res.end(await answer.text());
+    })().catch(() => {
+      // ⚠ A rejected promise here would take the process down and end every live room.
+      res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "something went wrong here" }));
+    });
   });
   // ⚠ The same process, the same port (`docs/adr/0002`). ⚠ Only HTTP and WebSocket go through
   //   ⚠ the tunnel, and media goes through neither (`docs/adr/0003`).
