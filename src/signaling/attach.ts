@@ -153,15 +153,20 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
     //   ⚠ mentioned again from here on (`docs/adr/0004`).
     logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
 
-    // ⚠⚠ **The number that becomes money** (`docs/adr/0015`, kagima#47).
+    // ⚠⚠ **How long a WebSocket kept this room's object awake** (`docs/adr/0015`, kagima#47).
     //
-    // ⚠ **On Durable Objects an accepted WebSocket is billed for the whole time it is connected**
-    //   (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
-    // ⚠ **So what will cost is not "how long people talked" ⚠ but "how long a room had a socket
-    //   ⚠ open".**
+    // ⚠ **On Durable Objects, ⚠ an accepted WebSocket keeps the object active for the whole time
+    //   ⚠ it is connected** (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
+    // ⚠ **Under kagima's current shape** — ⚠ **a host holding a socket open while the URL is
+    //   ⚠ handed over, ⚠ then a call** — ⚠ **this is expected to be the main part of duration.**
+    //
+    // ⚠⚠ **It is NOT the same as Cloudflare's total billable duration.**
+    //   ⚠ **Handling requests, ⚠ running event handlers and ⚠ idle time that does not qualify for
+    //   ⚠ hibernation all add duration too.** ⚠ **This measures one part** — ⚠ **the part this
+    //   ⚠ design controls** — ⚠ **and it must not be quoted as a bill.**
     //
     // ⚠⚠ **And it is per ROOM, ⚠ not per socket.** ⚠ **Two people for thirty minutes is thirty
-    //   ⚠ minutes of billed time, ⚠ not sixty.** ⚠ **Summing sockets would double it, ⚠ and we
+    //   ⚠ minutes of an awake object, ⚠ not sixty.** ⚠ **Summing sockets would double it, ⚠ and we
     //   ⚠ would plan against a number twice the truth.**
     //
     // ⚠ **Held in this process's memory for the life of the room and nowhere else**
@@ -226,20 +231,20 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
       logger.info("a peer left", {
         roomId,
         peers: stillThere,
-        // ⚠ This socket's own time. ⚠ Useful for reading one session; ⚠ NOT what is billed.
+        // ⚠ This socket's own time. ⚠ Useful for reading one session; ⚠ NOT the room's figure.
         heldMs: Math.round(now() - openedAt),
       });
 
-      // ⚠⚠ The billed quantity, ⚠ announced the moment it is known and then forgotten.
-      //   ⚠ A room with nobody in it has stopped costing anything.
+      // ⚠⚠ The room's own span, ⚠ announced the moment it is known and then forgotten.
+      //   ⚠ A room with nobody in it is no longer held awake by a socket.
       if (stillThere === 0) {
         const from = roomOpenedAt.get(roomId);
         roomOpenedAt.delete(roomId);
         if (from !== undefined) {
           logger.info("a room stopped holding sockets", {
             roomId,
-            // ⚠ Named for what it is: ⚠ wall-clock with at least one socket open.
-            //   ⚠ On Durable Objects this is the duration that gets charged.
+            // ⚠ Named for exactly what it is: ⚠ wall-clock with at least one socket open.
+            //   ⚠ ⚠ Not "the duration charged" — ⚠ see the note where this starts.
             socketOpenMs: Math.round(now() - from),
           });
         }

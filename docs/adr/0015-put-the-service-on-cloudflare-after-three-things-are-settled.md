@@ -88,7 +88,9 @@
 | 待ち 5 分 + 通話 30 分 | ⚠ **49 ルーム** |
 | 待ち 5 分 + 通話 60 分 | ⚠ **26 ルーム** |
 
-⚠ **効いてくるのは duration だけである。** ⚠ **requests は同条件で 2,500〜4,000 ルーム相当。**
+⚠ **この利用想定では、⚠ 無料枠で最初に制約になりそうなのは duration である。**
+⚠ **requests は同条件で 2,500〜4,000 ルーム相当なので、⚠ 先に尽きるのは duration の側に見える。**
+⚠ **「duration だけが効く」とは言わない** — ⚠ **他の要素を測っていない。**
 
 ### ⚠ Owner の決定(2026-09-05)
 
@@ -107,14 +109,22 @@ deployment                     ⚠ 文書に「may shut down at any time due to 
 
 ### ⚠ so 接続時間を測る
 
-⚠ **課金されるのは「ルームに socket が 1 本でも開いていた実時間」である。**
+⚠ **`accept()` した WebSocket は、⚠ 繋がっているあいだ DO を確実に active にする。**
+⚠ **so 測るのは「ルームに socket が 1 本でも開いていた実時間」である。**
 ⚠⚠ **socket の合計ではない。** ⚠ **2 人 30 分は 30 分であって 60 分ではない。**
+
+⚠⚠ **これは Cloudflare の総 billable duration と同じではない。**
+⚠ **request の処理、⚠ event handler の実行、⚠ hibernation の条件を満たさない idle 時間にも
+duration は発生する。** ⚠ **測っているのは、⚠ この設計が左右できる部分であり、
+⚠ 現構成では duration の主要部分になる見込みである** — ⚠ **「見込み」は本当に見込みである。**
 
 ⚠ **`src/signaling/attach.ts` がそれを announce する:**
 
 ```text
-a peer left                    ⚠ その socket 自身の時間 (heldMs) — 参考。⚠ 課金額ではない
-a room stopped holding sockets ⚠ ルームの実時間 (socketOpenMs) — ⚠ これが課金される量
+a peer left                    ⚠ その socket 自身の時間 (heldMs) — 参考。⚠ ルームの数字ではない
+a room stopped holding sockets ⚠ ルームの実時間 (socketOpenMs)
+                               ⚠ WebSocket が DO を確実に active にした時間であって、
+                               ⚠ 請求額そのものではない
 ```
 
 ⚠ **メモリに持つのはルームが生きているあいだだけで、⚠ 合計は取らない。**

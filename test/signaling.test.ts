@@ -346,13 +346,18 @@ test("⚠ hello carries a validated nickname, trimmed once", () => {
   });
 });
 
-// ── ⚠ the number that becomes money ─────────────────────────────────────────
+// ── ⚠ how long a socket kept the room awake ─────────────────────────────────
 //
 // ⚠ **kagima is moving to Durable Objects** (`docs/adr/0015`). ⚠ **There, an accepted WebSocket
-//   ⚠ is billed for the whole time it is connected** (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
+//   ⚠ keeps the object active for the whole time it is connected**
+//   (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
 // ⚠ **So the quantity to watch is not "how long people talked" — ⚠ it is "how long a room had a
 //   ⚠ socket open".** ⚠ **Measuring it now, ⚠ on the version that exists, ⚠ means the port starts
 //   ⚠ with a real number instead of an estimate.**
+//
+// ⚠⚠ **It is not the bill.** ⚠ **Requests, event handlers and non-hibernatable idle time add
+//   ⚠ duration too.** ⚠ **This is the part the design controls, ⚠ and it is expected to be the
+//   ⚠ main part** — ⚠ **"expected" is doing real work in that sentence.**
 
 /** ⚠ **Reads exactly what would be written.** ⚠ The logger's only exit is `console.log`. */
 const whileWatchingTheLog = async (run: () => Promise<void>): Promise<string[]> => {
@@ -371,8 +376,8 @@ const whileWatchingTheLog = async (run: () => Promise<void>): Promise<string[]> 
 
 const settle = () => new Promise((r) => setTimeout(r, 30));
 
-test("⚠⚠ a room's billed time is wall-clock, not the sum of its sockets", async () => {
-  // ⚠⚠ **Two people for thirty minutes is thirty minutes, ⚠ not sixty.**
+test("⚠⚠ a room's socket-open time is wall-clock, not the sum of its sockets", async () => {
+  // ⚠⚠ **Two people for thirty minutes is thirty minutes of an awake object, ⚠ not sixty.**
   // ⚠ **Summing the sockets would double it, ⚠ and every plan built on that number would be
   //   ⚠ wrong by a factor of two.**
   const { base, hub } = await startSignaling();
