@@ -43,3 +43,7 @@ coverage/
 
 # ⚠ Field-test scratch. ⚠ Observations belong on the issue, not in git.
 tmp/
+
+# ⚠ wrangler のローカルキャッシュ。⚠ **コミットしない**
+.wrangler/
+spike/.wrangler/

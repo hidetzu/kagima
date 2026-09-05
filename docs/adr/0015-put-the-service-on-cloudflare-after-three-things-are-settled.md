@@ -131,6 +131,56 @@ a room stopped holding sockets ⚠ ルームの実時間 (socketOpenMs)
 ⚠ **合計を持てばそれは記録であり、⚠ 記録こそ kagima が持たないものである**(`0005`)。
 ⚠ **serve もしない** — ⚠ **`0011` / `0014` で一度払った道である。**
 
+## ⚠ 測った(2026-09-06、⚠ `wrangler dev --local` 4.129.0、⚠ アカウント無し)
+
+⚠ **`spike/` を置いて、⚠ workerd の中で実際に走らせて聞いた。**
+⚠ **公開文書からの引き写しではない。** ⚠ **どれも `spike/worker.ts` を叩けば再現する。**
+
+| 問い | ⚠ 測った結果 |
+|---|---|
+| ⚠ **join token(Web Crypto HMAC)は無改変で動くか** | ⚠ **動く。** ⚠ 自室のトークンを通し、⚠ 別室のを拒む |
+| ⚠ **`src/random.ts` の CSPRNG は動くか** | ⚠ **動く。** ⚠ 1000 本引いて distinct 1000 |
+| ⚠ **ハンドシェイクの規則は無改変で動くか** | ⚠ **動く。** ⚠ `Headers.get` の `null` もそのまま扱えた |
+| ⚠ **`setInterval` は request handler の中で使えるか** | ⚠ **使える。** ⚠ 120ms で 11 回発火。⚠ `unref` も在る |
+| ⚠⚠ **サーバ側 WebSocket は protocol ping を出せるか** | ⚠⚠ **出せない** |
+
+### ⚠⚠ 見つかった移植ブロッカー — ⚠ 1 行で全部止まっていた
+
+⚠ **`src/token/join-token.ts` が、比較用の鍵をモジュール読み込み時に引いていた。**
+
+```text
+Uncaught Error: Disallowed operation called within global scope.
+Asynchronous I/O (ex: fetch() or connect()), setting a timeout, and generating
+random values are not allowed within global scope.
+```
+
+⚠ **このモジュールを読み込むだけで isolate が死ぬ。** ⚠ **つまり kagima の現物は、⚠ Worker では
+1 リクエストも処理せずに起動に失敗していた。**
+⚠ **初回使用時に引くよう直した。** ⚠ **性質は変わらない** — ⚠ プロセスに 1 つ、⚠ 乱数、⚠ 書き残さない。
+
+⚠ **壁は `test/room.test.ts`** の
+「⚠ nothing under `src/` draws randomness while the module is loading」。
+⚠ **これは代理指標である** — ⚠ **インデントで「関数の中かどうか」を代用しており、⚠ 木が整形
+されていることに依っている。** ⚠ **実行時についての主張は、⚠ Worker が実際に起動することであり、
+⚠ いまは `spike/` がそれである。**
+
+### ⚠⚠ ping が無い、ということの意味
+
+⚠ **`server.ping` は関数ではなく、⚠ prototype の名前一覧にも無い。**
+⚠ **クライアント側で待っても ping フレームは来なかった。**
+
+```text
+accept  binaryType  close  deserializeAttachment  extensions  protocol
+readyState  send  serializeAttachment  url
+```
+
+⚠ **`SignalingSocket.ping` は、⚠ Worker のアダプタでは別の答えを要する**
+(`src/signaling/socket.ts` が、⚠ 測る前からその継ぎ目を用意してあった)。
+⚠ **黙って何もしないことだけは許されない** — ⚠ **静かに死んだソケットが誰にも気づかれず、
+⚠ ルームが、去った人のために席を持ち続ける。**
+
+⚠ **どう答えるかは、この ADR ではまだ決めない。** ⚠ **kagima#62。**
+
 ## ⚠ 移植の切り方(2026-09-06、⚠ 実施しながら分かったこと)
 
 ⚠ **「Node 版と Worker 版を並べて書く」ことはしない。** ⚠ **`CLAUDE.md` § 3 が禁じている
@@ -159,17 +209,10 @@ a room stopped holding sockets ⚠ ルームの実時間 (socketOpenMs)
 1 つずつ書かれていた** — ⚠ **食い違っても静かに壊れる形だった**(⚠ ブラウザが知らない
 subprotocol を出し、⚠ サーバが拒否し、⚠ その拒否は不正トークンと見分けがつかない)。
 
-### ⚠ まだ測っていないこと — ⚠ ping
+### ⚠ ping — ⚠ 2026-09-06 に測った
 
-⚠ **`ws` は protocol レベルの ping を出せる。** ⚠ **Worker のサーバ側 WebSocket が出せるかは、
-⚠ このリポジトリでは測っていない**(⚠ wrangler がまだ無い)。
-⚠ **「出せない」とは書かない** — ⚠ **それは測っていない主張である**
-([`../../.claude/rules/evidence.md`](../../.claude/rules/evidence.md))。
-
-⚠ **どちらであっても継ぎ目は `SignalingSocket.ping` である。**
-⚠ **protocol ping を持たないアダプタは、⚠ 約束を別の方法で果たさねばならず、⚠ 黙って
-何もしないことだけは許されない** — ⚠ **静かに死んだソケットが誰にも気づかれなくなり、
-⚠ ルームが、去った人のために席を持ち続ける。**
+⚠ **この節は「まだ測っていない」と書いてあった。** ⚠ **測った。** ⚠ **上の節にある。**
+⚠ **答えは「出せない」であり、⚠ 継ぎ目が `SignalingSocket.ping` であったことは変わらない。**
 
 ## ⚠ 移植のときに越えてはならない境界
 
