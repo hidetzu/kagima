@@ -345,3 +345,95 @@ test("⚠ hello carries a validated nickname, trimmed once", () => {
     why: "malformed",
   });
 });
+
+// ── ⚠ the number that becomes money ─────────────────────────────────────────
+//
+// ⚠ **kagima is moving to Durable Objects** (`docs/adr/0015`). ⚠ **There, an accepted WebSocket
+//   ⚠ is billed for the whole time it is connected** (⚠ Cloudflare の公開文書、⚠ 参照日 2026-09-05)。
+// ⚠ **So the quantity to watch is not "how long people talked" — ⚠ it is "how long a room had a
+//   ⚠ socket open".** ⚠ **Measuring it now, ⚠ on the version that exists, ⚠ means the port starts
+//   ⚠ with a real number instead of an estimate.**
+
+/** ⚠ **Reads exactly what would be written.** ⚠ The logger's only exit is `console.log`. */
+const whileWatchingTheLog = async (run: () => Promise<void>): Promise<string[]> => {
+  const said: string[] = [];
+  const real = console.log;
+  // biome-ignore lint/suspicious/noConsole: ⚠ the test reads the boundary the logger writes to
+  console.log = (line: unknown) => said.push(String(line));
+  try {
+    await run();
+  } finally {
+    // biome-ignore lint/suspicious/noConsole: ⚠ put it back whatever happened
+    console.log = real;
+  }
+  return said;
+};
+
+const settle = () => new Promise((r) => setTimeout(r, 30));
+
+test("⚠⚠ a room's billed time is wall-clock, not the sum of its sockets", async () => {
+  // ⚠⚠ **Two people for thirty minutes is thirty minutes, ⚠ not sixty.**
+  // ⚠ **Summing the sockets would double it, ⚠ and every plan built on that number would be
+  //   ⚠ wrong by a factor of two.**
+  const { base, hub } = await startSignaling();
+  const room = "room-billing";
+
+  const said = await whileWatchingTheLog(async () => {
+    // ⚠⚠ **Shaped like a real call**: ⚠ the host opens first and waits, ⚠ the guest arrives
+    //   ⚠ later, ⚠ and the host leaves first. ⚠ **The gap matters:** ⚠ with both opening at once,
+    //   ⚠ "the room's span" and "the last socket's own life" are the same number, ⚠ and a
+    //   ⚠ mutation that returns the wrong one walks straight past (⚠ it did).
+    const host = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    await new Promise((r) => setTimeout(r, 150));
+    const guest = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    assert.equal(hub.peerCount(room), 2);
+    await new Promise((r) => setTimeout(r, 80));
+    host.close();
+    await settle();
+    guest.close();
+    await settle();
+  });
+
+  // ⚠ Scoped to this room. ⚠ Another case's socket closing inside the capture window is not
+  //   ⚠ this case's measurement.
+  const total = said.find((l) => l.includes("a room stopped holding sockets") && l.includes(room));
+  assert.ok(total !== undefined, `no room total was announced:\n${said.join("\n")}`);
+  const fields = JSON.parse(total.slice(total.indexOf("{"))) as {
+    socketOpenMs: number;
+    roomId: string;
+  };
+  assert.equal(fields.roomId, room);
+
+  const perSocket = said
+    .filter((l) => l.includes("a peer left") && l.includes(room))
+    .map((l) => (JSON.parse(l.slice(l.indexOf("{"))) as { heldMs: number }).heldMs);
+  assert.equal(perSocket.length, 2, `two sockets should have left:\n${said.join("\n")}`);
+
+  // ⚠⚠ **The assertion.** ⚠ The room's number is not the sum, ⚠ because the sockets overlapped.
+  const summed = perSocket.reduce((x, y) => x + y, 0);
+  assert.ok(
+    summed > fields.socketOpenMs,
+    `the sockets did not overlap, so this case is not testing what it claims: ` +
+      `summed=${summed} room=${fields.socketOpenMs}`,
+  );
+  // ⚠ And the room's number covers the whole span, ⚠ not just the last socket's life.
+  assert.ok(
+    fields.socketOpenMs >= Math.max(...perSocket),
+    `the room's time is shorter than a socket that was in it: ${JSON.stringify({ fields, perSocket })}`,
+  );
+});
+
+test("⚠ the announced duration never carries anything but the room and the time", async () => {
+  // ⚠ A measurement line is still a log line (`.claude/rules/security.md` § 2).
+  const { base } = await startSignaling();
+  const room = "room-quiet";
+  const said = await whileWatchingTheLog(async () => {
+    const a = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    a.close();
+    await settle();
+  });
+  const total = said.find((l) => l.includes("a room stopped holding sockets") && l.includes(room));
+  assert.ok(total !== undefined, said.join("\n"));
+  const fields = JSON.parse(total.slice(total.indexOf("{"))) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(fields).sort(), ["roomId", "socketOpenMs"]);
+});
