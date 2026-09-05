@@ -1,10 +1,15 @@
 // The signalling socket, from the browser's side.
 //
-// ⚠ **The token travels in the subprotocol, never in the URL** (`src/signaling/attach.ts` says why).
+// ⚠ **The token travels in the subprotocol, never in the URL** (`../signaling/protocol.ts` says why).
 // ⚠ **A URL is written to history, to the referer header, and to every log in between.**
+//
+// ⚠ **The prefix is imported, ⚠ not written again.** ⚠ **It was written twice until 2026-09-06,
+//   ⚠ and two copies of an agreement between two ends are two things that can drift**
+//   (`CLAUDE.md` § 3).
+import { TOKEN_PROTOCOL_PREFIX } from "../signaling/protocol.ts";
 import type { SignalMessage, Transport } from "./call.ts";
 
-export const TOKEN_PROTOCOL_PREFIX = "kagima.token.";
+export { TOKEN_PROTOCOL_PREFIX };
 
 export type SocketTransport = Transport & {
   readonly socket: WebSocket;
