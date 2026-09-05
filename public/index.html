@@ -78,6 +78,7 @@
   import { createRoom, joinOwnRoom, closeRoom, copyOne } from "/client/host.ts";
   import { createCall, classifyMediaError } from "/client/call.ts";
   import { createDiagnostics } from "/client/diagnostics.ts";
+  import { hostStatus, outranks } from "/status/status.ts";
   import { connectSignaling } from "/client/transport.ts";
 
   const $ = (id) => document.getElementById(id);
@@ -125,21 +126,12 @@
       const render = () => {
         // ⚠ textContent, never innerHTML: the name came from outside. ⚠ The other wall is
         //   ⚠ validation, in src/signaling/messages.ts.
-        status.textContent =
-          ending === "closed"
-            ? "このルームは閉じました。何も残っていません。"
-            : ending === "peer-left"
-              ? "相手の接続が切れました。まだこのルームは開いています。"
-              : ending === "detached"
-                ? "kagima とのつながりが切れました。通話は続いているかもしれません。"
-                : connected
-                  ? guestName === null
-                    ? "つながりました。"
-                    : `${guestName} さんとつながりました。`
-                  : guestName === null
-                    ? "相手が来るのを待っています。"
-                    : `${guestName} さんが入りました。つないでいます。`;
+        // ⚠ The sentence itself is decided in src/status/status.ts, ⚠ where the fast tier can
+        //   ⚠ hold it — ⚠ this file only says where it goes.
+        status.textContent = hostStatus({ ending, connected, guestName });
       };
+
+
 
       transport.onMessage((message) => {
         if (message.type === "hello") {
@@ -150,7 +142,7 @@
         if (message.type !== "peer-left") return;
         // ⚠ The other side dropped. ⚠ Recoverable, and worded as such — ⚠ it is not the room
         //   ⚠ ending, and it is not a fault (CLAUDE.md § 4-1).
-        ending = "peer-left";
+        ending = outranks(ending, "peer-left");
         connected = false;
         guestName = null;
         render();
@@ -211,6 +203,27 @@
         }
       });
 
+      // ⚠⚠ **The path could not be built, ⚠ or it broke and did not come back.**
+      //
+      // ⚠ **`failed` is not `disconnected`.** ⚠ **`disconnected` recovers; ⚠ this does not**
+      //   (`CLAUDE.md` § 4). ⚠ **So only `failed` says anything to the person.**
+      //
+      // ⚠ **kagima#16 decided v0.1.0 ships with STUN only** (`docs/adr/0013`) —
+      //   ⚠ **which means some pairs of networks will land here.** ⚠ **Accepting that and not
+      //   ⚠ telling the person are two different things:** ⚠ **without this, the screen said
+      //   ⚠ "つないでいます。" for ever, ⚠ and somebody waits for something that is not coming**
+      //   (`CLAUDE.md` § 4-1: ⚠ never sound stalled, ⚠ never use the progressive for a state).
+      //
+      // ⚠ **No cause is named.** ⚠ **We cannot see one** — ⚠ **the instrument was stripped of
+      //   ⚠ exactly these guesses** (`docs/adr/0012`).
+      call.pc.addEventListener("connectionstatechange", () => {
+        if (call.pc.connectionState !== "failed") return;
+        // ⚠ Two different things, ⚠ and the wrong one is worse than nothing: ⚠ "接続できません
+        //   ⚠ でした" after a ten-minute call is a lie about what happened.
+        ending = outranks(ending, connected ? "dropped" : "unreachable");
+        render();
+      });
+
       call.pc.addEventListener("track", () => {
         // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other facts:
         //   ⚠ `render` decides, and `ending` outranks this.
@@ -225,13 +238,13 @@
       transport.socket.addEventListener("close", (event) => {
         if (event.code === 4005) {
           call?.hangUp();
-          ending = "closed";
+          ending = outranks(ending, "closed");
           render();
           return;
         }
         // ⚠ The call itself may still be running: media goes browser to browser and does not
         //   ⚠ need us (docs/adr/0003). ⚠ So the tracks are NOT stopped here.
-        ending = "detached";
+        ending = outranks(ending, "detached");
         connected = false;
         render();
       });
@@ -267,7 +280,7 @@
     await closeRoom(room.roomId, room.hostKey);
     call?.hangUp();
     // ⚠ Through the one writer, like everything else on this line.
-    ending = "closed";
+    ending = outranks(ending, "closed");
     render();
   });
 </script>
