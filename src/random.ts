@@ -26,5 +26,20 @@ export const base64url = (bytes: Uint8Array): string => {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 };
 
+/**
+ * ⚠ **The other direction.** ⚠ **Here so the pair cannot drift apart.**
+ *
+ * ⚠ **`atob` is in both runtimes and speaks base64**, ⚠ **so the two base64url differences are
+ * put back before decoding.** ⚠ **Padding is restored because `atob` requires it.**
+ */
+export const base64urlDecode = (text: string): Uint8Array => {
+  const base64 = text.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+};
+
 /** ⚠ **`n` random bytes as base64url.** ⚠ A host key and a token nonce are both this. */
 export const randomToken = (n: number): string => base64url(randomBytes(n));

@@ -20,7 +20,9 @@ const capture = (fn: () => void): string => {
 };
 
 const PASSPHRASE = generatePassphrase();
-const TOKEN = issueJoinToken("some-room", "some-secret", Date.now());
+// ⚠ Awaited at module scope. ⚠ Minting a token is asynchronous now, ⚠ because Web Crypto is
+//   (`docs/adr/0015`). ⚠ Node runs a module's top-level await before anything imports it.
+const TOKEN = await issueJoinToken("some-room", "some-secret", Date.now());
 
 // ── the boundary takes secrets out ──────────────────────────────────────────
 

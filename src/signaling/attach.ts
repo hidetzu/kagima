@@ -129,10 +129,21 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
     };
 
     if (roomId === null || token === null) return refuse();
-    const checked = verifyJoinToken(token, roomId, options.secret, now());
-    if (!checked.ok) return refuse();
 
-    wss.handleUpgrade(req, socket, head, (ws) => accept(ws, roomId, checked.sessionId));
+    // ⚠⚠ **Asynchronous now, ⚠ because Web Crypto is** (`docs/adr/0015`).
+    //
+    // ⚠ **A rejection here must not be left unhandled: ⚠ the socket would stay open with nobody
+    //   ⚠ owning it, ⚠ and the caller would wait for an answer that never comes** — ⚠ **which is
+    //   ⚠ the one outcome `.claude/rules/evidence.md` calls out as "not an answer".**
+    // ⚠ **so a failure of ours produces the same single refusal as a bad token.** ⚠ **The caller
+    //   ⚠ cannot tell them apart, ⚠ which is the property this endpoint already had**
+    //   (`.claude/rules/security.md` § 3).
+    void verifyJoinToken(token, roomId, options.secret, now())
+      .then((checked) => {
+        if (!checked.ok) return refuse();
+        wss.handleUpgrade(req, socket, head, (ws) => accept(ws, roomId, checked.sessionId));
+      })
+      .catch(() => refuse());
   });
 
   const accept = (ws: WebSocket, roomId: string, sessionId: string): void => {
