@@ -132,6 +132,17 @@ const CLOSE_REFUSED = {
 } as const;
 
 /**
+ * ⚠ **The one answer to every refused host session** (`docs/adr/0018`).
+ *
+ * ⚠ **A wrong host key and a room that is not there must not be distinguishable**, ⚠ **or this
+ * endpoint answers "does this room exist?" as well** (`.claude/rules/security.md` § 3).
+ */
+const HOST_SESSION_REFUSED = {
+  status: 401,
+  body: { error: "that room could not be opened as its host" },
+} as const;
+
+/**
  * ⚠ **The body, ⚠ or `null` when it is too large to be one of ours.**
  *
  * ⚠ **`content-length` is checked first so an oversized body is refused before it is held.**
@@ -219,7 +230,7 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     const { id, refused } = ctx.knocks.knock(roomId, checked.message.nickname, Date.now());
     if (refused === null) {
       // ⚠ The Host is already here, waiting, with a socket open (`docs/adr/0017`).
-      ctx.hub.announce(
+      ctx.hub.announceToHost(
         roomId,
         JSON.stringify({ type: "knock", knockId: id, nickname: checked.message.nickname }),
       );
@@ -242,6 +253,47 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     // ⚠ Unknown ids read as waiting, ⚠ exactly like a Host who has not answered.
     const read = ctx.knocks.read(roomId, knockId);
     return json(200, read.token === undefined ? { state: read.state } : read);
+  }
+
+  // ⚠⚠ **The Host exchanges its key for a short-lived role, once** (`docs/adr/0018`).
+  //
+  // ⚠ **`hostKey` lives in the Host's page and is handed over here and nowhere else.**
+  // ⚠ **What comes back is a token that opens that room's door for as long as it lives** —
+  //   ⚠ **and nothing after this point reads `hostKey` again**
+  //   (`.claude/rules/security.md` § 4, ⚠ the same shape `docs/adr/0017` already uses).
+  const hostSession = /^\/api\/rooms\/([^/]+)\/host-session$/.exec(url.pathname);
+  if (hostSession) {
+    if (request.method !== "POST") {
+      return json(405, { error: "a host session is taken with POST" }, { allow: "POST" });
+    }
+    const raw = await readBody(request);
+    if (raw === null) {
+      return json(413, { error: "that request body is too large to be a host key" });
+    }
+    let hostKey: unknown;
+    try {
+      hostKey = (JSON.parse(raw) as { hostKey?: unknown }).hostKey;
+    } catch {
+      return json(400, { error: "the body is not JSON" });
+    }
+    if (typeof hostKey !== "string") {
+      return json(400, { error: "the body needs a hostKey, as a string" });
+    }
+
+    const roomId = decodeURIComponent(hostSession[1] as string);
+    const room = isRoomId(roomId) ? ctx.store.get(roomId) : undefined;
+    // ⚠ Exactly one comparison whatever the path, ⚠ for the same reason the close endpoint has
+    //   ⚠ one: ⚠ returning early for an unknown room makes the time saved the answer.
+    const matched = await constantTimeEqual(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
+    if (room === undefined || !matched) {
+      // ⚠ One answer. ⚠ A wrong key and a room that is not there are the same from outside.
+      return json(HOST_SESSION_REFUSED.status, HOST_SESSION_REFUSED.body);
+    }
+
+    // ⚠ Nothing about the key reaches the token (`.claude/rules/security.md` § 4).
+    return json(200, {
+      token: await issueJoinToken(room.id, ctx.secret, Date.now(), undefined, "host"),
+    });
   }
 
   const roomPath = /^\/api\/rooms\/([^/]+)$/.exec(url.pathname);
@@ -287,7 +339,8 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     error: "no such endpoint",
     endpoints: [
       "POST /api/rooms",
-      "POST /api/rooms/{roomId}/join",
+      "POST /api/rooms/{roomId}/host-session",
+      "POST /api/rooms/{roomId}/knock",
       "DELETE /api/rooms/{roomId}",
       "GET /r/{roomId}",
     ],

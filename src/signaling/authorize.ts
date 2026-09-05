@@ -5,7 +5,7 @@
 //   ⚠ on Node and in a Worker** (`docs/adr/0015`).
 // ⚠ **It reaches for no platform, ⚠ so a check can call it directly** — ⚠ **without a server,
 //   ⚠ without a port, ⚠ without a browser.**
-import { verifyJoinToken } from "../token/join-token.ts";
+import { type Role, verifyJoinToken } from "../token/join-token.ts";
 import { TOKEN_PROTOCOL_PREFIX } from "./protocol.ts";
 
 /**
@@ -25,9 +25,17 @@ import { TOKEN_PROTOCOL_PREFIX } from "./protocol.ts";
  * is not told to the caller** — ⚠ **telling them would answer "does this room exist?"**
  * (`.claude/rules/security.md` § 3).
  * ⚠ **So this type carries no reason at all.** ⚠ **There is nothing here for a caller to leak.**
+ *
+ * ⚠ **`role` comes out of the signed payload** ([`../../docs/adr/0018`](../../docs/adr/0018-give-the-host-a-short-lived-role-inside-one-room.md)).
+ * ⚠ **Never out of a header, ⚠ a query string, ⚠ or the order in which people connected.**
  */
 export type Upgrade =
-  | { readonly ok: true; readonly roomId: string; readonly sessionId: string }
+  | {
+      readonly ok: true;
+      readonly roomId: string;
+      readonly sessionId: string;
+      readonly role: Role;
+    }
   | { readonly ok: false };
 
 const REFUSED: Upgrade = { ok: false };
@@ -70,7 +78,9 @@ export const authorizeUpgrade = async (
 
   try {
     const checked = await verifyJoinToken(token, roomId, secret, at);
-    return checked.ok ? { ok: true, roomId, sessionId: checked.sessionId } : REFUSED;
+    return checked.ok
+      ? { ok: true, roomId, sessionId: checked.sessionId, role: checked.role }
+      : REFUSED;
   } catch {
     return REFUSED;
   }

@@ -99,19 +99,34 @@ const sign = async (payload: string, secret: string): Promise<string> =>
   base64url(await hmac(secret, payload));
 
 /**
+ * ⚠⚠ **What this connection may do inside one room** ([`docs/adr/0018`](../../docs/adr/0018-give-the-host-a-short-lived-role-inside-one-room.md)).
+ *
+ * ⚠ **It is a role in a room, ⚠ for as long as the token lives.**
+ * ⚠ **It is NOT an identity, ⚠ not an account, ⚠ and not a fact about a person or a device.**
+ * ⚠ **Two connections holding host tokens for two rooms have nothing in common.**
+ */
+export type Role = "host" | "guest";
+
+const ROLES: readonly string[] = ["host", "guest"];
+
+/**
  * Mint a token for one room.
  *
  * ⚠ **The payload is readable by anyone holding the token** — ⚠ **it is signed, not encrypted.**
- * ⚠ **So it holds only the room id, an expiry, and a nonce.** ⚠ **Nothing about the passphrase,
- * nothing about who is joining.**
+ * ⚠ **So it holds only the room id, an expiry, a nonce, and the role.** ⚠ **Nothing about who is
+ * joining.** ⚠ **`role=host` says "this token opens that room's door", ⚠ and nothing else.**
+ *
+ * ⚠ **The role is inside the signature.** ⚠ **Editing it invalidates the token** — ⚠ **which is
+ * the whole reason it lives here rather than in a field beside it.**
  */
 export const issueJoinToken = async (
   roomId: string,
   secret: string,
   now: number,
   nonce: string = base64url(randomBytes(NONCE_BYTES)),
+  role: Role = "guest",
 ): Promise<string> => {
-  const payload = base64url(utf8.encode(`${roomId}:${now + TOKEN_TTL_MS}:${nonce}`));
+  const payload = base64url(utf8.encode(`${roomId}:${now + TOKEN_TTL_MS}:${nonce}:${role}`));
   return `${payload}.${await sign(payload, secret)}`;
 };
 
@@ -133,7 +148,7 @@ export type TokenCheck =
    * implementations of one question, and the second one would not check the signature**
    * (`CLAUDE.md` § 3).
    */
-  | { readonly ok: true; readonly sessionId: string }
+  | { readonly ok: true; readonly sessionId: string; readonly role: Role }
   | { readonly ok: false; readonly why: TokenRejection };
 
 /**
@@ -158,15 +173,20 @@ export const verifyJoinToken = async (
 
   // ⚠ Only now is the payload ours to read.
   const parts = new TextDecoder().decode(base64urlDecode(payload)).split(":");
-  if (parts.length !== 3) return { ok: false, why: "malformed" };
+  if (parts.length !== 4) return { ok: false, why: "malformed" };
 
-  const [roomId, expText, nonce] = parts as [string, string, string];
+  const [roomId, expText, nonce, roleText] = parts as [string, string, string, string];
   const exp = Number(expText);
   if (!Number.isSafeInteger(exp)) return { ok: false, why: "malformed" };
+
+  // ⚠⚠ **Fail closed** (`docs/adr/0018`). ⚠ **Anything that is not exactly a known role is
+  //   ⚠ malformed, ⚠ never "guest by default"** — ⚠ **a default here is a default everywhere the
+  //   ⚠ parser is wrong, ⚠ and one of those places would eventually be "host".**
+  if (!ROLES.includes(roleText)) return { ok: false, why: "malformed" };
 
   // ⚠ Room before expiry: a token for another room is wrong whether or not it has expired,
   //   ⚠ and reporting the more specific fact keeps the counters meaningful.
   if (roomId !== expectedRoomId) return { ok: false, why: "wrong-room" };
   if (now >= exp) return { ok: false, why: "expired" };
-  return { ok: true, sessionId: nonce };
+  return { ok: true, sessionId: nonce, role: roleText as Role };
 };
