@@ -10,7 +10,6 @@
 //   ⚠ **That check defends "our process does not write it down".**
 //   ⚠ **It does NOT show that nothing is left in memory** — ⚠ **those are different claims and
 //   ⚠ only the first one has a check** (`.claude/rules/evidence.md`).
-import type { Passphrase } from "./types.ts";
 
 /**
  * ⚠ **How long a room survives with nobody connected to it.**
@@ -29,7 +28,6 @@ export const ROOM_IDLE_MS = 20 * 60 * 1000;
 export type Room = {
   readonly id: string;
   /** ⚠ **Held to be compared against, and never logged** (`.claude/rules/security.md` § 2). */
-  readonly passphrase: Passphrase;
   /**
    * ⚠ **The one thing only the host is given.**
    *

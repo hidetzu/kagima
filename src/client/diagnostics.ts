@@ -18,10 +18,10 @@ import type {
   Transition,
 } from "../diagnostics/report.ts";
 import {
-  HOLD_TARGET_MS,
-  firstFrameAt,
   familyOf,
+  firstFrameAt,
   formatReport,
+  HOLD_TARGET_MS,
   selectedPairIdOf,
 } from "../diagnostics/report.ts";
 

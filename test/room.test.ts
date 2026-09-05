@@ -4,17 +4,17 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { MAX_ID_ATTEMPTS, createRoom, defaultDeps } from "../src/room/create-room.ts";
+import { createRoom, defaultDeps, MAX_ID_ATTEMPTS } from "../src/room/create-room.ts";
 import {
   ALPHABET,
-  ID_LENGTH,
-  ROOM_ID_BITS,
   buildShareUrl,
   generateRoomId,
+  ID_LENGTH,
   isRoomId,
+  ROOM_ID_BITS,
   roomIdFromBytes,
 } from "../src/room/room-id.ts";
-import { ROOM_IDLE_MS, createRoomStore } from "../src/room/store.ts";
+import { createRoomStore, ROOM_IDLE_MS } from "../src/room/store.ts";
 
 const BASE = "https://kagima.example";
 
@@ -75,16 +75,6 @@ test("the share URL carries the room id", () => {
   assert.equal(buildShareUrl(BASE, id), `${BASE}/r/${id}`);
 });
 
-test("⚠ the share URL never carries the passphrase", () => {
-  // ⚠ A URL is written to history, to the referer header, and to every log in between.
-  const store = createRoomStore();
-  const { room, shareUrl } = createRoom(store, BASE);
-  assert.ok(!shareUrl.includes(room.passphrase), "the passphrase is in the share URL");
-  for (const word of room.passphrase.split("-")) {
-    assert.ok(!shareUrl.includes(word), `a passphrase word (${word}) is in the share URL`);
-  }
-});
-
 test("buildShareUrl refuses anything that is not a room id", () => {
   assert.throws(() => buildShareUrl(BASE, "not-a-room-id"), TypeError);
 });
@@ -124,13 +114,6 @@ test("closing a room drops it, and closing it again says there was none", () => 
 
 // ── creating a room ─────────────────────────────────────────────────────────
 
-test("a created room is in the store, with its passphrase", () => {
-  const store = createRoomStore();
-  const { room } = createRoom(store, BASE);
-  assert.equal(store.get(room.id), room);
-  assert.ok(room.passphrase.length > 0);
-});
-
 test("⚠ a colliding id is retried rather than overwriting", () => {
   // ⚠ A collision cannot be waited for at this entropy, so the generator is injected.
   //   ⚠ Without this, the retry path would ship having never run.
@@ -140,7 +123,6 @@ test("⚠ a colliding id is retried rather than overwriting", () => {
   const free = "b".repeat(ID_LENGTH);
   const { room } = createRoom(store, BASE, {
     newId: () => (++calls === 1 ? taken : free),
-    newPassphrase: () => "x-y-z-w",
     newHostKey: () => "a-host-key",
     now: () => 0,
   });
@@ -148,7 +130,6 @@ test("⚠ a colliding id is retried rather than overwriting", () => {
 
   const second = createRoom(store, BASE, {
     newId: () => (calls++ < 3 ? taken : free),
-    newPassphrase: () => "x-y-z-w",
     newHostKey: () => "a-host-key",
     now: () => 0,
   });
@@ -162,7 +143,6 @@ test("⚠ a generator that never yields a free id gives up loudly", () => {
   const same = "c".repeat(ID_LENGTH);
   const deps = {
     newId: () => same,
-    newPassphrase: () => "x-y-z-w",
     newHostKey: () => "a-host-key",
     now: () => 0,
   };

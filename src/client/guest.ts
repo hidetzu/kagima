@@ -12,38 +12,69 @@
 export const roomIdFromPath = (pathname: string): string | null =>
   /^\/r\/([0-9a-z]{16})$/.exec(pathname)?.[1] ?? null;
 
-export type JoinRefusal = "refused" | "malformed" | "unreachable";
-
-export type JoinResult =
-  | { readonly ok: true; readonly token: string }
-  | { readonly ok: false; readonly why: JoinRefusal };
-
 /**
- * ⚠ **Exchange the passphrase for a token, once.**
+ * ⚠ **Why a knock did not become a way in.**
  *
- * ⚠ **`refused` is deliberately one value.** ⚠ **The server returns one answer for a wrong
- * passphrase, an unknown room and a rate-limited attempt** — ⚠ **so there is nothing here to
- * tell apart, and inventing a distinction would answer a question the server declined to.**
+ * ⚠ **`refused` is deliberately one value** (`docs/adr/0017`) — ⚠ **the Host declined, ⚠ the room
+ * closed, ⚠ and the room ending while somebody waited all land here.**
+ * ⚠ **The Guest's next move is the same for all three, ⚠ and telling them apart would say the
+ * Host was there and decided.**
  */
-export const join = async (
+export type JoinRefusal = "refused" | "malformed" | "unreachable";
+/**
+ * ⚠⚠ **Knock, ⚠ and wait for the Host** (`docs/adr/0017`).
+ *
+ * ⚠ **There is nothing to guess.** ⚠ **The answer comes from a person, ⚠ and it can take minutes.**
+ * ⚠ **Measured: ⚠ the Host noticed in 24 seconds once; ⚠ five minutes is accepted.**
+ *
+ * ⚠ **Every failure looks the same from here** — ⚠ **an unknown room, a Host who has not looked,
+ * and a door with too many people at it all read `waiting`** (`src/knock/knocks.ts`).
+ */
+export const knock = async (
   roomId: string,
-  passphrase: string,
+  nickname: string,
   origin: string = location.origin,
-): Promise<JoinResult> => {
+): Promise<{ ok: true; knockId: string } | { ok: false; why: JoinRefusal }> => {
   let res: Response;
   try {
-    res = await fetch(new URL(`/api/rooms/${roomId}/join`, origin), {
+    res = await fetch(new URL(`/api/rooms/${roomId}/knock`, origin), {
       method: "POST",
-      body: JSON.stringify({ passphrase }),
+      body: JSON.stringify({ nickname }),
     });
   } catch {
     // ⚠ Nothing came back. ⚠ That is not the same as being refused
     //   (`.claude/rules/evidence.md`), ⚠ and the wording downstream keeps them apart.
     return { ok: false, why: "unreachable" };
   }
-  if (res.status === 401) return { ok: false, why: "refused" };
   if (!res.ok) return { ok: false, why: "malformed" };
-  return { ok: true, token: ((await res.json()) as { token: string }).token };
+  return { ok: true, knockId: ((await res.json()) as { knockId: string }).knockId };
+};
+
+/** ⚠ **What the door says.** ⚠ `over` covers refused, closed, and ended while waiting. */
+export type KnockOutcome =
+  | { readonly state: "waiting" }
+  | { readonly state: "admitted"; readonly token: string }
+  | { readonly state: "over" };
+
+/** ⚠ **Read once.** ⚠ The caller decides how often; ⚠ a person is on the other end. */
+export const readKnock = async (
+  roomId: string,
+  knockId: string,
+  origin: string = location.origin,
+): Promise<KnockOutcome> => {
+  try {
+    const res = await fetch(new URL(`/api/rooms/${roomId}/knock/${knockId}`, origin));
+    if (!res.ok) return { state: "waiting" };
+    const body = (await res.json()) as { state: string; token?: string };
+    if (body.state === "admitted" && typeof body.token === "string") {
+      return { state: "admitted", token: body.token };
+    }
+    // ⚠ Anything we do not recognise is "still waiting". ⚠ Never invent an ending.
+    return body.state === "over" ? { state: "over" } : { state: "waiting" };
+  } catch {
+    // ⚠ One failed read is not an answer. ⚠ Keep waiting rather than end the wait.
+    return { state: "waiting" };
+  }
 };
 
 /**
@@ -53,9 +84,9 @@ export const join = async (
  * (`CLAUDE.md` § 4-1). ⚠ **It says what to check and what to do next.**
  */
 export const WORDING: Readonly<Record<JoinRefusal, string>> = {
-  // ⚠ Wrong passphrase, unknown room, and rate-limited all land here. ⚠ On purpose.
-  //   ⚠ Saying "no such room" would answer "does this room exist?" to anyone who asks.
-  refused: "合言葉を確かめて、もう一度入力してください。URL と合言葉の両方が必要です。",
+  // ⚠⚠ One sentence for the Host declining, the room closing, and the room ending while waiting.
+  //   ⚠ Saying "the Host declined" would say the Host was there and looked (`docs/adr/0017`).
+  refused: "今回はこのルームに参加できませんでした。招待した人に確認してください。",
   // ⚠ The caller is the one who is wrong, and telling them so leaks nothing about any room.
   malformed: "うまく送れませんでした。ページを読み込み直して、もう一度お試しください。",
   // ⚠ Nothing arrived. ⚠ Never phrased as a refusal — the reader's next move is different.

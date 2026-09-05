@@ -34,21 +34,21 @@
     <button id="copy-url" type="button">URL をコピー</button>
   </div>
 
-  <div class="field">
-    <div>合言葉</div>
-    <div class="value" id="passphrase"></div>
-    <button id="copy-passphrase" type="button">合言葉をコピー</button>
+  <!--
+    ⚠⚠ **The door** (`docs/adr/0017`).
+    ⚠ **One knock at a time.** ⚠ **Never a queue, ⚠ never a count, ⚠ never "満員"** — ⚠ the cap is
+      ⚠ abuse protection and is not a product value.
+  -->
+  <div class="field" id="door" hidden>
+    <div id="door-who"></div>
+    <button id="admit" type="button">入れる</button>
+    <button id="deny" type="button">入れない</button>
+    <p class="hint" id="door-more" hidden>ほかにも入室を待っている人がいます。</p>
   </div>
 
-  <!--
-    ⚠ There is deliberately no button that copies both.
-    ⚠ The URL and the passphrase are meant to travel by different routes; that separation is the
-    ⚠ only wall between a leaked link and a stranger in the room (docs/PRODUCT.md § 3).
-    ⚠ One paste into one channel would remove it.
-  -->
   <p class="hint">
-    ⚠ URL と合言葉は、別々の方法で相手に渡してください。<br />
-    どちらか片方が漏れても、それだけでは入れません。
+    ⚠ URL を相手に渡してください。<br />
+    相手が来たら、この画面でお知らせします。
   </p>
 
   <p id="status">相手が来るのを待っています。</p>
@@ -75,11 +75,11 @@
 </section>
 
 <script type="module">
-  import { createRoom, joinOwnRoom, closeRoom, copyOne } from "/client/host.ts";
-  import { createCall, classifyMediaError } from "/client/call.ts";
+  import { classifyMediaError, createCall } from "/client/call.ts";
   import { createDiagnostics } from "/client/diagnostics.ts";
-  import { hostStatus, outranks } from "/status/status.ts";
+  import { closeRoom, copyOne, createRoom } from "/client/host.ts";
   import { connectSignaling } from "/client/transport.ts";
+  import { hostStatus, outranks } from "/status/status.ts";
 
   const $ = (id) => document.getElementById(id);
   const status = $("status");
@@ -93,12 +93,11 @@
     try {
       room = await createRoom();
       $("share-url").textContent = room.shareUrl;
-      $("passphrase").textContent = room.passphrase;
       $("before").hidden = true;
       $("after").hidden = false;
 
-      // ⚠ The host reads the passphrase once, to get its own token. ⚠ Then it stops reading it.
-      const token = await joinOwnRoom(room.roomId, room.passphrase);
+      // ⚠ The Host's own way in came with the room (`docs/adr/0017`). ⚠ There is nothing to exchange.
+      const token = room.token;
       const transport = await connectSignaling(room.roomId, token);
 
       // ⚠ Listen BEFORE anything slow. ⚠ `createCall` awaits getUserMedia, and the guest can
@@ -133,7 +132,36 @@
 
 
 
+      // ⚠⚠ **Somebody is at the door** (`docs/adr/0017`).
+      //
+      // ⚠ **One at a time, ⚠ oldest first.** ⚠ **A queue on screen would be a count, ⚠ and a count
+      //   ⚠ is a thing the cap must never show.**
+      // ⚠ **Nothing about who knocked is kept** — ⚠ **the list lives while the page does.**
+      const atTheDoor = [];
+      const showDoor = () => {
+        const first = atTheDoor[0];
+        $("door").hidden = first === undefined;
+        $("door-more").hidden = atTheDoor.length <= 1;
+        if (first !== undefined) {
+          // ⚠ textContent: the name came from outside (same wall as the status line).
+          $("door-who").textContent = `${first.nickname} さんがノックしています`;
+        }
+      };
+      const decide = (allow) => {
+        const first = atTheDoor.shift();
+        if (first === undefined) return;
+        transport.send({ type: "admit", knockId: first.knockId, allow });
+        showDoor();
+      };
+      $("admit").addEventListener("click", () => decide(true));
+      $("deny").addEventListener("click", () => decide(false));
+
       transport.onMessage((message) => {
+        if (message.type === "knock") {
+          atTheDoor.push({ knockId: message.knockId, nickname: message.nickname });
+          showDoor();
+          return;
+        }
         if (message.type === "hello") {
           guestName = message.nickname;
           render();
@@ -168,11 +196,6 @@
         if (event.code === 4005) {
           call?.hangUp();
           ending = outranks(ending, "closed");
-          render();
-          return;
-        }
-        if (event.code === 4002) {
-          ending = outranks(ending, "room-full");
           render();
           return;
         }
@@ -270,15 +293,11 @@
     }
   });
 
-  // ⚠ One thing per button. ⚠ Never both at once — see the comment in the markup.
+  // ⚠ One control, one thing. ⚠ The URL is the only thing there is to hand over now
+  //   (`docs/adr/0017`).
   $("copy-url").addEventListener("click", async () => {
     $("copy-url").textContent = (await copyOne(room.shareUrl))
       ? "URL をコピーしました"
-      : "コピーできませんでした。手で選んでください";
-  });
-  $("copy-passphrase").addEventListener("click", async () => {
-    $("copy-passphrase").textContent = (await copyOne(room.passphrase))
-      ? "合言葉をコピーしました"
       : "コピーできませんでした。手で選んでください";
   });
 

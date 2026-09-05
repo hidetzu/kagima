@@ -17,10 +17,11 @@
 // ⚠ **And a socket through a tunnel dies quietly** — ⚠ **no close frame, no error, just silence.**
 // ⚠ **Without a ping, this process holds a room slot for a peer that left.**
 import type { Server } from "node:http";
-import { WebSocketServer, type WebSocket } from "ws";
+import { type WebSocket, WebSocketServer } from "ws";
+import type { Knocks } from "../knock/knocks.ts";
 import { logger } from "../log.ts";
-import { verifyJoinToken } from "../token/join-token.ts";
-import { type Hub, type Peer } from "./hub.ts";
+import { issueJoinToken, verifyJoinToken } from "../token/join-token.ts";
+import type { Hub, Peer } from "./hub.ts";
 import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.ts";
 
 /** ⚠ **The subprotocol that carries the token.** ⚠ The only field a browser can set here. */
@@ -60,6 +61,11 @@ const tokenFromProtocols = (raw: string | undefined): string | null => {
 export type SignalingOptions = {
   readonly hub: Hub;
   readonly secret: string;
+  /**
+   * ⚠ **The door** (`docs/adr/0017`). ⚠ **Absent means no door** — ⚠ **used by checks that only
+   * care about relaying.**
+   */
+  readonly knocks?: Knocks;
   /**
    * ⚠ **Called while anybody is connected, so the room does not expire under a live call.**
    *
@@ -218,6 +224,25 @@ export const attachSignaling = (server: Server, options: SignalingOptions): WebS
         ws.send(JSON.stringify({ type: "refused", why: parsed.why }));
         return;
       }
+      // ⚠⚠ **The Host's decision about somebody at the door** (`docs/adr/0017`).
+      //
+      // ⚠ **Handled here and never relayed** — ⚠ **the other participant has no business learning
+      //   ⚠ who knocked or what was decided about them.**
+      // ⚠ **An id we do not know is ignored in silence: ⚠ answering would say which ids are real.**
+      // ⚠ **Nothing is said back on success either** — ⚠ **the Host learns the outcome by the
+      //   ⚠ knock leaving its list, ⚠ which is what it already watches.**
+      if (parsed.message.type === "admit") {
+        const { knockId, allow } = parsed.message;
+        void (async () => {
+          const token = allow ? await issueJoinToken(roomId, options.secret, now()) : null;
+          options.knocks?.decide(roomId, knockId, allow, token);
+        })().catch(() => {
+          // ⚠ Minting failed. ⚠ The knock stays waiting, ⚠ which is what it already looked like —
+          //   ⚠ so the Guest sees no difference and the Host can decide again.
+        });
+        return;
+      }
+
       // ⚠ Relayed opaque, with `from` filled in here rather than taken from the client.
       const line = JSON.stringify({ ...parsed.message, from: peer.id });
       const result = options.hub.relay(roomId, peer.id, line);

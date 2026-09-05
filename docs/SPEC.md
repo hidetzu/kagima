@@ -30,6 +30,9 @@
 
 | 層 | 何ができるか | どの規格の、どの節か | 何が裏付けるか |
 |---|---|---|---|
+| 入口 | ⚠ **URL を持つ人がノックでき、⚠ Host が入れると決めた人だけが入れる** | — | ⚠ **ケース `frames`**(`npm run e2e`)。⚠ **Host が承認するまで通話は始まらない** |
+| 入口 | ⚠ **存在しないルームと、⚠ Host が応じていないルームは、⚠ 外から区別できない** | — | ⚠ **ケース `guest-refusals`**(`npm run e2e`)。⚠ **2 つの待機画面を文字列として比較する** |
+| 入口 | ⚠ **入れなかった人のカメラは、⚠ 一度も求められない** | W3C Media Capture(`getUserMedia`) | ⚠ **ケース `third-person`**(`npm run e2e`)。⚠ **待っている側に `kagimaCall` が存在しないことを見る** |
 | ブラウザ間 | ⚠ **2 人が、⚠ 我々が書いていない 2 つのエンジンのあいだで、映像と音声を双方向にやりとりできる** | W3C WebRTC(`RTCPeerConnection`)、Media Capture(`getUserMedia`) | ⚠ **ケース `chromium-to-firefox`**(`npm run external`)。⚠ **`framesDecoded` を両側で読む。⚠ `connectionState` では判定しない** |
 
 ## 2. 意図的に実装していないもの
@@ -42,6 +45,7 @@
 
 | 実装していないもの | 意図的か | 理由 |
 |---|---|---|
+| ⚠ **合言葉による入室** | ⚠ **はい** | ⚠ **入口は Host の招待に変わった**([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md))。⚠ **推測される秘密は存在しない** |
 | TURN relay 経由の接続 | ⚠ **はい** | ⚠ **v0.1.0 は STUN のみで出す**([`adr/0013`](adr/0013-ship-v0-1-0-with-stun-only-and-say-so-when-it-does-not-reach.md))。⚠ **繋がらない組み合わせが存在することを受け入れた決定であって、⚠ 「STUN で足りる」という測定結果ではない。** ⚠ **割合は測っていない** |
 | WebKit での動作 | ⚠ **いいえ** | ⚠ **拒否ではない。** ⚠ **一度も走らせていないだけである** |
 

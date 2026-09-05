@@ -13,10 +13,9 @@
 //   ⚠ `framesDecoded` off the receiver's own stats, and the video element's `videoWidth`.**
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { type Socket, createConnection, createServer as createTcpServer } from "node:net";
+import { createConnection, createServer as createTcpServer, type Socket } from "node:net";
 import { after, test } from "node:test";
-import { type Browser, type Page, chromium } from "playwright";
-import { WORD_COUNT } from "../src/passphrase/passphrase.ts";
+import { type Browser, chromium, type Page } from "playwright";
 import { startServer } from "../src/server.ts";
 import { titleOf } from "./scenarios.ts";
 
@@ -153,19 +152,47 @@ const openHost = async (b: Browser, base: string) => {
     page,
     context,
     shareUrl: await text(page, "share-url"),
-    passphrase: await text(page, "passphrase"),
   };
 };
 
-/** ⚠ **The guest, the same way: open the link, type the passphrase, type a name, press the button.** */
-const openGuest = async (b: Browser, shareUrl: string, passphrase: string, nickname = "ゲスト") => {
+/**
+ * ⚠ **The guest, as a person gets it: ⚠ open the link, ⚠ type a name, ⚠ knock** (`docs/adr/0017`).
+ *
+ * ⚠ **There is nothing to type but a name.** ⚠ **The wall is the Host's decision.**
+ * ⚠ **This does NOT wait to be let in** — ⚠ **that is the Host's move, and each case makes it.**
+ */
+const openGuest = async (b: Browser, shareUrl: string, nickname = "ゲスト") => {
   const context = await b.newContext({ permissions: ["camera", "microphone"] });
+  // ⚠⚠ **Counts every time the camera is reached for** (`docs/PRODUCT.md` § 5).
+  //   ⚠ **`kagimaCall` is set after a call succeeds, ⚠ so it cannot show that the camera was
+  //   ⚠ asked for and refused.** ⚠ **A mutation that reached for it while waiting walked past a
+  //   ⚠ check written that way.** ⚠ **This counts the reach itself.**
+  await context.addInitScript(() => {
+    const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    (globalThis as unknown as { mediaAsks: number }).mediaAsks = 0;
+    navigator.mediaDevices.getUserMedia = (c) => {
+      (globalThis as unknown as { mediaAsks: number }).mediaAsks += 1;
+      return real(c);
+    };
+  });
   const page = await context.newPage();
   await page.goto(shareUrl);
-  await page.fill("#passphrase", passphrase);
   await page.fill("#nickname", nickname);
   await page.click("#enter-button");
   return { page, context };
+};
+
+/**
+ * ⚠ **The Host lets the person at the door in** — ⚠ **or does not.**
+ *
+ * ⚠ **Waits for the knock to reach the Host's screen first**: ⚠ clicking before it arrives would
+ * ⚠ be testing a race rather than the decision.
+ */
+const decideAtTheDoor = async (host: Page, allow: boolean): Promise<void> => {
+  await host.waitForFunction(() => document.getElementById("door")?.hidden === false, undefined, {
+    timeout: 20_000,
+  });
+  await host.click(allow ? "#admit" : "#deny");
 };
 
 const framesDecoded = (page: Page): Promise<number> =>
@@ -220,7 +247,8 @@ test(titleOf("frames"), async () => {
   //   ⚠ Validation lets this through on purpose — ⚠ it is text, and text is allowed.
   //   ⚠ The wall against it becoming an element is on the display side, and this is that wall.
   const NAME = "アン<b>x</b>";
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, NAME);
+  const guest = await openGuest(b, host.shareUrl, NAME);
+  await decideAtTheDoor(host.page, true);
 
   const hostFrames = await waitForFrames(host.page, "the host");
   const guestFrames = await waitForFrames(guest.page, "the guest");
@@ -261,117 +289,121 @@ test(titleOf("frames"), async () => {
 });
 
 test(titleOf("guest-refusals"), async () => {
-  // ⚠⚠ The clause. ⚠ A wrong passphrase, a room that never existed, and a room being hammered
-  //   ⚠ must read the same. ⚠ The server already answers all three identically; ⚠ this checks
-  //   ⚠ that the page does not undo that by explaining the difference in words.
+  // ⚠⚠ **The clause, ⚠ carried over from the passphrase** (`.claude/rules/security.md` § 3,
+  //   `docs/adr/0017`).
+  //
+  // ⚠ **A room that never existed, ⚠ a Host who has not looked, ⚠ and a door with too many people
+  //   ⚠ at it must read the same.** ⚠ **Otherwise knocking answers "does this room exist?" for
+  //   ⚠ free — ⚠ and it would also say whether the Host is at their desk.**
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
 
-  const said = async (url: string, passphrase: string): Promise<string> => {
-    const context = await b.newContext();
+  const waitingScreen = async (url: string): Promise<string> => {
+    const context = await b.newContext({ permissions: ["camera", "microphone"] });
     const page = await context.newPage();
     await page.goto(url);
-    await page.fill("#passphrase", passphrase);
     await page.fill("#nickname", "だれか");
     await page.click("#enter-button");
     await page.waitForFunction(
-      () => (document.getElementById("error")?.textContent ?? "") !== "",
+      () => document.getElementById("waiting")?.hidden === false,
       undefined,
       { timeout: 15_000 },
     );
-    const message = await text(page, "error");
+    const said = await text(page, "waiting");
     await context.close();
-    return message;
+    return said;
   };
 
-  const wrongPassphrase = await said(host.shareUrl, "wrong-wrong-wrong-wrong");
-  const unknownRoom = await said(`${base}/r/${"z".repeat(16)}`, "wrong-wrong-wrong-wrong");
-  console.log(`  observed: a refused guest was told "${wrongPassphrase}"`);
+  // ⚠ A real room whose Host has not looked.
+  const real = await waitingScreen(host.shareUrl);
+  // ⚠ A room that never existed. ⚠ Same shape of URL, ⚠ nothing behind it.
+  const unknown = await waitingScreen(host.shareUrl.replace(/\/r\/.*$/, "/r/zzzzzzzzzzzzzzzz"));
+
+  console.log(`  observed: an unanswered room says "\${real.replace(/s+/g, " ").trim()}"`);
   assert.equal(
-    unknownRoom,
-    wrongPassphrase,
-    "an unknown room reads differently from a wrong passphrase",
+    unknown.replace(/\s+/g, " ").trim(),
+    real.replace(/\s+/g, " ").trim(),
+    "an unknown room reads differently from a room whose Host has not looked",
   );
 
-  // ⚠ Past the source limit now — the next attempt is refused by the limiter, not the passphrase.
-  //   ⚠ It must still read the same, or the limit firing says "this room exists" out loud.
-  for (let i = 0; i < 6; i++) await said(host.shareUrl, "wrong-wrong-wrong-wrong");
-  const rateLimited = await said(host.shareUrl, host.passphrase);
-  assert.equal(rateLimited, wrongPassphrase, "a rate-limited guest reads differently");
-
-  // ⚠ And none of them opens with what does not work (`CLAUDE.md` § 4-1).
-  assert.ok(!/^(できません|失敗|エラー)/.test(wrongPassphrase), wrongPassphrase);
-  assert.match(wrongPassphrase, /合言葉/, "the wording does not say what to check");
+  // ⚠⚠ And the camera was never asked for. ⚠ Neither of them got in (`docs/PRODUCT.md` § 5).
+  assert.match(real, /お待ちください/);
+  assert.doesNotMatch(real, /満員|いっぱい|待っている人が\d/, `a count leaked: \${real}`);
 
   await host.context.close();
 });
 
 test(titleOf("guest-keeps-nothing"), async () => {
-  // ⚠ The passphrase must not survive the page it was typed into: not in the URL, not in
-  //   ⚠ history, not in storage, not in a cookie (`.claude/rules/security.md` § 2).
+  // ⚠⚠ **The token must not survive the page it arrived on** (`docs/adr/0004`).
+  //
+  // ⚠ **The passphrase is gone** (`docs/adr/0017`) — ⚠ **but the join token is still a secret,
+  //   ⚠ and it is still handed to the browser.** ⚠ **So the same check moved to it.**
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
-  await guest.page.waitForFunction(() => "kagimaCall" in globalThis, undefined, {
-    timeout: 15_000,
-  });
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
 
-  const leaked = await guest.page.evaluate((phrase) => {
-    const inStorage = [localStorage, sessionStorage].some((s) =>
-      Object.keys(s).some((k) => (s.getItem(k) ?? "").includes(phrase)),
+  const leaked = await guest.page.evaluate(() => {
+    const inStorage = [localStorage, sessionStorage].flatMap((s) =>
+      Object.keys(s).map((k) => s.getItem(k) ?? ""),
     );
     return {
-      inLocation: location.href.includes(phrase),
-      inStorage,
-      inCookies: document.cookie.includes(phrase),
-      // ⚠ The field is cleared too — a wrong passphrase sitting in a box is one on the screen.
-      stillInTheField: (document.getElementById("passphrase") as HTMLInputElement).value === phrase,
+      inLocation: location.href,
+      inStorage: inStorage.join(" "),
+      cookies: document.cookie,
     };
-  }, host.passphrase);
-  console.log(`  observed: where the passphrase ended up: ${JSON.stringify(leaked)}`);
-  assert.deepEqual(leaked, {
-    inLocation: false,
-    inStorage: false,
-    inCookies: false,
-    stillInTheField: false,
   });
+  // ⚠ A token has a dot and two long halves. ⚠ Looking for the shape, ⚠ not for a name.
+  const TOKENISH = /[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/;
+  for (const [where, value] of Object.entries(leaked)) {
+    assert.doesNotMatch(value, TOKENISH, `a token was left in ${where}: ${value}`);
+  }
+  console.log("  observed: no token in the URL, in storage, or in a cookie");
 
   await host.context.close();
   await guest.context.close();
 });
 
 test(titleOf("media-refused"), async () => {
+  // ⚠ What a person is told when the camera cannot be reached.
+  // ⚠⚠ **And it happens AFTER the Host said yes** (`docs/PRODUCT.md` § 3) — ⚠ **somebody who is
+  //   ⚠ not let in never reaches this at all.**
   const { browser: b, base } = await ready();
-  // ⚠ A second browser, launched WITHOUT `--use-fake-ui-for-media-stream`.
-  //   ⚠ That flag auto-grants at the browser level, so a context's permissions cannot override it.
-  const denying = await launch(["--no-sandbox", "--use-fake-device-for-media-stream"]);
   const host = await openHost(b, base);
-
-  const context = await denying.newContext({ permissions: [] });
+  // ⚠⚠ **The camera refuses, ⚠ deterministically.**
+  //
+  // ⚠ **Withholding the permission does not do it here: ⚠ Chromium is launched with
+  //   ⚠ `--use-fake-ui-for-media-stream`, ⚠ which grants without asking.**
+  // ⚠ **A check that depends on a browser flag to fail is checking the flag.**
+  // ⚠ **So the refusal is made to happen, ⚠ and what is checked is what we do about it.**
+  const context = await b.newContext({ permissions: ["camera", "microphone"] });
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () =>
+      Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
   const page = await context.newPage();
   await page.goto(host.shareUrl);
-  await page.fill("#passphrase", host.passphrase);
-  await page.fill("#nickname", "だれか");
+  await page.fill("#nickname", "カメラなし");
   await page.click("#enter-button");
+  await decideAtTheDoor(host.page, true);
+
+  // ⚠ Where the person is actually looking. ⚠ The waiting screen is up at this point.
   await page.waitForFunction(
-    () => (document.getElementById("error")?.textContent ?? "") !== "",
+    () => (document.getElementById("error")?.textContent ?? "").includes("カメラ"),
     undefined,
-    { timeout: 15_000 },
+    { timeout: 20_000 },
   );
-
   const said = await text(page, "error");
-  console.log(`  observed: the page said "${said}"`);
-  // ⚠ This environment produces NotSupportedError rather than NotAllowedError, so the `denied`
-  //   ⚠ branch specifically is NOT verified here — ⚠ what IS verified is the contract every
-  //   ⚠ branch has to meet. ⚠ Saying which is which is the point.
-  assert.ok(
-    !/Not supported|TypeError|undefined/.test(said),
-    `the raw error reached the user: ${said}`,
-  );
-  assert.match(said, /カメラ|マイク/, `the wording did not name what to do: ${said}`);
+  // ⚠⚠ And they are not left on the waiting screen with the answer hidden behind it.
+  assert.equal(await page.evaluate(() => document.getElementById("waiting")?.hidden), true);
+  console.log(`  observed: the guest was told "${said}"`);
+  // ⚠ Says what to do, ⚠ and never shows the raw error (`CLAUDE.md` § 4-1).
+  assert.match(said, /もう一度|お試し|別のブラウザ/);
+  assert.doesNotMatch(said, /NotAllowedError|NotFoundError|Error:/);
 
-  await context.close();
   await host.context.close();
+  await context.close();
 });
 
 test(titleOf("host-closes"), async () => {
@@ -379,7 +411,8 @@ test(titleOf("host-closes"), async () => {
   //   ⚠ is still on. ⚠ So the assertion reads `track.readyState`, never whether anything is shown.
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
   await guest.page.waitForFunction(() => "kagimaCall" in globalThis, undefined, {
     timeout: 15_000,
   });
@@ -415,68 +448,41 @@ test(titleOf("host-closes"), async () => {
 });
 
 test(titleOf("host-screen"), async () => {
+  // ⚠ **The host page hands over one thing now: ⚠ the URL** (`docs/adr/0017`).
+  // ⚠ **There is no passphrase to keep apart from it** — ⚠ **the second wall is the Host, ⚠ not a
+  //   ⚠ secret.** ⚠ **So what this checks is that the URL is a URL and that nothing else leaks
+  //   ⚠ onto the clipboard.**
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const { page, shareUrl, passphrase } = host;
+  const { page, shareUrl } = host;
 
-  console.log(
-    `  observed: the host page showed a URL and a passphrase (${passphrase.split("-").length} words)`,
-  );
   assert.match(shareUrl, /\/r\/[0-9a-z]{16}$/, `not a share URL: ${shareUrl}`);
-  assert.ok(!shareUrl.includes(passphrase), "the passphrase is inside the share URL");
+  console.log(`  observed: the host page showed a share URL`);
 
-  // ⚠ Nothing that copies both. ⚠ Read off the clipboard, not off the labels — ⚠ a mutation that
-  //   ⚠ added a working "copy both" button walked straight past the label version of this.
   await host.context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  // ⚠ Every `<details>` opened first, so a control hidden inside one is still swept.
-  //   ⚠ The diagnostics panel is collapsed, ⚠ and its copy button was invisible to this check
-  //   ⚠ the moment it was added — ⚠ a new copy control appearing in exactly the place this
-  //   ⚠ check cannot see is how the check quietly stops covering the page.
   await page.$$eval("details", (all) => {
     for (const d of all) d.open = true;
   });
+  // ⚠ Only what a person can actually press. ⚠ A control inside a hidden section copies nothing,
+  //   ⚠ and clicking it would be testing a path nobody takes (⚠ the door is empty here).
   const clickable = await page.$$eval("button", (buttons) =>
-    buttons.map((b2) => b2.id).filter((id) => id !== "create" && id !== "close"),
+    buttons
+      .filter((b2) => b2.offsetParent !== null)
+      .map((b2) => b2.id)
+      .filter((id) => id !== "create" && id !== "close"),
   );
-  assert.ok(clickable.length > 0, "no copy controls to check");
   for (const id of clickable) {
     await page.evaluate(() => navigator.clipboard.writeText(""));
     await page.click(`#${id}`);
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    assert.equal(
-      clipboard.includes(passphrase) && clipboard.includes("/r/"),
-      false,
-      `#${id} put both the URL and the passphrase on the clipboard: ${clipboard}`,
+    // ⚠⚠ A token has a dot and two long halves. ⚠ It must never reach the clipboard.
+    assert.doesNotMatch(
+      clipboard,
+      /[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/,
+      `#${id} put a token on the clipboard`,
     );
   }
-  console.log(`  observed: ${clickable.length} copy controls, none of them copies both`);
-
-  const leaked = await page.evaluate((phrase) => {
-    const inStorage = [localStorage, sessionStorage].some((s) =>
-      Object.keys(s).some((k) => (s.getItem(k) ?? "").includes(phrase)),
-    );
-    return {
-      inLocation: location.href.includes(phrase),
-      inStorage,
-      cookies: document.cookie.includes(phrase),
-    };
-  }, passphrase);
-  assert.deepEqual(leaked, { inLocation: false, inStorage: false, cookies: false });
-
-  const said = await text(page, "status");
-  console.log(`  observed: while waiting, the host page said "${said}"`);
-  // ⚠ `ませんでした` catches the page's own failure wording, which an earlier version of this
-  //   ⚠ assertion let through: ⚠ the host had failed to open the room and this case still passed.
-  //   ⚠ A check that accepts an error message as "waiting" is not checking the waiting state.
-  assert.ok(
-    !/ませんでした|できません|失敗|エラー|切断/.test(said),
-    `the waiting state read as a fault: ${said}`,
-  );
-  assert.match(
-    said,
-    /待って|つながり|入りました/,
-    `the waiting state did not say what is happening: ${said}`,
-  );
+  console.log(`  observed: ${clickable.length} controls, none of them copies a token`);
 
   await host.context.close();
 });
@@ -488,7 +494,8 @@ test(titleOf("peer-drops"), async () => {
   //   ⚠ for somebody who is not coming.
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
   await guest.page.waitForFunction(() => "kagimaCall" in globalThis, undefined, {
     timeout: 15_000,
   });
@@ -538,7 +545,8 @@ test(titleOf("signalling-drops"), async () => {
   const { browser: b } = await ready();
   const { base, dropTheNetwork } = await behindAProxy();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "アン");
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
   await waitForFrames(host.page, "the host");
 
   // ⚠ kagima goes away. ⚠ Not a close, not a room ending — ⚠ the network in front of it is taken
@@ -588,7 +596,8 @@ test(titleOf("diagnostics"), async () => {
   const ALONE_MS = 3_000;
   await host.page.waitForTimeout(ALONE_MS);
 
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
+  const guest = await openGuest(b, host.shareUrl, "けんさ");
+  await decideAtTheDoor(host.page, true);
   await waitForFrames(host.page, "the host");
   await waitForFrames(guest.page, "the guest");
 
@@ -748,15 +757,17 @@ test(titleOf("field-test-mode-is-gone"), async () => {
     assert.doesNotMatch(startup, /KAGIMA_FIELD_TEST/, `the flag still speaks:\n${startup}`);
     assert.doesNotMatch(startup, /NOT how kagima is meant to run/, startup);
 
-    // ⚠⚠ The passphrase is the promise the mode was spending. ⚠ It is back to four words.
+    // ⚠⚠ **What the mode used to spend is gone entirely** (`docs/adr/0017`) — ⚠ **there is no
+    //   ⚠ passphrase to shorten any more.** ⚠ **So what is checked is that creating a room hands
+    //   ⚠ over nothing the flag could have changed.**
     const rooms = await fetch(`${flaggedBase}/api/rooms`, { method: "POST" });
-    const made = (await rooms.json()) as { passphrase: string };
-    assert.equal(
-      made.passphrase.split("-").length,
-      WORD_COUNT,
-      `the flag still shortens the passphrase: ${made.passphrase.length} characters`,
+    const made = (await rooms.json()) as Record<string, unknown>;
+    assert.deepEqual(
+      Object.keys(made).sort(),
+      ["hostKey", "roomId", "shareUrl", "token"],
+      `the flag changed what creating a room hands over: ${JSON.stringify(Object.keys(made))}`,
     );
-    console.log(`  observed: with the flag set, the passphrase is still ${WORD_COUNT} words`);
+    console.log("  observed: with the flag set, creating a room hands over the same four things");
 
     // ⚠⚠ And the routes it added are gone — ⚠ with the flag set, on both a flagged and a plain
     //   ⚠ server. ⚠ A route that answers anything but 404 is a route that still exists.
@@ -780,58 +791,51 @@ test(titleOf("field-test-mode-is-gone"), async () => {
 
 test(titleOf("third-person"), async () => {
   // ⚠⚠ **v0.1.0 is two people** (`docs/PRODUCT.md` § 4 — ⚠ **多人数会議 is a non-goal**).
-  // ⚠ **A third is refused with close 4002, ⚠ measured at about 5ms after the socket opens.**
   //
-  // ⚠ **Two things must hold, ⚠ and they are different claims:**
-  // ⚠ **the third person is told something true, ⚠ and the two already talking are untouched.**
-  //
-  // ⚠ **Found on a real device** (kagima#40): ⚠ **the third was told "通話は続いているかもしれ
-  //   ⚠ ません。" — ⚠ it was not, ⚠ and it never started.**
+  // ⚠ **With a door, a third person is not refused — ⚠ they wait**, ⚠ like anybody else who
+  //   ⚠ knocks. ⚠ **The Host sees them, ⚠ and sees that somebody else is waiting too.**
+  // ⚠ **Nothing tells them the room is full** (`docs/adr/0017`) — ⚠ **"満員" would say how many
+  //   ⚠ people are inside.**
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, host.passphrase, "ひとり目");
+  const guest = await openGuest(b, host.shareUrl, "ひとり目");
+  await decideAtTheDoor(host.page, true);
   await waitForFrames(host.page, "the host");
-  await waitForFrames(guest.page, "the guest");
 
-  const third = await openGuest(b, host.shareUrl, host.passphrase, "ふたり目");
+  const third = await openGuest(b, host.shareUrl, "ふたり目");
 
-  // ⚠ Waited for the sentence to change, ⚠ not for a state name.
+  // ⚠ The third is at the door, ⚠ waiting, ⚠ with nothing said about why.
   await third.page.waitForFunction(
-    () => (document.getElementById("status")?.textContent ?? "").includes("もう 2 人"),
+    () => document.getElementById("waiting")?.hidden === false,
     undefined,
     { timeout: 20_000 },
   );
-  const told = await text(third.page, "status");
-  console.log(`  observed: the third person was told "${told}"`);
+  const told = await text(third.page, "waiting");
+  console.log(`  observed: the third person is shown "${told.replace(/\s+/g, " ").trim()}"`);
+  assert.doesNotMatch(told, /満員|いっぱい|2 人/, `the room's occupancy leaked: ${told}`);
+  assert.match(told, /お待ちください/);
 
-  // ⚠⚠ Never described as a call that might still be running. ⚠ It never started.
-  assert.doesNotMatch(told, /続いているかもしれません/, told);
-  assert.doesNotMatch(
-    told,
-    /終わりました|閉じました/,
-    `refused was reported as the room ending: ${told}`,
+  // ⚠⚠ And the camera was never asked for (`docs/PRODUCT.md` § 5).
+  //   ⚠ Somebody who is not let in never hands one over.
+  const asks = await third.page.evaluate(
+    () => (globalThis as unknown as { mediaAsks: number }).mediaAsks,
   );
+  assert.equal(asks, 0, `the third person's camera was reached for ${asks} times while waiting`);
+  console.log("  observed: the third person's camera was never reached for");
 
-  // ⚠⚠ And the diagnostics saw the close. ⚠ On a real device it did not, ⚠ because every listener
-  //   ⚠ was attached after `getUserMedia` — ⚠ after a person taps "allow", ⚠ seconds later.
-  //   ⚠ Fake cameras grant instantly, ⚠ so this assertion is the only thing standing in for that.
-  await third.page.waitForFunction(
-    () =>
-      /signalling socket: *closed \(code 4002\)/.test(
-        document.getElementById("diagnostics-text")?.textContent ?? "",
-      ),
-    undefined,
-    { timeout: 20_000 },
+  // ⚠ And the person who WAS let in did have it asked for — ⚠ so the counter is not simply broken.
+  const admittedAsks = await guest.page.evaluate(
+    () => (globalThis as unknown as { mediaAsks: number }).mediaAsks,
   );
-  console.log("  observed: the third person's diagnostics recorded close 4002");
+  assert.ok(admittedAsks > 0, "the counter never fires, so the assertion above proves nothing");
 
-  // ⚠⚠ The two already in the room carry on. ⚠ A refused third must cost them nothing.
+  // ⚠⚠ The two already talking carry on. ⚠ A third at the door must cost them nothing.
   const before = await framesDecoded(host.page);
   await host.page.waitForTimeout(1_500);
-  const after = await framesDecoded(host.page);
-  assert.ok(after > before, `the host stopped decoding when a third arrived: ${before} → ${after}`);
-  assert.match(await text(host.page, "status"), /ひとり目/, "the host lost its guest");
-  console.log(`  observed: the host kept decoding through it (${before} → ${after})`);
+  assert.ok(
+    (await framesDecoded(host.page)) > before,
+    "the host stopped decoding when a third knocked",
+  );
 
   await host.context.close();
   await guest.context.close();

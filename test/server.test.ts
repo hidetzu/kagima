@@ -9,16 +9,16 @@
 // ⚠ **It is at the edge of the fast tier**: ⚠ **it builds no environment and depends on nothing
 //   ⚠ outside this process, but it does open a port.** ⚠ **It is not the final gate, and it does
 //   ⚠ not pretend to be** (`.claude/skills/verify/SKILL.md` § 3 — ⚠ **that tier needs a browser**).
-import { readFile } from "node:fs/promises";
+
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
-import { type Context, handle } from "../src/server.ts";
-import { createRejectionCounter } from "../src/room/join.ts";
-import { createRateLimiter } from "../src/room/rate-limit.ts";
-import { createHub } from "../src/signaling/hub.ts";
+import { createKnockRejectionCounter, createKnocks } from "../src/knock/knocks.ts";
 import { createRoomStore } from "../src/room/store.ts";
+import { type Context, handle } from "../src/server.ts";
+import { createHub } from "../src/signaling/hub.ts";
 
 const started: Array<() => void> = [];
 after(() => {
@@ -34,9 +34,9 @@ const start = async (over: Partial<Context> = {}) => {
     store: createRoomStore(),
     baseUrl: "http://127.0.0.1",
     secret: "a-secret-for-this-test",
-    rejections: createRejectionCounter(),
-    limiter: createRateLimiter({ now: Date.now }),
     hub: createHub(),
+    knocks: createKnocks({ newId: () => `k${Math.random()}`, roomExists: () => true }),
+    knockRejections: createKnockRejectionCounter(),
     trustedSourceHeader: "",
     ...over,
   };
@@ -74,19 +74,6 @@ const makeRoom = async (base: string) => {
   };
 };
 
-test("a room is created, and the passphrase is not in the share URL", async () => {
-  const { base } = await start();
-  const room = await makeRoom(base);
-  assert.ok(!room.shareUrl.includes(room.passphrase));
-});
-
-test("the right passphrase opens the room", async () => {
-  const { base } = await start();
-  const room = await makeRoom(base);
-  const res = await join(base, room.roomId, room.passphrase);
-  assert.equal(res.status, 200);
-});
-
 test("⚠⚠ every refusal is byte for byte the same response", async () => {
   // ⚠ This is the property. ⚠ A distinguishable answer turns this endpoint into
   //   ⚠ "does this room exist?" for anyone who asks (`.claude/rules/security.md` § 3).
@@ -101,90 +88,6 @@ test("⚠⚠ every refusal is byte for byte the same response", async () => {
 
   assert.deepEqual(unknownRoom, wrongPassphrase, "an unknown room answers differently");
   assert.deepEqual(malformedId, wrongPassphrase, "a malformed room id answers differently");
-});
-
-test("⚠⚠ a rate-limited refusal is the same response as a wrong passphrase", async () => {
-  // ⚠ A 429 here would make the limit firing say "this room exists" out loud.
-  //   ⚠ The cost is that a real guest gets no "slow down" hint. ⚠ That cost is accepted.
-  const { base } = await start({ limiter: createRateLimiter({ now: Date.now, sourceLimit: 2 }) });
-  const room = await makeRoom(base);
-
-  const wrongPassphrase = await observable(
-    await join(base, room.roomId, "wrong-wrong-wrong-wrong"),
-  );
-  await join(base, room.roomId, "wrong-wrong-wrong-wrong");
-  // ⚠ Past the limit now. ⚠ Ask with the RIGHT passphrase, so the only reason to refuse is the limit.
-  const limited = await observable(await join(base, room.roomId, room.passphrase));
-
-  assert.deepEqual(limited, wrongPassphrase, "a rate-limited refusal is distinguishable");
-});
-
-test("⚠ a success costs nobody any budget, however many times it happens", async () => {
-  // ⚠ This case exists because a weaker one did not catch its own mutation.
-  //   ⚠ The version below it asserts a 200 before the limit has fired — ⚠ and a server that
-  //   ⚠ recorded a failure on SUCCESS still passed it, because the check runs before the record.
-  //   ⚠ What distinguishes the two is repeating the success past the limit.
-  const { base } = await start({ limiter: createRateLimiter({ now: Date.now, sourceLimit: 2 }) });
-  const room = await makeRoom(base);
-
-  for (let i = 0; i < 5; i++) {
-    const res = await join(base, room.roomId, room.passphrase);
-    assert.equal(res.status, 200, `success ${i + 1} was refused — a success consumed budget`);
-  }
-});
-
-test("⚠ the right passphrase is refused once the limit has fired", async () => {
-  // ⚠ This is the only thing a caller can observe that shows the limit works at all.
-  //   ⚠ Without a limiter this request returns 200.
-  const { base } = await start({ limiter: createRateLimiter({ now: Date.now, sourceLimit: 1 }) });
-  const room = await makeRoom(base);
-
-  assert.equal(
-    (await join(base, room.roomId, room.passphrase)).status,
-    200,
-    "a success must not cost budget",
-  );
-  await join(base, room.roomId, "wrong-wrong-wrong-wrong");
-  assert.equal(
-    (await join(base, room.roomId, room.passphrase)).status,
-    401,
-    "the limit did not fire",
-  );
-});
-
-test("⚠ refusals are counted apart even though they are answered alike", async () => {
-  // ⚠ An uncounted rejection is indistinguishable from a request that never arrived.
-  const { base, ctx } = await start({
-    limiter: createRateLimiter({ now: Date.now, sourceLimit: 2 }),
-  });
-  const room = await makeRoom(base);
-
-  await join(base, room.roomId, "wrong-wrong-wrong-wrong");
-  await join(base, "z".repeat(16), "wrong-wrong-wrong-wrong");
-  await join(base, room.roomId, room.passphrase); // ⚠ refused by the limit, not by the passphrase
-
-  const counts = ctx.rejections.counts();
-  assert.equal(counts["wrong-passphrase"], 1);
-  assert.equal(counts["unknown-room"], 1);
-  assert.equal(counts["rate-limited-source"], 1);
-});
-
-test("a body that is not a join is refused as malformed, and says so", async () => {
-  // ⚠ Malformed is not the same as declined (`.claude/rules/evidence.md`). ⚠ The caller is wrong,
-  //   ⚠ and telling them so leaks nothing about any room.
-  const { base } = await start();
-  const room = await makeRoom(base);
-  const notJson = await fetch(`${base}/api/rooms/${room.roomId}/join`, {
-    method: "POST",
-    body: "not json",
-  });
-  assert.equal(notJson.status, 400);
-
-  const tooBig = await fetch(`${base}/api/rooms/${room.roomId}/join`, {
-    method: "POST",
-    body: JSON.stringify({ passphrase: "a".repeat(4096) }),
-  });
-  assert.equal(tooBig.status, 413);
 });
 
 test("⚠ a room-creation response is never cached", async () => {
@@ -202,52 +105,6 @@ test("the host closes the room with the key it was given", async () => {
   const { base } = await start();
   const room = await makeRoom(base);
   assert.equal((await closeRoom(base, room.roomId, room.hostKey)).status, 200);
-});
-
-test("⚠⚠ after closing, the room answers exactly like one that never existed", async () => {
-  // ⚠ `docs/adr/0005`: a closed room and an absent room are the same thing from outside.
-  const { base } = await start();
-  const room = await makeRoom(base);
-  await closeRoom(base, room.roomId, room.hostKey);
-
-  const closed = await observable(await join(base, room.roomId, room.passphrase));
-  const neverExisted = await observable(await join(base, "z".repeat(16), room.passphrase));
-  assert.deepEqual(closed, neverExisted, "a closed room is distinguishable from an absent one");
-});
-
-test("⚠ a wrong host key and an absent room give the same answer", async () => {
-  // ⚠ Otherwise this endpoint answers "does this room exist?" too.
-  const { base } = await start();
-  const room = await makeRoom(base);
-  const wrongKey = await observable(await closeRoom(base, room.roomId, "not-the-host-key"));
-  const absent = await observable(await closeRoom(base, "z".repeat(16), "not-the-host-key"));
-  assert.deepEqual(absent, wrongKey, "an absent room answers differently");
-  // ⚠ And the room is still there: a refused close must not close anything.
-  assert.equal((await join(base, room.roomId, room.passphrase)).status, 200);
-});
-
-test("⚠ the host key is not in the share URL, and is given only at creation", async () => {
-  const { base } = await start();
-  const room = await makeRoom(base);
-  assert.ok(!room.shareUrl.includes(room.hostKey), "the host key is in the share URL");
-  // ⚠ Joining gives a join token, never the host key.
-  const joined = (await (await join(base, room.roomId, room.passphrase)).json()) as Record<
-    string,
-    unknown
-  >;
-  assert.equal(joined["hostKey"], undefined, "joining handed out the host key");
-});
-
-test("⚠ closing drops what the room was holding", async () => {
-  // ⚠ The list is individual on purpose (kagima#10 AC 3): the passphrase, the host key and the
-  //   ⚠ participant list all go, and the way to see that is that nothing about the room answers.
-  const { base, ctx } = await start();
-  const room = await makeRoom(base);
-  assert.notEqual(ctx.store.get(room.roomId), undefined);
-  await closeRoom(base, room.roomId, room.hostKey);
-  assert.equal(ctx.store.get(room.roomId), undefined, "the room is still held");
-  assert.equal(ctx.store.size(), 0);
-  assert.equal(ctx.hub.peerCount(room.roomId), 0);
 });
 
 test("⚠⚠ nothing exists on the server only so that a check can call it", async () => {
