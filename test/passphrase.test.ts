@@ -193,12 +193,17 @@ test("⚠ nothing under src/ reaches for Math.random", async () => {
   assert.deepEqual(offenders, [], `Math.random appears in: ${offenders.join(", ")}`);
 });
 
-test("⚠ the passphrase generator draws from node:crypto", () => {
+test("⚠ the passphrase generator draws from the one CSPRNG seam", () => {
   // ⚠ The negative test above cannot show that a CSPRNG *is* used — only that a known-bad one
   //   ⚠ is not. ⚠ "not observed ≠ did not happen" (`.claude/rules/evidence.md`), so assert it.
+  //
+  // ⚠ **It used to name `node:crypto` directly.** ⚠ **Workers does not have it** (`docs/adr/0015`),
+  //   ⚠ so the draw moved to `src/random.ts`, ⚠ which is the same promise in the Web Crypto name.
+  // ⚠ **The wall did not move: ⚠ it still says "draw from the sanctioned place, ⚠ and nowhere
+  //   ⚠ else".** ⚠ **`test/random.test.ts` holds what that place is allowed to be.**
   const src = readFileSync("src/passphrase/passphrase.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"node:crypto"/);
+  assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"\.\.\/random\.ts"/);
   assert.match(code, /randomBytes\(WORD_COUNT\)/);
 });
 

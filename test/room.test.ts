@@ -209,10 +209,12 @@ test("⚠ nothing under src/ reaches for a non-CSPRNG source of ids", async () =
   assert.deepEqual(offenders, [], `Math.random appears in: ${offenders.join(", ")}`);
 });
 
-test("⚠ the room id generator draws from node:crypto", async () => {
+test("⚠ the room id generator draws from the one CSPRNG seam", async () => {
   // ⚠ The negative test cannot show a CSPRNG *is* used, only that a known-bad one is not.
+  // ⚠ `src/random.ts` replaced `node:crypto` because Workers does not have it (`docs/adr/0015`).
+  //   ⚠ The wall is unchanged: ⚠ draw from the sanctioned place, ⚠ and nowhere else.
   const code = codeOf(await readFile("src/room/room-id.ts", "utf8"));
-  assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"node:crypto"/);
+  assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"\.\.\/random\.ts"/);
   assert.match(code, /randomBytes\(ID_LENGTH\)/);
 });
 

@@ -8,7 +8,7 @@
 //
 // ⚠ **What may be claimed is `ROOM_ID_BITS`, and it is computed from the alphabet and the length.**
 //   ⚠ **Never write the number anywhere else** (`.claude/rules/evidence.md`).
-import { randomBytes } from "node:crypto";
+import { randomBytes } from "../random.ts";
 
 /**
  * ⚠ **Crockford base32, lowercased, with `i` `l` `o` `u` already absent.**

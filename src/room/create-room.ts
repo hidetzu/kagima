@@ -3,7 +3,7 @@
 // ⚠ **Everything this needs is injected.** ⚠ **Not for elegance** — ⚠ **because the two properties
 //   ⚠ that matter (a collision is handled; the id comes from a CSPRNG) cannot be shown against a
 //   ⚠ real generator.** ⚠ **A collision would have to be waited for, and waiting is not a test.**
-import { randomBytes } from "node:crypto";
+import { randomToken } from "../random.ts";
 import { generatePassphrase } from "../passphrase/passphrase.ts";
 import { buildShareUrl, generateRoomId } from "./room-id.ts";
 import type { Room, RoomStore } from "./store.ts";
@@ -31,7 +31,7 @@ export type CreateRoomDeps = {
 export const defaultDeps: CreateRoomDeps = {
   newId: generateRoomId,
   newPassphrase: generatePassphrase,
-  newHostKey: () => randomBytes(32).toString("base64url"),
+  newHostKey: () => randomToken(32),
   now: Date.now,
 };
 
