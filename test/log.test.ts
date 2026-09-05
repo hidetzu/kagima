@@ -9,6 +9,7 @@ import { join as joinPath } from "node:path";
 import { test } from "node:test";
 import { createLogger, REDACTED, redact, scrub } from "../src/log.ts";
 import { issueJoinToken } from "../src/token/join-token.ts";
+import { codeOf } from "./source-text.ts";
 
 const lines: string[] = [];
 const log = createLogger({ write: (l) => lines.push(l) });
@@ -104,9 +105,7 @@ test("⚠⚠ only src/log.ts writes to the console", async () => {
   const offenders: string[] = [];
   for (const file of await sourceFiles()) {
     if (file === "src/log.ts") continue;
-    const code = (await readFile(file, "utf8"))
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    const code = codeOf(await readFile(file, "utf8"));
     if (/\bconsole\s*\.\s*\w+\s*\(/.test(code)) offenders.push(`${file} (console)`);
     if (/\bprocess\s*\.\s*std(out|err)\s*\.\s*write\s*\(/.test(code))
       offenders.push(`${file} (stdout)`);

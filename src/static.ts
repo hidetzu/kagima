@@ -1,20 +1,21 @@
 // Serving the browser's side of kagima.
 //
-// ⚠ **There is no build step** (`docs/adr/0002`). ⚠ **Node strips the types on the way out**
-//   (`module.stripTypeScriptTypes`), ⚠ **so `src/client/*.ts` is what the browser loads and what
-//   ⚠ `tsc` checks.** ⚠ **One file, not a source and a build output that can drift.**
+// ⚠ **The browser is served `dist/`, ⚠ not `src/`** (`docs/adr/0016`).
+// ⚠ **`npm run build` strips the types once, ⚠ ahead of time.** ⚠ **Nothing is transformed while
+//   ⚠ answering a request** — ⚠ **`node:module` does not exist in a Worker, ⚠ and that is what
+//   ⚠ took the choice away** (`docs/adr/0015`).
 //
-// ⚠ **That API is experimental.** ⚠ **Saying so is not the same as it being fine** — ⚠ **if it
-//   ⚠ changes, this breaks loudly at startup rather than quietly at runtime, and the alternative
-//   ⚠ (a bundler) is a second build system and needs an ADR.**
+// ⚠ **What this cost: ⚠ the source and what the browser runs are two files now, ⚠ and two files
+//   ⚠ can drift.** ⚠ **`docs/adr/0016` names the wall — ⚠ the final gate runs against the built
+//   ⚠ output, ⚠ and both gate runners build before they run.**
+// ⚠ **A source-reading check is a claim about the input, ⚠ never about the output.**
 //
 // ## ⚠ What may be served, and why the list is closed
 //
-// ⚠ **Only files under `public/` and `src/client/`, and only by an exact name from a fixed map.**
+// ⚠ **Only files under `public/` and `dist/`, and only by an exact name from a fixed map.**
 // ⚠ **No path is ever built from what the caller sent** — ⚠ **that is how a path traversal starts,
 //   ⚠ and the caller here is anyone at all.**
-import { readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,21 +30,21 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string }> = new Map([
   ["/", { file: "public/index.html", type: "text/html; charset=utf-8" }],
   ["/index.html", { file: "public/index.html", type: "text/html; charset=utf-8" }],
-  ["/client/host.ts", { file: "src/client/host.ts", type: "text/javascript; charset=utf-8" }],
-  ["/client/guest.ts", { file: "src/client/guest.ts", type: "text/javascript; charset=utf-8" }],
+  ["/client/host.js", { file: "dist/client/host.js", type: "text/javascript; charset=utf-8" }],
+  ["/client/guest.js", { file: "dist/client/guest.js", type: "text/javascript; charset=utf-8" }],
   [
-    "/client/diagnostics.ts",
-    { file: "src/client/diagnostics.ts", type: "text/javascript; charset=utf-8" },
+    "/client/diagnostics.js",
+    { file: "dist/client/diagnostics.js", type: "text/javascript; charset=utf-8" },
   ],
-  ["/status/status.ts", { file: "src/status/status.ts", type: "text/javascript; charset=utf-8" }],
+  ["/status/status.js", { file: "dist/status/status.js", type: "text/javascript; charset=utf-8" }],
   [
-    "/diagnostics/report.ts",
-    { file: "src/diagnostics/report.ts", type: "text/javascript; charset=utf-8" },
+    "/diagnostics/report.js",
+    { file: "dist/diagnostics/report.js", type: "text/javascript; charset=utf-8" },
   ],
-  ["/client/call.ts", { file: "src/client/call.ts", type: "text/javascript; charset=utf-8" }],
+  ["/client/call.js", { file: "dist/client/call.js", type: "text/javascript; charset=utf-8" }],
   [
-    "/client/transport.ts",
-    { file: "src/client/transport.ts", type: "text/javascript; charset=utf-8" },
+    "/client/transport.js",
+    { file: "dist/client/transport.js", type: "text/javascript; charset=utf-8" },
   ],
 ]);
 
@@ -56,6 +57,18 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
  */
 const ROOM_PAGE = /^\/r\/[0-9a-z]{16}$/;
 const ROOM_PAGE_FILE = { file: "public/room.html", type: "text/html; charset=utf-8" } as const;
+
+/**
+ * ⚠ **Which served files are not on disk.** ⚠ **Read at startup, ⚠ never while answering.**
+ *
+ * ⚠ **Grounds: a missing `dist/` is not a runtime condition ⚠ but a build that did not run**
+ * (`docs/adr/0016`). ⚠ **It must break loudly, at startup, naming what to do** —
+ * ⚠ **not quietly, on one request, as a stack trace a stranger reads** (`CLAUDE.md` § 4).
+ */
+export const missingServedFiles = (): readonly string[] =>
+  [...new Set([...SERVED.values(), ROOM_PAGE_FILE].map((e) => e.file))]
+    .filter((file) => !existsSync(join(ROOT, file)))
+    .sort();
 
 export const isServedPath = (pathname: string): boolean =>
   SERVED.has(pathname) || ROOM_PAGE.test(pathname);
@@ -70,12 +83,12 @@ export const serveStatic = (pathname: string): Response | null => {
   const entry = SERVED.get(pathname) ?? (ROOM_PAGE.test(pathname) ? ROOM_PAGE_FILE : undefined);
   if (entry === undefined) return null;
 
-  const raw = readFileSync(join(ROOT, entry.file), "utf8");
-  // ⚠ TypeScript out, JavaScript in. ⚠ The browser never sees a type annotation, and there is
-  //   ⚠ no build output to go stale against the source.
-  // ⚠⚠ **This half is Node's** (`node:module`). ⚠ **A Worker has no such thing, ⚠ and
-  //   ⚠ `docs/adr/0016` decided the answer there is a build step.**
-  const body = entry.file.endsWith(".ts") ? stripTypeScriptTypes(raw, { mode: "strip" }) : raw;
+  // ⚠⚠ **Read as it is.** ⚠ **Nothing is transformed while answering a request** (`docs/adr/0016`).
+  //
+  // ⚠ **`dist/` is written by `npm run build`, ⚠ and `npm run e2e` builds first** — ⚠ **so a
+  //   ⚠ stale one cannot pass the final gate.**
+  // ⚠ **The pages still come straight from `public/`: ⚠ they are HTML and need no transform.**
+  const body = readFileSync(join(ROOT, entry.file), "utf8");
 
   return new Response(body, {
     headers: {

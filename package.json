@@ -7,8 +7,9 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "build": "node scripts/build.ts",
     "check": "node scripts/check.ts",
-    "dev": "node src/server.ts",
+    "dev": "node scripts/build.ts && node src/server.ts",
     "e2e": "node scripts/e2e.ts",
     "external": "node scripts/external.ts"
   },

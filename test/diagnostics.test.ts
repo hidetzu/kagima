@@ -16,6 +16,7 @@ import {
   selectedPairIdOf,
   verdictOf,
 } from "../src/diagnostics/report.ts";
+import { codeOf } from "./source-text.ts";
 
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   localCandidates: [
@@ -81,9 +82,7 @@ test("⚠⚠ an address handed in cannot come out", () => {
  * ⚠ **Cutting the exception out and checking what is left is how a narrow exception stays narrow.**
  */
 const sourceWithoutTheOneReader = async (file: string): Promise<string> =>
-  (await readFile(file, "utf8"))
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "")
+  codeOf(await readFile(file, "utf8"))
     // ⚠ The definition, in report.ts.
     .replace(/export const familyOf =[\s\S]*?\n};/, "")
     // ⚠ Every call site, anywhere.
