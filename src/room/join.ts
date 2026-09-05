@@ -47,8 +47,13 @@ export type JoinOutcome =
 export type JoinDeps = {
   readonly now: () => number;
   readonly secret: string;
-  /** ⚠ **Injected so a test can count the comparisons.** ⚠ That count is what proves the timing class. */
-  readonly compare: (a: string, b: string) => boolean;
+  /**
+   * ⚠ **Injected so a test can count the comparisons.** ⚠ That count is what proves the timing class.
+   *
+   * ⚠ **Asynchronous because Web Crypto is** (`docs/adr/0015`). ⚠ **`node:crypto`'s synchronous
+   * HMAC does not exist in Workers, ⚠ and the comparison is not a place to keep two versions.**
+   */
+  readonly compare: (a: string, b: string) => Promise<boolean>;
 };
 
 /**
@@ -66,12 +71,12 @@ export type JoinDeps = {
  *
  * ⚠ **The three that can occur are counted apart and answered alike.**
  */
-export const attemptJoin = (
+export const attemptJoin = async (
   store: RoomStore,
   roomId: string,
   submitted: string,
   deps: JoinDeps,
-): JoinOutcome => {
+): Promise<JoinOutcome> => {
   const given = normalizePassphrase(submitted);
 
   // ⚠ A malformed id still gets compared. ⚠ Refusing it early would make "that is not even a
@@ -80,14 +85,14 @@ export const attemptJoin = (
   const expected = room?.passphrase ?? DECOY_PASSPHRASE;
 
   // ⚠ Exactly one comparison on every path. ⚠ That is the property, and a test counts it.
-  const matched = deps.compare(given, expected);
+  const matched = await deps.compare(given, expected);
 
   if (room === undefined) {
     return { ok: false, why: isRoomId(roomId) ? "unknown-room" : "malformed-room-id" };
   }
   if (!matched) return { ok: false, why: "wrong-passphrase" };
 
-  return { ok: true, token: issueJoinToken(room.id, deps.secret, deps.now()) };
+  return { ok: true, token: await issueJoinToken(room.id, deps.secret, deps.now()) };
 };
 
 /** ⚠ **The real comparator.** ⚠ Never `===` — see `constantTimeEqual`. */

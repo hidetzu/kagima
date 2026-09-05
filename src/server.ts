@@ -206,7 +206,7 @@ export const handle = async (
     const room = isRoomId(roomId) ? ctx.store.get(roomId) : undefined;
     // ⚠ Exactly one comparison whatever the path, for the same reason the join endpoint has one:
     //   ⚠ returning early for an unknown room makes the time saved the answer.
-    const matched = defaultCompare(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
+    const matched = await defaultCompare(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
     if (room === undefined || !matched) {
       send(res, CLOSE_REFUSED.status, CLOSE_REFUSED.body);
       return;
@@ -273,7 +273,7 @@ export const handle = async (
       return;
     }
 
-    const outcome = attemptJoin(ctx.store, roomId, submitted, {
+    const outcome = await attemptJoin(ctx.store, roomId, submitted, {
       now: Date.now,
       secret: ctx.secret,
       compare: defaultCompare,

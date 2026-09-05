@@ -23,7 +23,7 @@ import { issueJoinToken } from "../src/token/join-token.ts";
 
 // ── what may cross ──────────────────────────────────────────────────────────
 
-test("an offer, an answer, a candidate and a bye are understood", () => {
+test("an offer, an answer, a candidate and a bye are understood", async () => {
   assert.equal(parseClientMessage(JSON.stringify({ type: "offer", sdp: "v=0" })).ok, true);
   assert.equal(parseClientMessage(JSON.stringify({ type: "answer", sdp: "v=0" })).ok, true);
   assert.equal(
@@ -34,7 +34,7 @@ test("an offer, an answer, a candidate and a bye are understood", () => {
   assert.equal(parseClientMessage(JSON.stringify({ type: "bye" })).ok, true);
 });
 
-test("⚠ malformed and unsupported are different answers", () => {
+test("⚠ malformed and unsupported are different answers", async () => {
   // ⚠ Malformed means the sender got the format wrong. ⚠ Unsupported means we understood and
   //   ⚠ declined. ⚠ Collapsing them tells the sender to fix the wrong thing.
   assert.deepEqual(parseClientMessage("not json"), { ok: false, why: "not-json" });
@@ -49,14 +49,14 @@ test("⚠ malformed and unsupported are different answers", () => {
   assert.deepEqual(parseClientMessage(JSON.stringify([1, 2])), { ok: false, why: "malformed" });
 });
 
-test("⚠ an oversized payload is refused by size, before it is parsed", () => {
+test("⚠ an oversized payload is refused by size, before it is parsed", async () => {
   // ⚠ Parsing first means having already held it. ⚠ An unbounded SDP is a way to make this
   //   ⚠ process hold memory for somebody else.
   const huge = JSON.stringify({ type: "offer", sdp: "x".repeat(MAX_SDP_BYTES + 2048) });
   assert.deepEqual(parseClientMessage(huge), { ok: false, why: "too-large" });
 });
 
-test("⚠ an sdp or candidate just over its own ceiling is refused", () => {
+test("⚠ an sdp or candidate just over its own ceiling is refused", async () => {
   const sdp = JSON.stringify({ type: "offer", sdp: "x".repeat(MAX_SDP_BYTES + 1) });
   assert.equal(parseClientMessage(sdp).ok, false);
   const cand = JSON.stringify({
@@ -66,7 +66,7 @@ test("⚠ an sdp or candidate just over its own ceiling is refused", () => {
   assert.equal(parseClientMessage(cand).ok, false);
 });
 
-test("⚠ a candidate's optional fields are checked, not trusted", () => {
+test("⚠ a candidate's optional fields are checked, not trusted", async () => {
   for (const bad of [
     { type: "candidate", candidate: "c", sdpMLineIndex: -1 },
     { type: "candidate", candidate: "c", sdpMLineIndex: 1.5 },
@@ -90,7 +90,7 @@ const fakePeer = (id: number, sessionId: string) => {
   return { peer, sent, closed };
 };
 
-test("a message reaches the other peer in the room, and nobody else", () => {
+test("a message reaches the other peer in the room, and nobody else", async () => {
   const hub = createHub();
   const a = fakePeer(1, "sa");
   const b = fakePeer(2, "sb");
@@ -105,7 +105,7 @@ test("a message reaches the other peer in the room, and nobody else", () => {
   assert.deepEqual(elsewhere.sent, [], "⚠ it reached another room");
 });
 
-test("a message with nobody else there is not an error", () => {
+test("a message with nobody else there is not an error", async () => {
   const hub = createHub();
   hub.join("room-a", fakePeer(1, "sa").peer);
   assert.equal(hub.relay("room-a", 1, "hello"), "no-peer");
@@ -118,7 +118,7 @@ test(`⚠ a ${ROOM_CAPACITY + 1}th connection is refused, not queued`, () => {
   assert.equal(hub.join("room-a", fakePeer(3, "sc").peer), "room-full");
 });
 
-test("⚠ a reconnect replaces its own socket rather than taking a second slot", () => {
+test("⚠ a reconnect replaces its own socket rather than taking a second slot", async () => {
   // ⚠ Through a tunnel the old socket dies quietly. ⚠ Without this the reconnect is refused
   //   ⚠ as room-full, by a peer that is already gone.
   const hub = createHub();
@@ -133,7 +133,7 @@ test("⚠ a reconnect replaces its own socket rather than taking a second slot",
   assert.equal(hub.peerCount("room-a"), 2);
 });
 
-test("⚠⚠ a message from a replaced connection is dropped, not relayed", () => {
+test("⚠⚠ a message from a replaced connection is dropped, not relayed", async () => {
   // ⚠ This is the reordering case, and reading the code will not find it.
   //   ⚠ The old socket had a message in flight. ⚠ It arrives after the new one has joined.
   //   ⚠ Relaying it would apply an old peer's answer to a negotiation that has moved on.
@@ -150,7 +150,7 @@ test("⚠⚠ a message from a replaced connection is dropped, not relayed", () =
   assert.deepEqual(host.sent, [], "⚠ a stale message reached the host");
 });
 
-test("leaving removes only that peer, and the room survives", () => {
+test("leaving removes only that peer, and the room survives", async () => {
   const hub = createHub();
   hub.join("room-a", fakePeer(1, "sa").peer);
   hub.join("room-a", fakePeer(2, "sb").peer);
@@ -200,7 +200,7 @@ const connect = (base: string, roomId: string, token: string): Promise<WebSocket
 
 test("a valid token for the room connects", async () => {
   const { base } = await startSignaling();
-  const ws = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
+  const ws = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
   assert.equal(ws.readyState, WebSocket.OPEN);
   ws.close();
 });
@@ -220,20 +220,20 @@ test("⚠ no token does not connect", async () => {
 test("⚠ a token for another room does not connect", async () => {
   // ⚠ Without this, one leaked token is every room (`.claude/rules/security.md` § 4).
   const { base } = await startSignaling();
-  const token = issueJoinToken("room-b", SECRET, Date.now());
+  const token = await issueJoinToken("room-b", SECRET, Date.now());
   await assert.rejects(() => connect(base, "room-a", token));
 });
 
 test("⚠ a token signed with another secret does not connect", async () => {
   const { base } = await startSignaling();
-  const token = issueJoinToken("room-a", "some-other-secret", Date.now());
+  const token = await issueJoinToken("room-a", "some-other-secret", Date.now());
   await assert.rejects(() => connect(base, "room-a", token));
 });
 
 test("an offer crosses from one peer to the other, with `from` set by the server", async () => {
   const { base } = await startSignaling();
-  const a = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
-  const b = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
+  const a = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
+  const b = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
 
   const heard = new Promise<string>((resolve) => {
     b.addEventListener("message", (e) => resolve(String(e.data)), { once: true });
@@ -250,9 +250,9 @@ test("an offer crosses from one peer to the other, with `from` set by the server
 
 test("⚠ a third connection is closed with a reason that says what happened", async () => {
   const { base } = await startSignaling();
-  const a = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
-  const b = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
-  const c = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
+  const a = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
+  const b = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
+  const c = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
 
   const closed = await new Promise<CloseEvent>((resolve) => {
     c.addEventListener("close", (e) => resolve(e as CloseEvent), { once: true });
@@ -266,7 +266,7 @@ test("⚠ a malformed message is answered, not silently dropped", async () => {
   // ⚠ Something discarded with nothing said is indistinguishable from something that never
   //   ⚠ arrived (`.claude/rules/evidence.md`).
   const { base } = await startSignaling();
-  const a = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
+  const a = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
   const heard = new Promise<string>((resolve) => {
     a.addEventListener("message", (e) => resolve(String(e.data)), { once: true });
   });
@@ -279,8 +279,8 @@ test("⚠ one peer leaving does not close the room for the other", async () => {
   // ⚠ A signalling socket dropping is not a room ending. ⚠ An established call carries on
   //   ⚠ without us (`docs/adr/0003`).
   const { base, hub } = await startSignaling();
-  const a = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
-  const b = await connect(base, "room-a", issueJoinToken("room-a", SECRET, Date.now()));
+  const a = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
+  const b = await connect(base, "room-a", await issueJoinToken("room-a", SECRET, Date.now()));
   assert.equal(hub.peerCount("room-a"), 2);
 
   await new Promise<void>((resolve) => {
@@ -299,20 +299,20 @@ test("⚠ one peer leaving does not close the room for the other", async () => {
 // ⚠ **The second is that the page shows it as text and never as markup** — ⚠ **either one alone
 //   ⚠ is one mistake away from the other side of the screen.**
 
-test("an ordinary nickname is accepted", () => {
+test("an ordinary nickname is accepted", async () => {
   for (const ok of ["ふつうの名前", "a", "Ann", "x".repeat(MAX_NICKNAME_CHARS)]) {
     assert.equal(isNickname(ok), true, ok);
   }
 });
 
-test("⚠ an empty or over-long nickname is refused", () => {
+test("⚠ an empty or over-long nickname is refused", async () => {
   // ⚠ Long is not a style question: it is a way to push text at somebody who cannot refuse it.
   for (const bad of ["", "   ", "x".repeat(MAX_NICKNAME_CHARS + 1)]) {
     assert.equal(isNickname(bad), false, JSON.stringify(bad));
   }
 });
 
-test("⚠⚠ control and format characters are refused, not stripped", () => {
+test("⚠⚠ control and format characters are refused, not stripped", async () => {
   // ⚠ Stripping changes what somebody typed and then shows it to a third party as though they
   //   ⚠ had typed that. ⚠ Refusing says no to the sender instead of lying to the receiver.
   const bad = [
@@ -327,11 +327,11 @@ test("⚠⚠ control and format characters are refused, not stripped", () => {
   for (const b of bad) assert.equal(isNickname(b), false, JSON.stringify(b));
 });
 
-test("⚠ a nickname that is not a string is refused", () => {
+test("⚠ a nickname that is not a string is refused", async () => {
   for (const bad of [123, null, undefined, {}, ["a"]]) assert.equal(isNickname(bad), false);
 });
 
-test("⚠ hello carries a validated nickname, trimmed once", () => {
+test("⚠ hello carries a validated nickname, trimmed once", async () => {
   // ⚠ Trimmed here so both sides see the same string, and a later comparison is not against
   //   ⚠ something that only looks the same.
   const parsed = parseClientMessage(JSON.stringify({ type: "hello", nickname: "  Ann  " }));
@@ -388,9 +388,9 @@ test("⚠⚠ a room's socket-open time is wall-clock, not the sum of its sockets
     //   ⚠ later, ⚠ and the host leaves first. ⚠ **The gap matters:** ⚠ with both opening at once,
     //   ⚠ "the room's span" and "the last socket's own life" are the same number, ⚠ and a
     //   ⚠ mutation that returns the wrong one walks straight past (⚠ it did).
-    const host = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    const host = await connect(base, room, await issueJoinToken(room, SECRET, Date.now()));
     await new Promise((r) => setTimeout(r, 150));
-    const guest = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    const guest = await connect(base, room, await issueJoinToken(room, SECRET, Date.now()));
     assert.equal(hub.peerCount(room), 2);
     await new Promise((r) => setTimeout(r, 80));
     host.close();
@@ -433,7 +433,7 @@ test("⚠ the announced duration never carries anything but the room and the tim
   const { base } = await startSignaling();
   const room = "room-quiet";
   const said = await whileWatchingTheLog(async () => {
-    const a = await connect(base, room, issueJoinToken(room, SECRET, Date.now()));
+    const a = await connect(base, room, await issueJoinToken(room, SECRET, Date.now()));
     a.close();
     await settle();
   });
