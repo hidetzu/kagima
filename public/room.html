@@ -144,6 +144,30 @@
       //   (src/client/diagnostics.ts). ⚠ A slower refresh would coarsen the measurement.
       setInterval(refreshDiagnostics, 250);
       await refreshDiagnostics();
+
+      // ⚠⚠ **Field-test only** (`docs/adr/0011`). ⚠ **Absent unless the server says the mode is on**,
+      //   ⚠ and the server only says so when it was started with the flag.
+      // ⚠ **Why: copying a report off two devices by hand is what stopped the last run being
+      //   ⚠ two-sided.** ⚠ **A field test that only records one end cannot say "both ends".**
+      // ⚠ **What goes over the wire is the same text the panel shows** — ⚠ **it cannot carry an
+      //   ⚠ address, and the server refuses it if it somehow does.**
+      void (async () => {
+        const on = await fetch("/api/field-test").then((r) => r.ok).catch(() => false);
+        if (!on) return;
+        document.getElementById("diagnostics").open = true;
+        let lastSent = "";
+        setInterval(async () => {
+          const report = document.getElementById("diagnostics-text").textContent;
+          if (report === lastSent) return;
+          lastSent = report;
+          await fetch("/api/observations", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ roomId: roomId, side: "guest", report }),
+          }).catch(() => {});
+        }, 2000);
+      })();
+
       document.getElementById("diagnostics-copy").addEventListener("click", async () => {
         await refreshDiagnostics();
         const text = document.getElementById("diagnostics-text").textContent;

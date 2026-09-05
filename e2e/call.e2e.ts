@@ -12,6 +12,7 @@
 //   ⚠ exists to catch** (`.claude/skills/verify/SKILL.md` § 3). ⚠ **So the assertion reads
 //   ⚠ `framesDecoded` off the receiver's own stats, and the video element's `videoWidth`.**
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { after, test } from "node:test";
 import { type Browser, type Page, chromium } from "playwright";
 import { startServer } from "../src/server.ts";
@@ -641,4 +642,97 @@ test(titleOf("diagnostics"), async () => {
 
   await host.context.close();
   await guest.context.close();
+});
+
+test(titleOf("field-test-mode"), async () => {
+  // ⚠⚠ **A mode that costs two promises** (`docs/adr/0011`). ⚠ **So this case checks both what it
+  //   ⚠ does when asked for, ⚠ and that it is absent when it was not.**
+  //
+  // ⚠ **Started as a child process, ⚠ not in this one.** ⚠ **The flag is read once at startup on
+  //   ⚠ purpose — ⚠ a mode that can turn itself on mid-run is one nobody can reason about — ⚠ so
+  //   ⚠ the only honest way to exercise it is through the real entry point.**
+  const { browser: b, base: offBase } = await ready();
+
+  // ⚠⚠ First: without the flag, ⚠ these paths do not exist at all.
+  //   ⚠ Not "exist and refuse" — ⚠ that would answer "is this a field-test server?" for free.
+  for (const path of ["/api/field-test", "/api/observations"]) {
+    const status = await b
+      .newContext()
+      .then((c) => c.request.get(`${offBase}${path}`))
+      .then((r) => r.status());
+    assert.equal(status, 404, `${path} exists on a server that was not asked for the mode`);
+  }
+  console.log("  observed: without the flag, neither field-test path exists");
+
+  const port = nextPort++;
+  const fieldBase = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["src/server.ts"], {
+    env: {
+      ...process.env,
+      KAGIMA_FIELD_TEST: "1",
+      PORT: String(port),
+      PUBLIC_BASE_URL: fieldBase,
+      JOIN_TOKEN_SECRET: "a-field-test-secret",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const said: string[] = [];
+  child.stdout.on("data", (d: Buffer) => said.push(d.toString()));
+  child.stderr.on("data", (d: Buffer) => said.push(d.toString()));
+  try {
+    for (let i = 0; i < 100 && !said.join("").includes("listening"); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // ⚠ The banner, ⚠ because a mode that costs a promise must announce itself rather than wait
+    //   ⚠ to be discovered by whoever reads the passphrase.
+    const banner = said.join("");
+    assert.match(banner, /KAGIMA_FIELD_TEST=1/, `no banner in:\n${banner}`);
+    assert.match(banner, /passphrase is 2 characters/, "the banner hides the short passphrase");
+    assert.match(banner, /collected in memory/, "the banner hides that reports are collected");
+
+    const host = await openHost(b, fieldBase);
+    // ⚠ The whole reason the mode exists: ⚠ this is what a person types on a phone.
+    assert.match(host.passphrase, /^[a-z]{2}$/, `not a short passphrase: ${host.passphrase}`);
+    console.log(`  observed: the passphrase is ${host.passphrase.length} characters`);
+
+    const guest = await openGuest(b, host.shareUrl, host.passphrase, "けんさ");
+    await waitForFrames(host.page, "the host");
+    await waitForFrames(guest.page, "the guest");
+
+    // ⚠⚠ Both sides, collected without anybody copying anything.
+    //   ⚠ The last run recorded one end because copying by hand is what stopped it.
+    const collected = async (): Promise<string> => {
+      const context = await b.newContext();
+      const r = await context.request.get(`${fieldBase}/api/observations`);
+      return r.text();
+    };
+    let text = "";
+    for (let i = 0; i < 60; i++) {
+      text = await collected();
+      if (text.includes("── host") && text.includes("── guest")) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    // ⚠ The server's own log goes into the failure, ⚠ so a refusal says why rather than
+    //   ⚠ leaving the next reader to reproduce it.
+    const detail = `${text}\n      ── what the server said ──\n      ${said.join("").split("\n").slice(-12).join("\n      ")}`;
+    assert.match(text, /── host/, `the host's observation was not collected:\n${detail}`);
+    assert.match(text, /── guest/, `the guest's observation was not collected:\n${text}`);
+    assert.match(text, /kagima field-test observation/);
+    console.log("  observed: both sides' reports were collected, with nobody copying anything");
+
+    // ⚠ And the collected text is still the thing that may be pasted in public.
+    for (const pattern of [
+      /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/,
+      /\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){3,}\b/i,
+      /[0-9a-f-]{20,}\.local\b/i,
+    ]) {
+      assert.doesNotMatch(text, pattern, `an address reached the collected reports:\n${text}`);
+    }
+
+    await host.context.close();
+    await guest.context.close();
+  } finally {
+    child.kill();
+  }
 });
