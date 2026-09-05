@@ -21,6 +21,15 @@ export type CandidateFact = {
   readonly type: string;
   /** ⚠ `udp` / `tcp`. */
   readonly protocol: string;
+  /**
+   * ⚠ `v4` / `v6` / `?`. ⚠ **Never an address** — ⚠ see `familyOf`.
+   *
+   * ⚠⚠ **Why it is here: ⚠ `host/host` means "the two ends were on the same network" over IPv4
+   * ⚠ and the opposite over IPv6** — ⚠ **"there was no NAT to traverse".**
+   * ⚠ **Two opposite conclusions from one label, ⚠ and a first cross-network observation ran
+   * straight into it.**
+   */
+  readonly family: string;
 };
 
 /** ⚠ **How the two ends actually reached each other.** ⚠ The answer the field test is after. */
@@ -98,6 +107,33 @@ const KNOWN_VALUES = new Set([
   "have-remote-pranswer",
 ]);
 
+const KNOWN_FAMILIES = new Set(["v4", "v6", "?"]);
+
+/**
+ * ⚠⚠ **The one place in kagima that is allowed to look at an address, ⚠ and all it may say is
+ * which of two families it belongs to.**
+ *
+ * ⚠ **Why it exists: ⚠ a first cross-network observation selected `host/host`, ⚠ which over IPv4
+ * would mean "the two ends were on the same network" ⚠ and over IPv6 means the opposite —
+ * ⚠ "there was no NAT to traverse at all".** ⚠ **Without this bit, ⚠ that observation cannot be
+ * interpreted, ⚠ and [kagima#16](https://github.com/hidetzu/kagima/issues/16) cannot be answered.**
+ *
+ * ⚠ **The address is not returned, ⚠ not stored, ⚠ not logged, ⚠ and not passed on.**
+ * ⚠ **This function's return type is the wall: ⚠ three values, ⚠ and `test/diagnostics.test.ts`
+ * hands it every address shape it can think of and asserts nothing else ever comes back.**
+ *
+ * ⚠ **`?` is a real answer, ⚠ not a failure** — ⚠ **an mDNS `.local` candidate hides its family,
+ * ⚠ and saying "unknown" is the honest thing** (`.claude/rules/evidence.md`).
+ */
+export const familyOf = (address: unknown): string => {
+  if (typeof address !== "string") return "?";
+  // ⚠ A colon appears in no IPv4 address and in every IPv6 one.
+  if (address.includes(":")) return "v6";
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)) return "v4";
+  // ⚠ An mDNS name, ⚠ or something we do not recognise. ⚠ Never guessed at.
+  return "?";
+};
+
 const only = (value: string, allowed: ReadonlySet<string>): string =>
   allowed.has(value) ? value : "other";
 
@@ -110,7 +146,9 @@ const countByType = (candidates: readonly CandidateFact[]): string => {
   const seen = new Map<string, number>();
   for (const c of candidates) {
     // ⚠ Through the vocabulary, always. ⚠ Never the value as handed in.
-    const key = `${only(c.type, KNOWN_TYPES)}/${only(c.protocol, KNOWN_PROTOCOLS)}`;
+    const key =
+      `${only(c.type, KNOWN_TYPES)}/${only(c.protocol, KNOWN_PROTOCOLS)}` +
+      `/${only(c.family, KNOWN_FAMILIES)}`;
     seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   return [...seen]
@@ -150,6 +188,8 @@ export type StatLike = {
   readonly remoteCandidateId?: string;
   readonly candidateType?: string;
   readonly protocol?: string;
+  /** ⚠ **Only ever handed to `familyOf`.** ⚠ Never read for anything else, ⚠ never stored. */
+  readonly address?: string;
   readonly kind?: string;
   readonly framesDecoded?: number;
 };
@@ -258,7 +298,15 @@ export const formatReport = (s: Snapshot): string => {
       s.selected === null
         ? "none"
         : `${only(s.selected.local.type, KNOWN_TYPES)}/${only(s.selected.remote.type, KNOWN_TYPES)}` +
-          ` over ${only(s.selected.local.protocol, KNOWN_PROTOCOLS)}`
+          ` over ${only(s.selected.local.protocol, KNOWN_PROTOCOLS)}` +
+          ` ${only(s.selected.local.family, KNOWN_FAMILIES)}` +
+          // ⚠⚠ Said in words, ⚠ because "host/host" alone has meant two opposite things.
+          (
+            only(s.selected.local.family, KNOWN_FAMILIES) === "v6" &&
+            only(s.selected.local.type, KNOWN_TYPES) === "host"
+              ? "  ⚠ globally routable: there was no NAT to traverse"
+              : ""
+          )
     }`,
   );
   lines.push(

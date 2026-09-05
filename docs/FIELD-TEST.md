@@ -155,11 +155,19 @@ curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
 
 ⚠ **実際にこれが起きた。** ⚠ **診断は成功と出て、⚠ しかし別ネットワークではなかった。**
 
+⚠⚠ **種別(`v4` / `v6`)まで見ること。** ⚠ **`host/host` だけでは決まらない**
+([`adr/0012`](adr/0012-let-the-diagnostics-say-the-address-family-and-nothing-more.md))。
+
 | 診断に出るもの | ⚠ 何を意味するか |
 |---|---|
-| `selected pair: host/host` | ⚠ **同じネットワークにいた。** ⚠ **これは A ではなく B である** |
-| `remote candidates` に srflx が無い | ⚠ **相手は STUN を必要としていない。** ⚠ 同じ側にいる |
-| `selected pair` に srflx が出る | ⚠ **NAT を越えている。** ⚠ **A として数えてよい** |
+| `host/host over udp v4` | ⚠ **同じネットワークにいた。** ⚠ **これは A ではなく B である** |
+| ⚠ **`host/host over udp v6`** | ⚠ **両端がグローバル IPv6 を持っていた。** ⚠ **越えるべき NAT が無かった** — ⚠ **別ネットワークでも起きる。** ⚠ **レポートが言葉でもそう言う** |
+| `srflx` が selected pair に出る | ⚠ **NAT を越えた。** ⚠ **A として数えてよい** |
+| `relay` が出る | ⚠ **TURN が使われた。** ⚠ **越えられなかった、が答えである** |
+| `remote candidates` に srflx が無い | ⚠ 相手は STUN を必要としていない |
+
+⚠ **`v6` で成功しても、⚠ 「IPv4 でも大丈夫」とは言えない。**
+⚠ **IPv4 しか無い経路は、⚠ 相変わらず測っていない。**
 
 ⚠ **so 記録した後に `selected pair` を見て、⚠ どの行に書くかを決める。**
 ⚠ **「Wi-Fi を切ったつもり」を根拠にしない** — ⚠ **切れていたかどうかは、観測に出ている。**

@@ -9,6 +9,7 @@ import {
   HOLD_TARGET_MS,
   type Snapshot,
   arrivedAt,
+  familyOf,
   firstFrameAt,
   formatReport,
   msToFrameSinceArrival,
@@ -18,13 +19,13 @@ import {
 
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   localCandidates: [
-    { type: "host", protocol: "udp" },
-    { type: "srflx", protocol: "udp" },
+    { type: "host", protocol: "udp", family: "v4" },
+    { type: "srflx", protocol: "udp", family: "v4" },
   ],
-  remoteCandidates: [{ type: "srflx", protocol: "udp" }],
+  remoteCandidates: [{ type: "srflx", protocol: "udp", family: "v4" }],
   selected: {
-    local: { type: "srflx", protocol: "udp" },
-    remote: { type: "srflx", protocol: "udp" },
+    local: { type: "srflx", protocol: "udp", family: "v4" },
+    remote: { type: "srflx", protocol: "udp", family: "v4" },
   },
   transitions: [{ at: 120, what: "iceConnectionState", value: "connected" }],
   msToFirstFrame: 800,
@@ -49,13 +50,15 @@ test("⚠⚠ an address handed in cannot come out", () => {
   //   ⚠ the wall has to hold even when the caller is careless.
   const poisoned = snapshot({
     localCandidates: [
-      { type: "host 192.168.1.42", protocol: "udp" },
-      { type: "srflx", protocol: "udp 203.0.113.7" },
+      { type: "host 192.168.1.42", protocol: "udp", family: "v4 192.168.1.42" },
+      { type: "srflx", protocol: "udp 203.0.113.7", family: "2400:4050:b701:9800::1" },
     ],
-    remoteCandidates: [{ type: "srflx fe80::1ff:fe23:4567:890a", protocol: "udp" }],
+    remoteCandidates: [
+      { type: "srflx fe80::1ff:fe23:4567:890a", protocol: "udp", family: "fe80::1" },
+    ],
     selected: {
-      local: { type: "srflx 203.0.113.7", protocol: "udp" },
-      remote: { type: "srflx 198.51.100.9", protocol: "udp" },
+      local: { type: "srflx 203.0.113.7", protocol: "udp", family: "203.0.113.7" },
+      remote: { type: "srflx 198.51.100.9", protocol: "udp", family: "v6 198.51.100.9" },
     },
     transitions: [
       { at: 10, what: "candidate", value: "candidate:1 1 udp 2122 192.168.1.42 5 typ host" },
@@ -69,16 +72,75 @@ test("⚠⚠ an address handed in cannot come out", () => {
   }
 });
 
-test("⚠ the module that formats the report never reads a raw candidate line", async () => {
-  // ⚠ The runtime check above holds only for what the snapshot carries.
-  //   ⚠ This one holds the shape: ⚠ the formatter must not know how to parse a candidate at all,
-  //   ⚠ because a parser is how an address gets in.
-  const code = (await readFile("src/diagnostics/report.ts", "utf8"))
+/**
+ * ⚠ **Source with comments gone, ⚠ and with the one sanctioned address reader gone too.**
+ *
+ * ⚠⚠ **`familyOf` is allowed to see an address** (`docs/adr/0012`). ⚠ **Nothing else is.**
+ * ⚠ **So the wall is not "the word never appears" any more — ⚠ it is "the word appears in
+ * exactly one place, ⚠ and that place is a function that can only return three values".**
+ * ⚠ **Cutting the exception out and checking what is left is how a narrow exception stays narrow.**
+ */
+const sourceWithoutTheOneReader = async (file: string): Promise<string> =>
+  (await readFile(file, "utf8"))
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  assert.doesNotMatch(code, /\baddress\b/i, "the formatter names an address field");
+    .replace(/^\s*\/\/.*$/gm, "")
+    // ⚠ The definition, in report.ts.
+    .replace(/export const familyOf =[\s\S]*?\n};/, "")
+    // ⚠ Every call site, anywhere.
+    .replace(/familyOf\([^)]*\)/g, "")
+    // ⚠ The field's declaration. ⚠ Declaring it is what lets `familyOf` be handed it;
+    //   ⚠ ⚠ *reading* it anywhere else is what the next assertion forbids outright.
+    .replace(/readonly address\?: string;/, "")
+    // ⚠ Quoted text. ⚠ The report says "addresses are deliberately absent" in its own footer,
+    //   ⚠ and a check that trips over the sentence describing it is checking the wrong thing
+    //   (`CLAUDE.md` § 5: ⚠ strip the words before reading the code).
+    .replace(/"[^"]*"|'[^']*'/g, '""');
+
+test("⚠ the module that formats the report reads an address in one place and nowhere else", async () => {
+  const code = await sourceWithoutTheOneReader("src/diagnostics/report.ts");
+  assert.doesNotMatch(code, /\baddress\b/i, "the formatter names an address outside familyOf");
+  // ⚠⚠ The sharp one: ⚠ nothing anywhere may read the field except through `familyOf`.
+  assert.doesNotMatch(code, /\.address\b/, "the formatter reads an address directly");
   assert.doesNotMatch(code, /candidate:\s*\d/, "the formatter parses a candidate line");
   assert.doesNotMatch(code, /\.candidate\b/, "the formatter reads a raw candidate string");
+});
+
+// ── ⚠ the one sanctioned reader ─────────────────────────────────────────────
+
+test("⚠⚠ familyOf answers with one of exactly three words, whatever it is handed", () => {
+  // ⚠ **This is the whole wall.** ⚠ **The address goes in; ⚠ nothing but a family comes out.**
+  const handed = [
+    "192.168.1.42",
+    "203.0.113.7",
+    "255.255.255.255",
+    "fe80::1ff:fe23:4567:890a",
+    "2400:4050:b701:9800:4a68:4aff:fe9c:efdc",
+    "::1",
+    "0f8e7d6c5b4a39281706.local",
+    "not-an-address-at-all",
+    "",
+    "1.2.3.4.5.6.7.8",
+    "192.168.1.42:5000",
+  ];
+  for (const address of handed) {
+    const said = familyOf(address);
+    assert.ok(["v4", "v6", "?"].includes(said), `familyOf returned ${said} for ${address}`);
+    // ⚠⚠ And it never hands any of the input back, ⚠ not even a piece of it.
+    assert.ok(!said.includes("."), `familyOf leaked something from ${address}`);
+    assert.ok(!said.includes(":"), `familyOf leaked something from ${address}`);
+  }
+  // ⚠ Anything that is not a string is not guessed at.
+  for (const odd of [undefined, null, 42, {}, ["1.2.3.4"]]) {
+    assert.equal(familyOf(odd), "?");
+  }
+});
+
+test("⚠ the two families are told apart, and an mDNS name is not guessed at", () => {
+  assert.equal(familyOf("192.168.1.42"), "v4");
+  assert.equal(familyOf("2400:4050:b701:9800::1"), "v6");
+  // ⚠ `?` is an answer, ⚠ not a failure. ⚠ Guessing here would be dressing a guess as a
+  //   ⚠ measurement (`.claude/rules/evidence.md`).
+  assert.equal(familyOf("0f8e7d6c5b4a39281706.local"), "?");
 });
 
 test("⚠⚠ the collector never reads an address either", async () => {
@@ -89,10 +151,9 @@ test("⚠⚠ the collector never reads an address either", async () => {
   //   ⚠ "other".** ⚠ **The wall held and the mistake was invisible** — ⚠ **which is how the next
   //   ⚠ one, on a field the vocabulary does not cover, would get through.**
   // ⚠ **So the collector is held to the same shape, in source.**
-  const code = (await readFile("src/client/diagnostics.ts", "utf8"))
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  assert.doesNotMatch(code, /\baddress\b/i, "the collector names an address field");
+  const code = await sourceWithoutTheOneReader("src/client/diagnostics.ts");
+  assert.doesNotMatch(code, /\baddress\b/i, "the collector names an address outside familyOf");
+  assert.doesNotMatch(code, /\.address\b/, "the collector reads an address directly");
   assert.doesNotMatch(code, /\.candidate\b/, "the collector reads a raw candidate string");
   assert.doesNotMatch(code, /\brelatedAddress\b/i, "the collector reads a related address");
   // ⚠ The `track` event is a negotiation event. ⚠ It must never be what times a frame again.
@@ -114,7 +175,7 @@ test("⚠⚠ no srflx is reported as before-NAT, not as a NAT failure", () => {
     framesDecoded: 0,
     msToFirstFrame: null,
     heldMs: null,
-    localCandidates: [{ type: "host", protocol: "udp" }],
+    localCandidates: [{ type: "host", protocol: "udp", family: "v4" }],
     selected: null,
   });
   assert.match(verdictOf(s), /before NAT/);
@@ -142,7 +203,7 @@ test("⚠ a relay candidate counts as reflexive for the purpose of that split", 
     framesDecoded: 0,
     msToFirstFrame: null,
     heldMs: null,
-    localCandidates: [{ type: "relay", protocol: "udp" }],
+    localCandidates: [{ type: "relay", protocol: "udp", family: "v4" }],
     selected: null,
   });
   assert.match(verdictOf(s), /NAT was not traversed/);

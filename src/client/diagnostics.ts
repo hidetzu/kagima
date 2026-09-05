@@ -20,6 +20,7 @@ import type {
 import {
   HOLD_TARGET_MS,
   firstFrameAt,
+  familyOf,
   formatReport,
   selectedPairIdOf,
 } from "../diagnostics/report.ts";
@@ -31,10 +32,18 @@ export type Diagnostics = {
   report(): Promise<string>;
 };
 
-/** ⚠ **The two safe fields, and nothing else.** ⚠ Never the address, never the raw line. */
+/**
+ * ⚠ **The safe fields, and nothing else.** ⚠ **Never the raw candidate line.**
+ *
+ * ⚠⚠ **`familyOf` is the only thing here that sees an address, ⚠ and all it returns is `v4`,
+ * `v6` or `?`** (`src/diagnostics/report.ts`). ⚠ **The address is not kept, ⚠ not copied, ⚠ and
+ * does not reach the fact this builds.** ⚠ **`test/diagnostics.test.ts` asserts that this file
+ * mentions an address nowhere else.**
+ */
 const factOf = (stat: StatLike | undefined): CandidateFact => ({
   type: stat?.candidateType ?? "other",
   protocol: stat?.protocol ?? "other",
+  family: familyOf(stat?.address),
 });
 
 export const createDiagnostics = (
