@@ -7,13 +7,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { base64url, base64urlDecode, randomBytes, randomToken } from "../src/random.ts";
+import { codeOf } from "./source-text.ts";
 
 test("⚠⚠ the seam draws from the platform CSPRNG and from nothing else", async () => {
   // ⚠ `crypto.getRandomValues` is a CSPRNG in Node and in Workers alike (`docs/adr/0015`).
   //   ⚠ `Math.random` makes no such promise (`.claude/rules/security.md` § 1).
-  const code = (await readFile("src/random.ts", "utf8"))
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  const code = codeOf(await readFile("src/random.ts", "utf8"));
   assert.match(code, /crypto\.getRandomValues/, "the seam does not use the platform CSPRNG");
   assert.doesNotMatch(code, /Math\.random/, "the seam reaches for Math.random");
   // ⚠ And it must not quietly go back to a runtime-specific name — ⚠ that is what moved.

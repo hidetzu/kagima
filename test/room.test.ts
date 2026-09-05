@@ -15,6 +15,7 @@ import {
   roomIdFromBytes,
 } from "../src/room/room-id.ts";
 import { createRoomStore, ROOM_IDLE_MS } from "../src/room/store.ts";
+import { codeOf } from "./source-text.ts";
 
 const BASE = "https://kagima.example";
 
@@ -163,9 +164,17 @@ const sourceFiles = async (dir = "src"): Promise<string[]> => {
   return out;
 };
 
-// ⚠ Strip comments first, or these find the sentences written to describe them (`CLAUDE.md` § 5).
-const codeOf = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+/**
+ * ⚠ **The one file allowed to touch the filesystem, ⚠ and why.**
+ *
+ * ⚠ **`src/static.ts` reads the pages and the built browser modules off disk** (`docs/adr/0016`).
+ * ⚠ **That is not persisting a room** — ⚠ **it never writes, ⚠ and what it reads is the same for
+ * every caller.** ⚠ **The case below cuts it out and then checks what is left inside it**, ⚠ which
+ * is how a narrow exception stays narrow.
+ *
+ * ⚠ **It is also the file a Worker replaces outright** (`docs/adr/0015`).
+ */
+const MAY_READ_THE_DISK = "src/static.ts";
 
 test("⚠ nothing under src/ imports a way to persist a room", async () => {
   // ⚠ This is what defends docs/adr/0005 mechanically. ⚠ Without it the ADR is a promise.
@@ -174,9 +183,44 @@ test("⚠ nothing under src/ imports a way to persist a room", async () => {
   const forbidden = /from\s+"node:(fs|fs\/promises|sqlite)"|require\(\s*"node:(fs|sqlite)"/;
   const offenders: string[] = [];
   for (const file of await sourceFiles()) {
+    if (file === MAY_READ_THE_DISK) continue;
     if (forbidden.test(codeOf(await readFile(file, "utf8")))) offenders.push(file);
   }
   assert.deepEqual(offenders, [], `a persistence module is imported in: ${offenders.join(", ")}`);
+});
+
+test("⚠⚠ the one file that may read the disk never writes to it", async () => {
+  // ⚠⚠ **Until 2026-09-06 this file was invisible to the case above** (`CLAUDE.md` § 9):
+  //   ⚠ **a glob inside one of its comments opened a block comment that swallowed its imports.**
+  // ⚠ **The exemption is deliberate now, ⚠ so the claim it costs is asserted here instead.**
+  //
+  // ⚠ **What this shows: ⚠ no write API is named in it.**
+  // ⚠ **What it does NOT show: ⚠ that nothing anywhere writes.** ⚠ Different claim, and the case
+  //   ⚠ above is the one that carries it for every other file.
+  const code = codeOf(await readFile(MAY_READ_THE_DISK, "utf8"));
+
+  // ⚠ Named, so the failure says which one. ⚠ A regex alternation would say only "it matched".
+  const WRITES = [
+    "writeFile",
+    "writeFileSync",
+    "appendFile",
+    "appendFileSync",
+    "createWriteStream",
+    "mkdir",
+    "mkdirSync",
+    "rm",
+    "rmSync",
+    "unlink",
+    "unlinkSync",
+    "open",
+    "openSync",
+  ];
+  const found = WRITES.filter((name) => new RegExp(`\\b${name}\\b`).test(code));
+  assert.deepEqual(found, [], `${MAY_READ_THE_DISK} names a write API: ${found.join(", ")}`);
+
+  // ⚠ And it is still the file this exemption was written for. ⚠ If it stops reading the disk,
+  //   ⚠ the exemption is stale and should go, rather than sit here covering something else.
+  assert.match(code, /from\s+"node:fs"/, "the exemption no longer describes this file");
 });
 
 test("⚠ nothing under src/ reaches for a non-CSPRNG source of ids", async () => {

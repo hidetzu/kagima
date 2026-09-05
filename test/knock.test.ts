@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createKnocks, type Knocks, MAX_WAITING } from "../src/knock/knocks.ts";
+import { codeOf } from "./source-text.ts";
 
 let n = 0;
 const make = (exists: (id: string) => boolean = () => true, maxWaiting?: number): Knocks =>
@@ -145,9 +146,7 @@ test("⚠ a decided knock leaves the Host's list", () => {
 test("⚠⚠ the cap is never named to a caller", async () => {
   // ⚠ **`docs/adr/0017`**: ⚠ **the cap is abuse protection, ⚠ not a product value.**
   // ⚠ **"最大 5 人待てます" must never be shown, ⚠ and neither must "満員".**
-  const code = (await readFile("src/knock/knocks.ts", "utf8"))
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  const code = codeOf(await readFile("src/knock/knocks.ts", "utf8"));
   // ⚠ The refusal reason exists for counting; ⚠ it must never be part of what `read` returns.
   const read = /read\(roomId, id\)[\s\S]*?\n {4}},/.exec(code)?.[0];
   assert.ok(read !== undefined, "read is not where this check looks for it");

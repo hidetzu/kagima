@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { codeOf } from "./source-text.ts";
 
 const CLIENT = join("src", "client");
 
@@ -46,10 +47,8 @@ const MEDIA = [
 test("⚠⚠ no server file names anything that could carry a media track", async () => {
   const offenders: string[] = [];
   for (const file of await serverFiles()) {
-    const code = (await readFile(file, "utf8"))
-      // ⚠ Comments stripped first, or this finds the sentences describing it (`CLAUDE.md` § 5).
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    // ⚠ Comments stripped first, or this finds the sentences describing it (`CLAUDE.md` § 5).
+    const code = codeOf(await readFile(file, "utf8"));
     for (const name of MEDIA) {
       if (code.includes(name)) offenders.push(`${file}: ${name}`);
     }
