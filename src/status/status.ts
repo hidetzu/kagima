@@ -23,6 +23,14 @@
 export type Ending =
   /** ⚠ The room is over and its state is gone. */
   | "closed"
+  /**
+   * ⚠ **This connection was never admitted: ⚠ the room already has two people in it.**
+   *
+   * ⚠ **Its own ending because it is not a drop.** ⚠ **Calling it `detached` told somebody who
+   * never got in that "the call may still be running"** — ⚠ **it was not, ⚠ and it never started.**
+   * ⚠ **This is the one refusal whose reason may be named: ⚠ the server said it in the close code.**
+   */
+  | "room-full"
   /** ⚠ The other side dropped. ⚠ Recoverable; ⚠ the room is still open. */
   | "peer-left"
   /** ⚠ Signalling went away. ⚠ **The call may well still be running** (`docs/adr/0010`). */
@@ -40,6 +48,7 @@ export type Ending =
  */
 const ORDER: readonly Exclude<Ending, null>[] = [
   "closed",
+  "room-full",
   "peer-left",
   "detached",
   "unreachable",
@@ -66,6 +75,7 @@ export type GuestState = {
 
 const HOST_ENDINGS: Readonly<Record<Exclude<Ending, null>, string>> = {
   closed: "このルームは閉じました。何も残っていません。",
+  "room-full": "このルームにはもう 2 人います。空いてから、もう一度お試しください。",
   "peer-left": "相手の接続が切れました。まだこのルームは開いています。",
   detached: "kagima とのつながりが切れました。通話は続いているかもしれません。",
   // ⚠ Says what happened and what to do. ⚠ ⚠ It does not say why — ⚠ we cannot see why, ⚠ and
@@ -76,6 +86,7 @@ const HOST_ENDINGS: Readonly<Record<Exclude<Ending, null>, string>> = {
 
 const GUEST_ENDINGS: Readonly<Record<Exclude<Ending, null>, string>> = {
   closed: "この通話は終わりました。何も残っていません。",
+  "room-full": "このルームにはもう 2 人います。空いてから、もう一度お試しください。",
   "peer-left": "相手の接続が切れました。待っています。",
   detached: "kagima とのつながりが切れました。通話は続いているかもしれません。",
   unreachable:

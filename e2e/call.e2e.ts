@@ -712,3 +712,63 @@ test(titleOf("field-test-mode-is-gone"), async () => {
     child.kill();
   }
 });
+
+test(titleOf("third-person"), async () => {
+  // ⚠⚠ **v0.1.0 is two people** (`docs/PRODUCT.md` § 4 — ⚠ **多人数会議 is a non-goal**).
+  // ⚠ **A third is refused with close 4002, ⚠ measured at about 5ms after the socket opens.**
+  //
+  // ⚠ **Two things must hold, ⚠ and they are different claims:**
+  // ⚠ **the third person is told something true, ⚠ and the two already talking are untouched.**
+  //
+  // ⚠ **Found on a real device** (kagima#40): ⚠ **the third was told "通話は続いているかもしれ
+  //   ⚠ ません。" — ⚠ it was not, ⚠ and it never started.**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, host.passphrase, "ひとり目");
+  await waitForFrames(host.page, "the host");
+  await waitForFrames(guest.page, "the guest");
+
+  const third = await openGuest(b, host.shareUrl, host.passphrase, "ふたり目");
+
+  // ⚠ Waited for the sentence to change, ⚠ not for a state name.
+  await third.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("もう 2 人"),
+    undefined,
+    { timeout: 20_000 },
+  );
+  const told = await text(third.page, "status");
+  console.log(`  observed: the third person was told "${told}"`);
+
+  // ⚠⚠ Never described as a call that might still be running. ⚠ It never started.
+  assert.doesNotMatch(told, /続いているかもしれません/, told);
+  assert.doesNotMatch(
+    told,
+    /終わりました|閉じました/,
+    `refused was reported as the room ending: ${told}`,
+  );
+
+  // ⚠⚠ And the diagnostics saw the close. ⚠ On a real device it did not, ⚠ because every listener
+  //   ⚠ was attached after `getUserMedia` — ⚠ after a person taps "allow", ⚠ seconds later.
+  //   ⚠ Fake cameras grant instantly, ⚠ so this assertion is the only thing standing in for that.
+  await third.page.waitForFunction(
+    () =>
+      /signalling socket: *closed \(code 4002\)/.test(
+        document.getElementById("diagnostics-text")?.textContent ?? "",
+      ),
+    undefined,
+    { timeout: 20_000 },
+  );
+  console.log("  observed: the third person's diagnostics recorded close 4002");
+
+  // ⚠⚠ The two already in the room carry on. ⚠ A refused third must cost them nothing.
+  const before = await framesDecoded(host.page);
+  await host.page.waitForTimeout(1_500);
+  const after = await framesDecoded(host.page);
+  assert.ok(after > before, `the host stopped decoding when a third arrived: ${before} → ${after}`);
+  assert.match(await text(host.page, "status"), /ひとり目/, "the host lost its guest");
+  console.log(`  observed: the host kept decoding through it (${before} → ${after})`);
+
+  await host.context.close();
+  await guest.context.close();
+  await third.context.close();
+});

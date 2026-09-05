@@ -150,6 +150,39 @@
 
       // ⚠ The guest offers, because the guest arrives second and knows the host is there.
       //   ⚠ The host waiting for an offer IS the waiting state; no extra message is needed.
+      // ⚠⚠ **Attached before anything slow, ⚠ like the message handler above.**
+      // ⚠ **`createCall` awaits `getUserMedia`; ⚠ a close arriving while the camera prompt is up
+      //   ⚠ has nobody listening** (kagima#40 — ⚠ **the guest page had the same shape, ⚠ and a
+      //   ⚠ real device found it: ⚠ fake cameras grant instantly and hide it**).
+      // ⚠ **The code is remembered too, ⚠ so the diagnostics can be told once it exists.**
+      let noteSocketClosed = () => {};
+      let closedCode = null;
+
+      // ⚠ The endings are not the same thing (kagima#11).
+      //   ⚠ 4005 is the room being over. ⚠ Anything else is this connection going away, which
+      //   ⚠ may come back. ⚠ Saying "ended" for the second one would be telling the person
+      //   ⚠ something we do not know.
+      transport.socket.addEventListener("close", (event) => {
+        closedCode ??= event.code;
+        noteSocketClosed(event.code);
+        if (event.code === 4005) {
+          call?.hangUp();
+          ending = outranks(ending, "closed");
+          render();
+          return;
+        }
+        if (event.code === 4002) {
+          ending = outranks(ending, "room-full");
+          render();
+          return;
+        }
+        // ⚠ The call itself may still be running: media goes browser to browser and does not
+        //   ⚠ need us (docs/adr/0003). ⚠ So the tracks are NOT stopped here.
+        ending = outranks(ending, "detached");
+        connected = false;
+        render();
+      });
+
       call = await createCall({ transport, isOfferer: false });
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
@@ -158,7 +191,10 @@
 
       // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.
       const diagnostics = createDiagnostics(call.pc);
-      transport.socket.addEventListener("close", (e) => diagnostics.noteSocketClosed(e.code));
+      noteSocketClosed = (code) => diagnostics.noteSocketClosed(code);
+      // ⚠ Replayed if it happened while the camera prompt was up. ⚠ The time it carries is when
+      //   ⚠ this started looking, ⚠ not when it happened.
+      if (closedCode !== null) diagnostics.noteSocketClosed(closedCode);
       const refreshDiagnostics = async () => {
         document.getElementById("diagnostics-text").textContent = await diagnostics.report();
       };
@@ -202,30 +238,23 @@
         render();
       });
 
-      call.pc.addEventListener("track", () => {
-        // ⚠ Says what happened, not a state name. ⚠ And it does not erase the other facts:
-        //   ⚠ `render` decides, and `ending` outranks this.
+      // ⚠⚠ **A frame, ⚠ not a negotiation event.**
+      //
+      // ⚠ **This used to hang off `track`.** ⚠ **`track` fires when the transceiver is created —
+      //   ⚠ in the middle of negotiation, ⚠ before any media moves.** ⚠ **So the screen could say
+      //   ⚠ "つながりました。" with zero frames decoded** — ⚠ **which is exactly the failure the
+      //   ⚠ final gate exists to catch** (`.claude/skills/verify/SKILL.md` § 3).
+      // ⚠ **The instrument was fixed for this same reason** (kagima#37). ⚠ **The screen was not.**
+      // ⚠ **The screen is the half a person believes.**
+      //
+      // ⚠ `loadeddata` on the element means a frame is there to show. ⚠ It is what the person
+      //   ⚠ actually sees, ⚠ and it is what the browser checks already assert (`videoWidth > 0`).
+      $("remote").addEventListener("loadeddata", () => {
+        // ⚠ `render` decides, and `ending` outranks this.
         connected = true;
         render();
       });
 
-      // ⚠ Three endings, and they are not the same thing (kagima#11).
-      //   ⚠ 4005 is the room being over. ⚠ Anything else is this connection going away, which
-      //   ⚠ may come back. ⚠ Saying "ended" for the second one would be telling the person
-      //   ⚠ something we do not know.
-      transport.socket.addEventListener("close", (event) => {
-        if (event.code === 4005) {
-          call?.hangUp();
-          ending = outranks(ending, "closed");
-          render();
-          return;
-        }
-        // ⚠ The call itself may still be running: media goes browser to browser and does not
-        //   ⚠ need us (docs/adr/0003). ⚠ So the tracks are NOT stopped here.
-        ending = outranks(ending, "detached");
-        connected = false;
-        render();
-      });
     } catch (error) {
       console.warn("kagima: the room could not be opened", error);
       const failure = classifyMediaError(error);

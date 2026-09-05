@@ -4,6 +4,7 @@
 //   (`.claude/rules/verification.md`).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   PASSPHRASE_BITS,
@@ -199,4 +200,51 @@ test("⚠ the passphrase generator draws from node:crypto", () => {
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.match(code, /import\s*\{[^}]*\brandomBytes\b[^}]*\}\s*from\s*"node:crypto"/);
   assert.match(code, /randomBytes\(WORD_COUNT\)/);
+});
+
+// ── ⚠ a phone left in a Japanese IME ────────────────────────────────────────
+//
+// ⚠ **Found by the first real handover** (kagima#40): ⚠ **typing the passphrase on a phone was
+//   ⚠ heavy.** ⚠ **The words are romaji, ⚠ and an IME turns them into kana.**
+
+test("⚠⚠ kana normalises to nothing, which is why the page must catch it first", async () => {
+  // ⚠⚠ **This is the trap.** ⚠ Kana does not become a *wrong* passphrase — ⚠ it becomes an
+  //   ⚠ *empty* one, ⚠ and the server's refusal is deliberately the same for every reason
+  //   (`.claude/rules/security.md` § 3). ⚠ **So the person is told nothing and can work out
+  //   ⚠ nothing.** ⚠ The page checks before sending, ⚠ using this very function.
+  for (const typed of ["あきかぜ", "アキカゼ", "秋風", "あきかぜ　あまぐも", "、。ー"]) {
+    assert.equal(normalizePassphrase(typed), "", `kana survived: ${typed}`);
+  }
+  // ⚠ And a real one does not trip the guard.
+  assert.notEqual(normalizePassphrase("akikaze-amagumo-asahi-ayame"), "");
+  // ⚠ Full-width romaji is a different case: ⚠ NFKC folds it, ⚠ so it must NOT be refused.
+  assert.notEqual(normalizePassphrase("ａｋｉｋａｚｅ"), "");
+});
+
+test("⚠⚠ the page uses the server's own rule rather than a copy of it", async () => {
+  // ⚠ **Two copies of one decision drift** (`CLAUDE.md` § 3), ⚠ **and here the drift would be
+  //   ⚠ cruel: ⚠ the page would say "that looks fine" about something the server then refuses.**
+  const page = await readFile("public/room.html", "utf8");
+  const code = page.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(code, /from "\/passphrase\/normalize\.ts"/, "the page does not import the rule");
+  assert.doesNotMatch(code, /\[\^a-z\]/, "the page carries its own copy of the rule");
+
+  // ⚠ And the rule really is in one file, ⚠ not two.
+  const shared = await readFile("src/passphrase/normalize.ts", "utf8");
+  assert.match(shared, /export const normalizePassphrase/);
+  const generator = await readFile("src/passphrase/passphrase.ts", "utf8");
+  assert.doesNotMatch(
+    generator.replace(/^\s*\/\/.*$/gm, ""),
+    /export const normalizePassphrase =/,
+    "the generator defines a second normaliser",
+  );
+});
+
+test("⚠ the passphrase field asks for a Latin keyboard", async () => {
+  // ⚠ Small, ⚠ and it is the half that stops the trap happening at all.
+  const page = await readFile("public/room.html", "utf8");
+  const field = /<input id="passphrase"[\s\S]*?\/>/.exec(page)?.[0] ?? "";
+  for (const attr of ['inputmode="latin"', 'autocorrect="off"', 'autocapitalize="off"']) {
+    assert.ok(field.includes(attr), `the passphrase field is missing ${attr}: ${field}`);
+  }
 });

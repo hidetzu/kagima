@@ -22,13 +22,14 @@
 //   ⚠ return it unchanged.** ⚠ **The day the generator emits something non-canonical, the claim
 //   ⚠ breaks and that test fails.**
 import { randomBytes } from "node:crypto";
+import { SEPARATOR } from "./normalize.ts";
 import { BITS_PER_WORD, WORDS } from "./words.ts";
+
+// ⚠ Re-exported so every existing caller keeps one import. ⚠ The rule itself lives in one file.
+export { SEPARATOR, normalizePassphrase } from "./normalize.ts";
 
 /** ⚠ **How many words are said.** ⚠ Four is the trade recorded in `docs/adr/0007`. */
 export const WORD_COUNT = 4;
-
-/** ⚠ **Not a letter**, so normalisation can rebuild it from whatever the person typed between words. */
-export const SEPARATOR = "-";
 
 /**
  * ⚠ **The strength claim, derived from the two numbers it depends on.**
@@ -68,21 +69,3 @@ export const passphraseFromBytes = (bytes: Uint8Array): string => {
  * anywhere near this** (`.claude/rules/security.md` § 1).
  */
 export const generatePassphrase = (): string => passphraseFromBytes(randomBytes(WORD_COUNT));
-
-/**
- * Put what a person typed into the one form the comparison expects.
- *
- * ⚠ **This does not decide whether the passphrase is right.** ⚠ **That is kagima#4, and it
- * compares in constant time.** ⚠ **This only removes the ways two people can write the same thing.**
- */
-export const normalizePassphrase = (input: string): string =>
-  input
-    // ⚠ Full-width letters and the ideographic space arrive from Japanese IMEs.
-    //   ⚠ NFKC folds them to ASCII; without it "ｓａｋｕｒａ" never matches "sakura".
-    .normalize("NFKC")
-    .toLowerCase()
-    // ⚠ Any run of non-letters becomes one separator — spaces, hyphens, underscores, dots.
-    //   ⚠ People retype a spoken phrase with whatever separator they reach for.
-    .replace(/[^a-z]+/g, SEPARATOR)
-    // ⚠ Leading and trailing separators come from the replace above, and from stray punctuation.
-    .replace(/^-+|-+$/g, "");
