@@ -28,7 +28,7 @@
 | U7 | ブラウザ間の相互運用 | 「会話できる」の denominator | ⚠ **一度測った**(§ 6)。⚠ **母集団は狭い** |
 | U8 | Raspberry Pi 等への展開 | 何も止まらない | ⚠ **v0.1.0 では測らない**(`PRODUCT.md` § 2) |
 | ⚠ **P1** | ⚠ **誰が・どんな場面で・なぜ既存のものでなく kagima を使うのか** | ⚠ **次に何を作るかが決まらない** | ⚠ **仮説のみ。** ⚠ **一つも検証していない**(§ 9) |
-| ⚠ **U9** | ⚠ **制御プレーンを Cloudflare 側に置くか**(Worker + Durable Objects) | ⚠ **何も止まらない。** ⚠ Node 版は動いている | ⚠ **一度動かして測った**(§ 10)。⚠ **決定は Owner 待ち** |
+| ⚠ **U9** | ⚠ **制御プレーンを Cloudflare 側に置くか**(Worker + Durable Objects) | — | ⚠ **決定済** → [`adr/0015`](adr/0015-put-the-service-on-cloudflare-after-three-things-are-settled.md)。⚠ **先に片付ける 3 つが残る**(§ 10) |
 
 ---
 
@@ -347,8 +347,8 @@ Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった�
 
 ## 10. U9 — 制御プレーンを Cloudflare 側に置くか
 
-⚠ **草案の ADR がある**([`adr/0015-DRAFT`](adr/0015-DRAFT-do-not-move-to-workers-and-durable-objects-yet.md))。
-⚠ **そちらが決定の材料を持つ。** ⚠ **ここは測った値だけを持つ。**
+⚠ **方向は決まった** — [`adr/0015`](adr/0015-put-the-service-on-cloudflare-after-three-things-are-settled.md)。
+⚠ **ここに残るのは、⚠ 測った値と、⚠ **まだ決まっていない 3 つ**である。**
 
 ### 測ったこと(2026-09-05、⚠ `wrangler dev --local`、⚠ アカウント無し)
 
@@ -365,10 +365,15 @@ Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった�
 | ⚠⚠ **DO の storage** | ⚠⚠ **signalling 後も 0 キー。** ⚠ **何も書いていない** |
 | wrangler が持ち込む量 | ⚠ **91 パッケージ / 230MB**(開発時のみ) |
 
-### ⚠ 測っていないこと
+### ⚠ 移る前に片付ける 3 つ(⚠ まだ決まっていない)
 
-- ⚠⚠ **Durable Objects の課金条件。** ⚠ **数字は書かない** — ⚠ **調べていないからである。**
-  ⚠ **そして これが決定を止めている唯一の項目である**([`PRODUCT.md`](PRODUCT.md) § 6)。
+| # | Issue | 何を | 誰が |
+|---|---|---|---|
+| **1** | [#47](https://github.com/hidetzu/kagima/issues/47) | ⚠ **Durable Objects の課金条件を確かめる。** ⚠ **数字は書かない** — ⚠ 調べていないからである | ⚠ **Owner** |
+| **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **ブラウザに配る `.ts` をどう作るか** — ⚠ **第二のビルドシステムを受け入れる形を決める** | AI + Owner |
+| **3** | [#49](https://github.com/hidetzu/kagima/issues/49) | ⚠ **`signalling-drops` 相当をどう検査するか** — ⚠ **検証可能性を落として移らない** | AI |
+
+### ⚠ 測っていないこと
 - ⚠ **本番の Cloudflare 上での挙動。** ⚠ **ローカルの `workerd` で見たことしか知らない。**
 - ⚠ **DO が退避されたときルームがどう見えるか。** ⚠ **強制する方法を用意していない。**
 
