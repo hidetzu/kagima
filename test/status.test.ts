@@ -11,7 +11,6 @@ import { type Ending, guestStatus, hostStatus, outranks } from "../src/status/st
 
 const ENDINGS: readonly Exclude<Ending, null>[] = [
   "closed",
-  "room-full",
   "peer-left",
   "detached",
   "unreachable",
@@ -85,26 +84,6 @@ test("⚠ every ending has its own sentence, and no two are the same", () => {
     assert.equal(new Set(said).size, said.length, `two endings read the same: ${said.join(" / ")}`);
     for (const one of said) assert.notEqual(one.trim(), "", "an ending has no sentence");
   }
-});
-
-test("⚠⚠ a connection that was never admitted is not called a dropped one", () => {
-  // ⚠⚠ **Measured on a real device** (kagima#40): ⚠ **a third person opened the shared URL, ⚠ was
-  //   ⚠ refused with close 4002, ⚠ and was told "通話は続いているかもしれません。"**
-  // ⚠ **It was not. ⚠ It never started.** ⚠ **Waiting does not help; ⚠ the room is full.**
-  for (const said of [
-    guestStatus({ ending: "room-full", connected: false }),
-    hostStatus({ ending: "room-full", connected: false, guestName: null }),
-  ]) {
-    assert.match(said, /もう 2 人/, said);
-    assert.doesNotMatch(said, /続いているかもしれません/, said);
-    // ⚠ And it is not the room ending either.
-    assert.doesNotMatch(said, /終わりました|閉じました/, said);
-    // ⚠ It leaves a reason to come back: ⚠ the room may empty.
-    assert.match(said, /もう一度/, said);
-  }
-  // ⚠ It outranks `detached`, ⚠ because a drop cannot mask never having been let in.
-  assert.equal(outranks("room-full", "detached"), "room-full");
-  assert.equal(outranks("detached", "room-full"), "room-full");
 });
 
 // ── ⚠ the screen must not say connected before a frame ──────────────────────

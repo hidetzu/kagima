@@ -9,21 +9,22 @@
 //
 // ⚠ **Every room dies with this process.** ⚠ **That is the specification** (`docs/adr/0005`).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createKnockRejectionCounter,
+  createKnocks,
+  type KnockRejectionCounter,
+  type Knocks,
+} from "./knock/knocks.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
 import { createRoom } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
-import {
-  type RejectionCounter,
-  attemptJoin,
-  createRejectionCounter,
-  defaultCompare,
-} from "./room/join.ts";
-import { type RateLimiter, createRateLimiter } from "./room/rate-limit.ts";
-import { CLOSE_ROOM_CLOSED, attachSignaling } from "./signaling/attach.ts";
+import { createRoomStore, type RoomStore } from "./room/store.ts";
+import { attachSignaling, CLOSE_ROOM_CLOSED } from "./signaling/attach.ts";
+import { createHub, type Hub } from "./signaling/hub.ts";
+import { parseClientMessage } from "./signaling/messages.ts";
 import { serveStatic } from "./static.ts";
-import { type Hub, createHub } from "./signaling/hub.ts";
-import { type RoomStore, createRoomStore } from "./room/store.ts";
+import { constantTimeEqual, issueJoinToken } from "./token/join-token.ts";
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_BASE_URL = `http://localhost:${DEFAULT_PORT}`;
@@ -54,9 +55,11 @@ export type Context = {
   readonly store: RoomStore;
   readonly baseUrl: string;
   readonly secret: string;
-  readonly rejections: RejectionCounter;
-  readonly limiter: RateLimiter;
   readonly hub: Hub;
+  /** ⚠ **The door** (`docs/adr/0017`). ⚠ Who is waiting, and what the Host decided. */
+  readonly knocks: Knocks;
+  /** ⚠ **Why knocks were not taken.** ⚠ Counted apart, ⚠ answered alike. */
+  readonly knockRejections: KnockRejectionCounter;
   /**
    * ⚠ **The header to read the caller's address from, when something we trust sets it.**
    *
@@ -92,7 +95,7 @@ export const sourceOf = (req: IncomingMessage, trustedHeader: string): string =>
 const send = (res: ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    // ⚠ Never let a room-creation response sit in a cache. ⚠ It carries the passphrase.
+    // ⚠ Never let a room-creation response sit in a cache. ⚠ It carries the host key.
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
   });
@@ -100,29 +103,16 @@ const send = (res: ServerResponse, status: number, body: unknown): void => {
 };
 
 /**
- * ⚠ **The one answer to every refused join.**
- *
- * ⚠ **Same status, same body, for a wrong passphrase, an unknown room and a malformed id**
- * (`docs/adr/0004`). ⚠ **It is a single constant so the three paths cannot drift apart** —
- * ⚠ **drifting apart is exactly the bug, and it would not look like one in a diff.**
- */
-const JOIN_REFUSED = {
-  status: 401,
-  body: { error: "the room and passphrase did not match" },
-} as const;
-
-/**
  * ⚠ **The one answer to every refused close.**
  *
- * ⚠ **Same reasoning as `JOIN_REFUSED`: a wrong host key and a room that is not there must not be
- * distinguishable**, ⚠ **or this endpoint answers "does this room exist?" as well.**
+ * ⚠ **A wrong host key and a room that is not there must not be distinguishable**, ⚠ **or this endpoint answers "does this room exist?" as well.**
  */
 const CLOSE_REFUSED = {
   status: 401,
   body: { error: "that room could not be closed" },
 } as const;
 
-const readBody = async (req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string | null> => {
+const readBody = async (req: IncomingMessage): Promise<string | null> => {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -166,20 +156,83 @@ export const handle = async (
     }
     try {
       const { room, shareUrl } = createRoom(ctx.store, ctx.baseUrl);
-      // ⚠ The passphrase is returned here and nowhere else, ever. ⚠ The host cannot learn it any
-      //   ⚠ other way (`docs/PRODUCT.md` § 3), and after this the server only compares it.
-      //   ⚠ It is NOT in shareUrl — see room-id.ts.
-      // ⚠ The host key is handed over here and never again, like the passphrase.
+      // ⚠⚠ **The host key and the host's own token are handed over here and never again.**
+      // ⚠ **There is no passphrase** (`docs/adr/0017`) — ⚠ **who comes in is the Host's decision,
+      //   ⚠ and the Host is the one asking.**
       send(res, 201, {
         roomId: room.id,
         shareUrl,
-        passphrase: room.passphrase,
+        token: await issueJoinToken(room.id, ctx.secret, Date.now()),
         hostKey: room.hostKey,
       });
     } catch {
       // ⚠ Nothing from the error reaches the response or a log line (`.claude/rules/security.md` § 2).
       send(res, 503, { error: "could not create a room just now, please try again" });
     }
+    return;
+  }
+
+  // ⚠⚠ **The door** (`docs/adr/0017`).
+  //
+  // ⚠ **Every answer here looks the same whatever happened** — ⚠ **an unknown room, a Host who
+  //   ⚠ has not answered, and a door with too many people at it are one shape.**
+  // ⚠ **Anything else answers "does this room exist?" for free** (`.claude/rules/security.md` § 3).
+  const knockPath = /^\/api\/rooms\/([^/]+)\/knock$/.exec(url.pathname);
+  if (knockPath) {
+    if (req.method !== "POST") {
+      res.setHeader("allow", "POST");
+      send(res, 405, { error: "knocking is a POST" });
+      return;
+    }
+    const raw = await readBody(req);
+    if (raw === null) {
+      send(res, 413, { error: "that request body is too large to be a knock" });
+      return;
+    }
+    let nickname: unknown;
+    try {
+      nickname = (JSON.parse(raw) as { nickname?: unknown }).nickname;
+    } catch {
+      send(res, 400, { error: "the body is not JSON" });
+      return;
+    }
+    // ⚠ The same rule the signalling side uses. ⚠ One place, ⚠ not two (`CLAUDE.md` § 3).
+    const checked = parseClientMessage(JSON.stringify({ type: "hello", nickname }));
+    if (!checked.ok || checked.message.type !== "hello") {
+      // ⚠ Malformed is the caller's own mistake and says nothing about any room.
+      send(res, 400, { error: "that name cannot be used" });
+      return;
+    }
+    const roomId = decodeURIComponent(knockPath[1] as string);
+    const { id, refused } = ctx.knocks.knock(roomId, checked.message.nickname, Date.now());
+    if (refused === null) {
+      // ⚠ The Host is already here, waiting, with a socket open (`docs/adr/0017`).
+      ctx.hub.announce(
+        roomId,
+        JSON.stringify({ type: "knock", knockId: id, nickname: checked.message.nickname }),
+      );
+    } else {
+      // ⚠ Counted, ⚠ never answered. ⚠ An uncounted rejection is indistinguishable from a
+      //   ⚠ request that never arrived (`.claude/rules/evidence.md`).
+      ctx.knockRejections.record(refused);
+    }
+    // ⚠⚠ The same body either way.
+    send(res, 200, { knockId: id });
+    return;
+  }
+
+  const knockState = /^\/api\/rooms\/([^/]+)\/knock\/([^/]+)$/.exec(url.pathname);
+  if (knockState) {
+    if (req.method !== "GET") {
+      res.setHeader("allow", "GET");
+      send(res, 405, { error: "reading a knock is a GET" });
+      return;
+    }
+    const roomId = decodeURIComponent(knockState[1] as string);
+    const knockId = decodeURIComponent(knockState[2] as string);
+    // ⚠ Unknown ids read as waiting, ⚠ exactly like a Host who has not answered.
+    const read = ctx.knocks.read(roomId, knockId);
+    send(res, 200, read.token === undefined ? { state: read.state } : read);
     return;
   }
 
@@ -206,7 +259,7 @@ export const handle = async (
     const room = isRoomId(roomId) ? ctx.store.get(roomId) : undefined;
     // ⚠ Exactly one comparison whatever the path, for the same reason the join endpoint has one:
     //   ⚠ returning early for an unknown room makes the time saved the answer.
-    const matched = await defaultCompare(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
+    const matched = await constantTimeEqual(hostKey, room?.hostKey ?? DECOY_HOST_KEY);
     if (room === undefined || !matched) {
       send(res, CLOSE_REFUSED.status, CLOSE_REFUSED.body);
       return;
@@ -214,82 +267,16 @@ export const handle = async (
 
     // ⚠ The sockets first, so nobody is left holding a room that no longer exists.
     ctx.hub.closeRoom(roomId, CLOSE_ROOM_CLOSED, "the host ended this room");
-    // ⚠ Then the room, and with it the passphrase, the host key and the participant list.
+    // ⚠ Then the room, and with it the host key and the participant list.
     //   ⚠ `docs/adr/0005`: what is not held cannot leak.
     ctx.store.close(roomId);
+    // ⚠ And everyone still at the door hears the same one word as everyone who was refused
+    //   (`docs/adr/0017`). ⚠ Leaving them on "waiting" would leave them waiting for a room
+    //   ⚠ that is gone.
+    ctx.knocks.endRoom(roomId);
     // ⚠ Says the room is over, and says nothing about who was in it.
     logger.info("a room was closed by its host", { roomId });
     send(res, 200, { closed: true });
-    return;
-  }
-
-  const join = /^\/api\/rooms\/([^/]+)\/join$/.exec(url.pathname);
-  if (join) {
-    if (req.method !== "POST") {
-      res.setHeader("allow", "POST");
-      send(res, 405, { error: "joining a room is a POST" });
-      return;
-    }
-
-    const raw = await readBody(req);
-    if (raw === null) {
-      // ⚠ Malformed, and said so — ⚠ this is not the same as declined, and the caller is the one
-      //   ⚠ that is wrong (`.claude/rules/evidence.md`). ⚠ It leaks nothing about any room.
-      send(res, 413, { error: "that request body is too large to be a join" });
-      return;
-    }
-
-    let submitted: unknown;
-    try {
-      submitted = (JSON.parse(raw) as { passphrase?: unknown }).passphrase;
-    } catch {
-      send(res, 400, { error: "the body is not JSON" });
-      return;
-    }
-    if (typeof submitted !== "string") {
-      send(res, 400, { error: "the body needs a passphrase, as a string" });
-      return;
-    }
-
-    const roomId = decodeURIComponent(join[1] as string);
-    const source = sourceOf(req, ctx.trustedSourceHeader);
-
-    // ⚠ Ask before comparing anything. ⚠ A limit that fires after the work has been done
-    //   ⚠ still lets the work be used as a timing signal.
-    const decision = ctx.limiter.check(roomId, source);
-    if (decision !== "allow") {
-      // ⚠ The same answer as a wrong passphrase, deliberately.
-      //   ⚠ A distinguishable 429 would make the limit firing say "this room exists"
-      //   ⚠ (`.claude/rules/security.md` § 3).
-      //   ⚠ The cost is that a real guest gets no "slow down" hint. ⚠ That cost is accepted.
-      ctx.rejections.record(
-        decision === "source-limit"
-          ? "rate-limited-source"
-          : decision === "room-limit"
-            ? "rate-limited-room"
-            : "at-capacity",
-      );
-      send(res, JOIN_REFUSED.status, JOIN_REFUSED.body);
-      return;
-    }
-
-    const outcome = await attemptJoin(ctx.store, roomId, submitted, {
-      now: Date.now,
-      secret: ctx.secret,
-      compare: defaultCompare,
-    });
-
-    if (!outcome.ok) {
-      // ⚠ Counted apart, answered alike. ⚠ `why` stops here and never reaches the wire.
-      ctx.rejections.record(outcome.why);
-      // ⚠ Only a failure consumes budget. ⚠ A guest who gets it right first time costs nobody
-      //   ⚠ anything, and an attacker's misses are what fill the room's ledger.
-      ctx.limiter.recordFailure(roomId, source);
-      send(res, JOIN_REFUSED.status, JOIN_REFUSED.body);
-      return;
-    }
-    // ⚠ The token is bound to this room and short-lived (`src/token/join-token.ts`).
-    send(res, 200, { token: outcome.token });
     return;
   }
 
@@ -329,13 +316,18 @@ export const startServer = (
     logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
     logger.warn("behind a tunnel that makes every caller look like one source");
   }
+  const store = createRoomStore();
   const ctx: Context = {
-    store: createRoomStore(),
+    store,
     baseUrl,
     secret: joinTokenSecret(),
-    rejections: createRejectionCounter(),
-    limiter: createRateLimiter({ now: Date.now }),
     hub: createHub(),
+    knockRejections: createKnockRejectionCounter(),
+    knocks: createKnocks({
+      newId: () => randomToken(16),
+      // ⚠ Asked, never reached into. ⚠ The door does not get to browse the rooms.
+      roomExists: (id) => store.get(id) !== undefined,
+    }),
     trustedSourceHeader,
   };
   const server = createServer((req, res) => {
@@ -351,6 +343,7 @@ export const startServer = (
   const wss = attachSignaling(server, {
     hub: ctx.hub,
     secret: ctx.secret,
+    knocks: ctx.knocks,
     touch: (roomId) => ctx.store.touch(roomId),
   });
 

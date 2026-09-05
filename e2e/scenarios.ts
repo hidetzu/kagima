@@ -21,11 +21,11 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: "guest-refusals",
-    sees: "a wrong passphrase, an unknown room and a rate-limited attempt reading the same",
+    sees: "an unknown room and a room whose Host has not looked reading the same",
   },
   {
     name: "guest-keeps-nothing",
-    sees: "the passphrase not surviving the page it was typed into",
+    sees: "the join token not surviving the page it arrived on",
   },
   {
     name: "media-refused",
@@ -33,7 +33,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: "host-screen",
-    sees: "the host page handing over a URL and a passphrase, and keeping them apart",
+    sees: "the host page handing over a URL, and no control putting a token on the clipboard",
   },
   {
     name: "peer-drops",
@@ -53,7 +53,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: "third-person",
-    sees: "a third person being told the room is full, and the two already in it carrying on",
+    sees: "a third person waiting at the door while two are already talking",
   },
   {
     name: "host-closes",

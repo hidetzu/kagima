@@ -4,10 +4,8 @@
 //   ⚠ that matter (a collision is handled; the id comes from a CSPRNG) cannot be shown against a
 //   ⚠ real generator.** ⚠ **A collision would have to be waited for, and waiting is not a test.**
 import { randomToken } from "../random.ts";
-import { generatePassphrase } from "../passphrase/passphrase.ts";
 import { buildShareUrl, generateRoomId } from "./room-id.ts";
 import type { Room, RoomStore } from "./store.ts";
-import { asPassphrase } from "./types.ts";
 
 /**
  * ⚠ **How many ids to try before giving up.**
@@ -21,7 +19,6 @@ export const MAX_ID_ATTEMPTS = 8;
 
 export type CreateRoomDeps = {
   readonly newId: () => string;
-  readonly newPassphrase: () => string;
   /** ⚠ **CSPRNG.** ⚠ A guessable host key lets anyone end anyone's call. */
   readonly newHostKey: () => string;
   readonly now: () => number;
@@ -30,7 +27,6 @@ export type CreateRoomDeps = {
 /** ⚠ **The real ones.** ⚠ Overridden only by tests, and only to force a state that cannot be waited for. */
 export const defaultDeps: CreateRoomDeps = {
   newId: generateRoomId,
-  newPassphrase: generatePassphrase,
   newHostKey: () => randomToken(32),
   now: Date.now,
 };
@@ -41,8 +37,8 @@ export type CreatedRoom = {
 };
 
 /**
- * ⚠ **The host is the only party that ever receives the passphrase from us**, and only here,
- * ⚠ once. ⚠ **Nothing later re-reads or re-sends it** (`docs/adr/0004`).
+ * ⚠ **A room is an id and a host key.** ⚠ **There is no secret to guess** (`docs/adr/0017`) —
+ * ⚠ **who comes in is the Host's decision, ⚠ not something a caller can know.**
  *
  * @throws when no free id was found in `MAX_ID_ATTEMPTS` tries. ⚠ **Never returns a partial room.**
  */
@@ -51,14 +47,13 @@ export const createRoom = (
   baseUrl: string,
   deps: CreateRoomDeps = defaultDeps,
 ): CreatedRoom => {
-  const passphrase = asPassphrase(deps.newPassphrase());
   const hostKey = deps.newHostKey();
 
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
     const id = deps.newId();
     const at = deps.now();
     // ⚠ A room nobody ever joins still has a clock, and it starts here.
-    const room: Room = { id, passphrase, hostKey, createdAt: at, lastSeenAt: at };
+    const room: Room = { id, hostKey, createdAt: at, lastSeenAt: at };
     // ⚠ `add` refuses rather than overwrites, so a collision cannot silently steal a live room.
     if (store.add(room)) return { room, shareUrl: buildShareUrl(baseUrl, id) };
   }

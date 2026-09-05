@@ -15,7 +15,8 @@
 2. ⚠ **The repository is public.** ⚠ **Assume every commit body, issue, PR and comment is read
    by anyone** ([`git.md`](git.md) owns what never goes public; ⚠ **this file does not restate it**).
 3. ⚠ **The input is hostile by construction.** ⚠ **A room URL is handed to someone over a channel
-   we do not control**, and the passphrase is the only thing standing behind it.
+   we do not control**, ⚠ **and the only thing standing behind it is the Host's decision**
+   (`../../docs/adr/0017`). ⚠ **A leaked URL lets somebody knock; ⚠ it does not let them in.**
 
 ⚠ **Where a security decision has more than one defensible answer, it is not simplified here.**
 ⚠ **It becomes an ADR or an issue** ([`owner-decisions.md`](owner-decisions.md)).
@@ -24,60 +25,70 @@
 
 ---
 
-## 1. Identifiers and the passphrase
+## 1. Identifiers and the door
 
 - MUST: ⚠ **Generate a room id from a CSPRNG.** ⚠ **Never from a counter, a timestamp, a PID,
   `Math.random`, or anything derived from them.**
   ⚠ **Grounds: the URL is the outer wall, and a guessable wall is not a wall.**
-- MUST: ⚠ **State the entropy of the room id and of the passphrase, in bits, and say which
-  alphabet and length produce it** ([`evidence.md`](evidence.md) — ⚠ **a number carries how it
-  was derived**).
-- MUST: ⚠ **The passphrase is for a human to say out loud.** ⚠ **Its entropy is therefore low**,
-  ⚠ **so it is the rate limit, not the passphrase, that makes it safe** (§ 3).
-  ⚠ **Never argue a rate limit away by pointing at the passphrase's length.**
-- MUST: ⚠ **Compare the passphrase with a constant-time comparison.**
+- MUST: ⚠ **State the entropy of the room id, in bits, and say which alphabet and length produce
+  it** (`evidence.md` — ⚠ **a number carries how it was derived**).
+- MUST: ⚠ **There is no secret to guess at the door** (`../../docs/adr/0017`).
+  ⚠ **Who comes in is the Host's decision, ⚠ made while the Host is present.**
+  ⚠ **Never reintroduce a guessable secret without an ADR** — ⚠ **it brings the whole rate-limit
+  question back with it** (kagima#56).
+- MUST: ⚠ **Compare the host key and the join token with a constant-time comparison.**
   ⚠ **Never with `===` on the raw string.**
-- SHOULD: ⚠ **Normalise before comparing** (case, whitespace, Unicode form) —
-  ⚠ **and say so, because normalising lowers the entropy stated above.**
+- MUST: ⚠ **A knock at a room that does not exist, ⚠ a knock nobody has looked at, ⚠ and a knock
+  dropped because too many are waiting must be indistinguishable from outside** (§ 3).
+- MUST NOT: ⚠ **Never show how many people are at a door, ⚠ and never say a door is full.**
+  ⚠ **The cap is abuse protection, ⚠ not a product value** (`../../docs/adr/0017`).
 
 ## 2. What must never be written down
 
-- MUST NOT: ⚠ **Never log the passphrase.** ⚠ **Not at any level, not "only in development",
+- MUST NOT: ⚠ **Never log the join token or the host key.** ⚠ **Not at any level, not "only in development",
   ⚠ not inside an object that gets serialised whole.**
-  ⚠ **The common way this breaks is not a `log(passphrase)` line — it is
+  ⚠ **The common way this breaks is not a `log(token)` line — it is
   `log(requestBody)` and `log(err)` with the body attached.**
-- MUST NOT: ⚠ **Never log a join token, a room id together with its passphrase, or a TURN
-  credential.**
+- MUST NOT: ⚠ **Never log a room id together with who knocked at it, or a TURN credential.**
 - MUST: ⚠ **A log line about a failed join says that a join failed, and never what was tried.**
 - MUST: ⚠ **Redact at the boundary that builds the line, not at the call site.**
   ⚠ **A rule that every call site must remember is not a rule, it is a hope.**
 - MUST: ⚠ **Leave a check behind that fails when a secret reaches a log**
   ([`verification.md`](verification.md) — ⚠ **a fixed bug leaves a check behind**).
-  ⚠ **Without it, "we do not log the passphrase" is a promise and not a wall.**
+  ⚠ **Without it, "we do not log the token" is a promise and not a wall.**
 
-## 3. Standing in front of a guess
+## 3. One answer, whatever happened
 
-- MUST: ⚠ **Rate-limit passphrase attempts per room**, ⚠ **and independently per source.**
-  ⚠ **Per-source alone lets a botnet through; per-room alone lets one attacker lock a room's
-  real guest out** (⚠ **that second one is a denial of service we would have built ourselves**).
+⚠ **This section used to be about rate-limiting passphrase attempts.**
+⚠ **There is no passphrase** (`../../docs/adr/0017`). ⚠ **What survived it is the shape of the
+answer, ⚠ and that binds harder than before** — ⚠ **because a knock is cheap and anyone with the
+URL can make one.**
+
+- MUST: ⚠ **A room that does not exist and a room whose Host has not answered must be
+  indistinguishable from outside** — ⚠ **same response, same shape, same timing class.**
+  ⚠ **Otherwise knocking answers "does this room exist?" for free, ⚠ and it also says whether the
+  Host is at their desk.**
+- MUST: ⚠ **Refused, closed, and ended-while-waiting are one answer to the Guest.**
+  ⚠ **Telling them apart would say the Host was there and decided.**
 - MUST: ⚠ **Count every rejection well enough to tell them apart**
-  ([`evidence.md`](evidence.md) § Outcomes are not one outcome).
+  (`evidence.md` § Outcomes are not one outcome).
   ⚠ **An uncounted rejection is indistinguishable from a request that never arrived.**
-- MUST: ⚠ **A wrong passphrase and an unknown room must be indistinguishable from outside** —
-  ⚠ **same response, same shape, same timing class.**
-  ⚠ **Otherwise the endpoint answers "does this room exist?" for free.**
-- MUST: ⚠ **Say which of the outcomes in [`evidence.md`](evidence.md) can occur for this
-  endpoint, and say explicitly that the rest cannot.**
+- MUST: ⚠ **Say which of the outcomes in `evidence.md` can occur for this endpoint, and say
+  explicitly that the rest cannot.**
+- MUST: ⚠ **Bound how many knocks a room holds at once.** ⚠ **Unbounded tracking is itself the
+  attack.** ⚠ **Reaching the bound is counted and never shown.**
+- MUST NOT: ⚠ **Never let a knock reach for the camera.** ⚠ **Somebody who is not let in never
+  hands one over** (`../../docs/PRODUCT.md` § 5).
 
 ## 4. The join token
 
-- MUST: ⚠ **The passphrase is exchanged for a short-lived token, once**, and
-  ⚠ **nothing after that point re-reads the passphrase.**
+- MUST: ⚠ **The Host's decision is exchanged for a short-lived token, once**, and
+  ⚠ **nothing after that point re-reads the decision** (`../../docs/adr/0017`).
 - MUST: ⚠ **Bind the token to the room it was issued for.** ⚠ **A token that works on another
   room turns one leaked link into all of them.**
 - MUST: ⚠ **State the lifetime, and state what happens when it expires mid-call.**
   ⚠ **"It probably will not happen" is not an answer** — ⚠ **name the outcome.**
-- MUST NOT: ⚠ **Never put the passphrase, or anything derived from it, inside the token.**
+- MUST NOT: ⚠ **Never put the host key, or anything derived from it, inside the token.**
 
 ## 5. Media
 
@@ -105,7 +116,7 @@
 ## 7. After the room closes
 
 - MUST: ⚠ **Closing a room drops its state.** ⚠ **Say what "drops" means for each thing held** —
-  the passphrase, the token, the participant list, the signalling buffers.
+  the host key, the tokens, the participant list, who was at the door, the signalling buffers.
 - MUST: ⚠ **An expired or closed room answers exactly like a room that never existed** (§ 3).
 - MUST NOT: ⚠ **Never keep a record "just to be able to debug it."**
   ⚠ **What may be retained is a product decision, and it is currently: nothing.**

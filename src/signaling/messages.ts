@@ -25,6 +25,9 @@ export const MAX_CANDIDATE_BYTES = 4 * 1024;
  */
 export const MAX_NICKNAME_CHARS = 24;
 
+/** ⚠ **A knock id is ours and is a uuid.** ⚠ Bounded so a long one is refused before it is looked up. */
+export const MAX_KNOCK_ID_BYTES = 64;
+
 /** ⚠ **Anything larger than the largest thing we accept is refused before it is parsed.** */
 export const MAX_MESSAGE_BYTES = MAX_SDP_BYTES + 1024;
 
@@ -38,6 +41,14 @@ export type ClientMessage =
       readonly sdpMLineIndex: number | null;
     }
   | { readonly type: "hello"; readonly nickname: string }
+  /**
+   * ⚠ **The Host's decision about somebody at the door** (`docs/adr/0017`).
+   *
+   * ⚠ **Only the Host ever sends this.** ⚠ **Nothing here checks that** — ⚠ **`attach.ts` does,
+   * ⚠ because only it knows which peer is which.** ⚠ **An id it does not recognise is ignored
+   * silently: ⚠ answering "no such knock" would say which ids are real.**
+   */
+  | { readonly type: "admit"; readonly knockId: string; readonly allow: boolean }
   | { readonly type: "bye" };
 
 /**
@@ -140,6 +151,11 @@ export const parseClientMessage = (raw: string): ParseResult => {
       // ⚠ Trimmed once, here, so both sides see the same string and the comparison downstream
       //   ⚠ is not against something that only looks the same.
       return { ok: true, message: { type: "hello", nickname: m["nickname"].trim() } };
+    }
+    case "admit": {
+      if (!isString(m["knockId"], MAX_KNOCK_ID_BYTES)) return { ok: false, why: "malformed" };
+      if (typeof m["allow"] !== "boolean") return { ok: false, why: "malformed" };
+      return { ok: true, message: { type: "admit", knockId: m["knockId"], allow: m["allow"] } };
     }
     case "bye":
       return { ok: true, message: { type: "bye" } };

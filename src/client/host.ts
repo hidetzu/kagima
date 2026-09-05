@@ -1,26 +1,19 @@
 // The host's side of making a room.
 //
-// ⚠ **The host receives two things once, and never again: the passphrase and the host key**
-//   (`docs/adr/0004`, `docs/adr/0005`). ⚠ **Both live in this page's memory and nowhere else.**
+// ⚠ **The Host receives three things once, and never again: ⚠ the room id, the host key and its
+//   ⚠ own join token** (`docs/adr/0017`).
 //
-// ## ⚠ Why there is no "copy both"
+// ⚠ **There is no passphrase.** ⚠ **Who comes in is the Host's decision, ⚠ made while they are
+//   ⚠ sitting there with the socket open** — ⚠ **not something a caller can know.**
 //
-// ⚠ **The URL and the passphrase are supposed to travel by different routes.**
-// ⚠ **That separation is the only wall standing between a leaked link and a stranger in the room**
-//   (`docs/PRODUCT.md` § 3).
-// ⚠ **One button that puts both on the clipboard collapses it into one paste, into one channel.**
-// ⚠ **So there are two, and they are never joined.**
-//
-// ## ⚠ Why the passphrase is not in the URL
-//
-// ⚠ **A URL is written to history, to the referer header, and to every log in between**
-//   (`.claude/rules/security.md` § 2). ⚠ **Nothing here ever puts it there, and the final gate
-//   ⚠ checks that it did not.**
+// ⚠ **So the URL carries only "you may knock here".** ⚠ **A leaked URL lets somebody knock; ⚠ it
+//   ⚠ does not let them in.**
 
 export type CreatedRoom = {
   readonly roomId: string;
   readonly shareUrl: string;
-  readonly passphrase: string;
+  /** ⚠ **The Host's own way in.** ⚠ Handed over once, ⚠ at creation, ⚠ and never again. */
+  readonly token: string;
   readonly hostKey: string;
 };
 
@@ -28,20 +21,6 @@ export const createRoom = async (origin: string = location.origin): Promise<Crea
   const res = await fetch(new URL("/api/rooms", origin), { method: "POST" });
   if (!res.ok) throw new Error("the room could not be made");
   return (await res.json()) as CreatedRoom;
-};
-
-/** ⚠ **The host holds the passphrase to get its own join token, once.** ⚠ Then it stops reading it. */
-export const joinOwnRoom = async (
-  roomId: string,
-  passphrase: string,
-  origin: string = location.origin,
-): Promise<string> => {
-  const res = await fetch(new URL(`/api/rooms/${roomId}/join`, origin), {
-    method: "POST",
-    body: JSON.stringify({ passphrase }),
-  });
-  if (!res.ok) throw new Error("the room could not be opened");
-  return ((await res.json()) as { token: string }).token;
 };
 
 export const closeRoom = async (

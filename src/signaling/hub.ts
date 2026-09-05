@@ -56,6 +56,13 @@ export type Hub = {
    */
   leave(roomId: string, peerId: number): Peer[];
   relay(roomId: string, fromPeerId: number, line: string): RelayResult;
+  /**
+   * ⚠ **Say something to everyone in a room, ⚠ from us rather than from a peer.**
+   *
+   * ⚠ **Used to tell the Host that somebody is at the door** (`docs/adr/0017`).
+   * ⚠ **`relay` cannot do it: ⚠ it excludes the sender and there is no sender here.**
+   */
+  announce(roomId: string, line: string): void;
   /** ⚠ For tests and for closing a room (kagima#10). ⚠ Never served over HTTP. */
   peerCount(roomId: string): number;
   /** ⚠ **Every peer in the room, so a room can be closed.** */
@@ -81,6 +88,10 @@ export const createHub = (): Hub => {
       if (others.length >= ROOM_CAPACITY) return "room-full";
       rooms.set(roomId, [...others, peer]);
       return "joined";
+    },
+
+    announce(roomId, line) {
+      for (const peer of peersOf(roomId)) peer.send(line);
     },
 
     leave(roomId, peerId) {

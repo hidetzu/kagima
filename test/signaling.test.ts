@@ -7,16 +7,16 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
 import {
+  attachSignaling,
   CLOSE_ROOM_FULL,
   TOKEN_PROTOCOL_PREFIX,
-  attachSignaling,
 } from "../src/signaling/attach.ts";
-import { CLOSE_REPLACED, ROOM_CAPACITY, createHub, type Peer } from "../src/signaling/hub.ts";
+import { CLOSE_REPLACED, createHub, type Peer, ROOM_CAPACITY } from "../src/signaling/hub.ts";
 import {
+  isNickname,
   MAX_CANDIDATE_BYTES,
   MAX_NICKNAME_CHARS,
   MAX_SDP_BYTES,
-  isNickname,
   parseClientMessage,
 } from "../src/signaling/messages.ts";
 import { issueJoinToken } from "../src/token/join-token.ts";

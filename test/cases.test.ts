@@ -7,8 +7,9 @@
 //
 // ⚠ **`the test passed ≠ the behaviour is correct`** (`.claude/rules/evidence.md`).
 //   ⚠ **These assert the contract — what goes in, what comes out — not the implementation's steps.**
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { CASES, type Case, caseNames, selectCases } from "../scripts/cases.ts";
 
 const fixture: readonly Case[] = [

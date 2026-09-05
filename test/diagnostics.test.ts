@@ -6,13 +6,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
-  HOLD_TARGET_MS,
-  type Snapshot,
   arrivedAt,
   familyOf,
   firstFrameAt,
   formatReport,
+  HOLD_TARGET_MS,
   msToFrameSinceArrival,
+  type Snapshot,
   selectedPairIdOf,
   verdictOf,
 } from "../src/diagnostics/report.ts";

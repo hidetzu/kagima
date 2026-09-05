@@ -22,30 +22,29 @@
 <h1>kagima</h1>
 
 <section id="before">
-  <p>この部屋に入るには、合言葉が要ります。</p>
-  <p class="hint">合言葉は、URL とは別の方法で相手から聞いてください。</p>
+  <p>この部屋に入るには、ホストの許可が要ります。</p>
+  <p class="hint">名前を入れて「入室をお願いする」と、ホストの画面にお知らせが出ます。</p>
 
   <form id="enter">
-    <label for="passphrase">合言葉</label>
-    <!-- ⚠ autocomplete off: the passphrase is for this room only and must not be remembered. -->
-    <!--
-      ⚠⚠ inputmode / autocorrect: ⚠ the words are romaji (`akikaze`, `amagumo`), ⚠ and a phone
-        ⚠ sitting in a Japanese IME turns them into kana. ⚠ Normalisation drops everything that is
-        ⚠ not a-z, ⚠ so kana does not become a wrong passphrase — ⚠ it becomes an empty one, ⚠ and
-        ⚠ the refusal is deliberately indistinguishable from any other (`rules/security.md` § 3).
-      ⚠ **So the person is told nothing, and there is nothing to work out.**
-      ⚠ These two attributes ask for a Latin keyboard before that happens.
-    -->
-    <input id="passphrase" name="passphrase" autocomplete="off" autocapitalize="off"
-           autocorrect="off" inputmode="latin" spellcheck="false" required />
-
     <label for="nickname">ニックネーム</label>
     <input id="nickname" name="nickname" autocomplete="off" maxlength="24" required />
-    <p class="hint">相手の画面に出ます。あとには残りません。</p>
+    <p class="hint">ホストの画面に出ます。あとには残りません。</p>
 
-    <button type="submit" id="enter-button">入る</button>
+    <button type="submit" id="enter-button">入室をお願いする</button>
   </form>
   <p id="error" role="status"></p>
+</section>
+
+<!--
+  ⚠⚠ **Waiting is shown as what it is** (`docs/adr/0017`).
+  ⚠ **Not "審査中" — ⚠ nothing is being judged. ⚠ The Host has not looked yet.**
+  ⚠ **Five minutes is accepted**, ⚠ so the wait says so rather than letting somebody guess.
+-->
+<section id="waiting" hidden>
+  <h2>入室をお願いしました</h2>
+  <p>ホストが気づくまで、この画面のままお待ちください。</p>
+  <p class="hint">数分かかることがあります。</p>
+  <p><button type="button" id="give-up">やめる</button></p>
 </section>
 
 <section id="after" hidden>
@@ -71,12 +70,11 @@
 </section>
 
 <script type="module">
-  import { roomIdFromPath, join, WORDING } from "/client/guest.ts";
-  import { createCall, classifyMediaError } from "/client/call.ts";
+  import { classifyMediaError, createCall } from "/client/call.ts";
   import { createDiagnostics } from "/client/diagnostics.ts";
-  import { guestStatus, outranks } from "/status/status.ts";
-  import { normalizePassphrase } from "/passphrase/normalize.ts";
+  import { knock, readKnock, roomIdFromPath, WORDING } from "/client/guest.ts";
   import { connectSignaling } from "/client/transport.ts";
+  import { guestStatus, outranks } from "/status/status.ts";
 
   const $ = (id) => document.getElementById(id);
   const roomId = roomIdFromPath(location.pathname);
@@ -86,45 +84,51 @@
     $("enter-button").disabled = true;
     $("error").textContent = "";
 
-    // ⚠ Read once, held in a local, never stored anywhere. ⚠ Not in the URL, not in storage.
-    const passphrase = $("passphrase").value;
     const nickname = $("nickname").value.trim();
 
-    // ⚠⚠ **Said here, ⚠ before anything is sent, ⚠ and only about what this person typed.**
-    //
-    // ⚠ **Grounds: the server's refusal is deliberately the same for a wrong passphrase, an
-    //   ⚠ unknown room and a rate limit** (`.claude/rules/security.md` § 3). ⚠ **That is right,
-    //   ⚠ and it means the server can never say "you typed kana".**
-    // ⚠ **A phone left in a Japanese IME produces exactly that**, ⚠ and normalisation drops it to
-    //   ⚠ nothing — ⚠ so the person gets the one flat refusal and no way to work out why.
-    //
-    // ⚠ **This leaks nothing: ⚠ it tells the person about their own keystrokes, ⚠ which they
-    //   ⚠ already know.** ⚠ **Nothing has been sent at this point, ⚠ and nothing is sent if this
-    //   ⚠ fires** — ⚠ **which also means a mistyped alphabet never spends the room's rate limit.**
-    // ⚠ **The rule is the server's own** (`/passphrase/normalize.ts`), ⚠ **imported, not copied** —
-    //   ⚠ a second copy would drift and then lie.
-    if (normalizePassphrase(passphrase) === "") {
-      $("error").textContent =
-        "合言葉は英字で入力します。キーボードを英字に切り替えて、もう一度お試しください。";
-      $("passphrase").value = "";
+    // ⚠⚠ **Knock. ⚠ Nothing is guessed, ⚠ and nothing secret is sent** (`docs/adr/0017`).
+    const knocked = await knock(roomId, nickname);
+    if (!knocked.ok) {
+      $("error").textContent = WORDING[knocked.why];
       $("enter-button").disabled = false;
       return;
     }
 
-    const result = await join(roomId, passphrase);
+    $("before").hidden = true;
+    $("waiting").hidden = false;
 
-    // ⚠ Cleared whatever happened. ⚠ The passphrase has been exchanged for a token and is never
-    //   ⚠ read again (docs/adr/0004) — ⚠ leaving it in the field keeps a secret on the screen,
-    //   ⚠ in the form, and in whatever restores that form later.
-    // ⚠ The browser check found this: it was cleared on failure and kept on success.
-    $("passphrase").value = "";
-
-    if (!result.ok) {
-      // ⚠ One sentence for every refusal the server declined to tell apart.
-      $("error").textContent = WORDING[result.why];
+    // ⚠⚠ **The camera has NOT been asked for, ⚠ and will not be until the Host says yes**
+    //   (`docs/PRODUCT.md` § 3 と § 5)。
+    // ⚠ **Somebody who is not let in never hands over a camera.**
+    let stopped = false;
+    $("give-up").addEventListener("click", () => {
+      stopped = true;
+      $("waiting").hidden = true;
+      $("before").hidden = false;
       $("enter-button").disabled = false;
-      return;
+    });
+
+    // ⚠ A person is on the other end. ⚠ Two seconds is often enough and costs little.
+    let token = null;
+    while (!stopped) {
+      const outcome = await readKnock(roomId, knocked.knockId);
+      if (outcome.state === "admitted") {
+        token = outcome.token;
+        break;
+      }
+      if (outcome.state === "over") {
+        // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
+        $("waiting").hidden = true;
+        $("before").hidden = false;
+        $("error").textContent = WORDING.refused;
+        $("enter-button").disabled = false;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
     }
+    if (token === null) return;
+    const result = { ok: true, token };
+
 
     try {
       const transport = await connectSignaling(roomId, result.token);
@@ -168,11 +172,6 @@
         //   ⚠ **waiting does not help; ⚠ the room is full** (`CLAUDE.md` § 4-1).
         // ⚠ **This is the one refusal whose reason may be named: ⚠ the server said it outright,
         //   ⚠ in the close code.** ⚠ **Nothing is being inferred.**
-        if (e.code === 4002) {
-          ending = outranks(ending, "room-full");
-          render();
-          return;
-        }
         // ⚠ Not the room ending — ⚠ this connection went away, and the call may still be running.
         //   ⚠ The tracks stay: media goes browser to browser and does not need us.
         ending = outranks(ending, "detached");
@@ -193,6 +192,9 @@
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;
 
+      // ⚠⚠ The waiting screen comes down here, ⚠ and not before.
+      //   ⚠ Leaving it up would show "お待ちください" over a call that has already started.
+      $("waiting").hidden = true;
       $("before").hidden = true;
       $("after").hidden = false;
 
@@ -277,6 +279,14 @@
       console.warn("kagima: the call could not start", error);
       const failure = classifyMediaError(error);
       // ⚠ Never the raw error, and never opening with what does not work (CLAUDE.md § 4-1).
+      // ⚠⚠ **Back to the screen the person can see.**
+      //
+      // ⚠ **The waiting screen is showing at this point** — ⚠ **the Host said yes and the camera
+      //   ⚠ was asked for straight after.** ⚠ **Writing into a hidden element would leave somebody
+      //   ⚠ waiting for ever while the answer sat where nobody could read it.**
+      // ⚠ **A browser check caught exactly that.**
+      $("waiting").hidden = true;
+      $("before").hidden = false;
       $("error").textContent =
         failure === "denied"
           ? "カメラとマイクの使用を許可すると会話をはじめられます。許可してから、もう一度お試しください。"

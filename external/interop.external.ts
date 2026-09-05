@@ -19,7 +19,7 @@
 // ⚠ **It says nothing about a third engine.** ⚠ **WebKit has never been run here.**
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { type Browser, type Page, chromium, firefox } from "playwright";
+import { type Browser, chromium, firefox, type Page } from "playwright";
 import { startServer } from "../src/server.ts";
 import { titleOf } from "./scenarios.ts";
 
@@ -125,15 +125,22 @@ test(titleOf("chromium-to-firefox"), async () => {
     { timeout: 20_000 },
   );
   const shareUrl = await text(host, "share-url");
-  const passphrase = await text(host, "passphrase");
 
   // ⚠ Firefox grants by preference, not by Playwright permission — see FIREFOX_PREFS.
   const guestContext = await fox.newContext();
   const guest = await guestContext.newPage();
   await guest.goto(shareUrl);
-  await guest.fill("#passphrase", passphrase);
+
   await guest.fill("#nickname", "きつね");
   await guest.click("#enter-button");
+
+  // ⚠⚠ **The Host lets them in** (`docs/adr/0017`). ⚠ **There is nothing to type but a name.**
+  // ⚠ **This is the cross-engine half of the door: ⚠ the knock is rendered by one engine and the
+  //   ⚠ decision made in another.**
+  await host.waitForFunction(() => document.getElementById("door")?.hidden === false, undefined, {
+    timeout: 20_000,
+  });
+  await host.click("#admit");
 
   // ⚠ Waited for on both sides, then read. ⚠ Never asserted from one side about the other.
   const waitForFrames = async (page: Page, who: string) => {

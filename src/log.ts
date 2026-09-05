@@ -17,13 +17,15 @@
 // by the shape of the value  ⚠ "sakana-tsuki-arashi-midori" ⚠ catches a value under an innocent name
 // ```
 //
-// ⚠ **Neither alone is enough.** ⚠ **A passphrase inside an error message has no field name at
-//   ⚠ all**, ⚠ **and a token under a key called `t` has no recognisable name either.**
+// ⚠ **Neither alone is enough.** ⚠ **A token under a key called `t` has no recognisable name.**
+//
+// ⚠ **The shape half used to also catch a passphrase by its word list.** ⚠ **kagima has no
+//   ⚠ passphrase any more** (`docs/adr/0017`) — ⚠ **who comes in is the Host's decision.**
+// ⚠ **So that half went with it.** ⚠ **The name half stays, ⚠ and it still covers the join token.**
 //
 // ⚠ **What this cannot do:** ⚠ **it cannot recognise a secret that looks like ordinary text and
 //   ⚠ sits under an ordinary name.** ⚠ **That is a real gap, and naming it is not the same as
 //   ⚠ closing it** — ⚠ **the wall against that is not passing such a thing in.**
-import { WORDS } from "./passphrase/words.ts";
 
 /** ⚠ **What replaces anything recognised.** ⚠ Fixed, so a redaction is obvious in a log. */
 export const REDACTED = "[redacted]";
@@ -32,17 +34,6 @@ export const REDACTED = "[redacted]";
 //   ⚠ Matched loosely on purpose: `joinToken`, `TURN_KEY_API_TOKEN` and `authorization` all hit.
 const SECRET_KEY = /pass(phrase|word)|secret|token|credential|authoriz|cookie|api[-_]?key/i;
 
-// ⚠ A passphrase, by shape: hyphen-joined words that are all in the list (`docs/adr/0007`).
-//   ⚠ Three is the floor rather than four, so a truncated one is still caught.
-const WORD_SET = new Set<string>(WORDS);
-const looksLikeAPassphrase = (value: string): boolean => {
-  const parts = value
-    .toLowerCase()
-    .split(/[-\s_]+/)
-    .filter(Boolean);
-  return parts.length >= 3 && parts.every((p) => WORD_SET.has(p));
-};
-
 // ⚠ A join token, by shape: two long base64url runs joined by a dot (`src/token/join-token.ts`).
 const looksLikeAToken = (value: string): boolean =>
   /^[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/.test(value);
@@ -50,13 +41,9 @@ const looksLikeAToken = (value: string): boolean =>
 /** ⚠ **Applied to every string that reaches a log, wherever it came from.** */
 export const scrub = (value: string): string => {
   if (looksLikeAToken(value)) return REDACTED;
-  if (looksLikeAPassphrase(value)) return REDACTED;
   // ⚠ Also inside a longer sentence — this is the `err.message` case, and it is the common one.
-  return value
-    .replace(/[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, REDACTED)
-    .replace(/\b[a-z]{5,}(?:-[a-z]{5,}){2,}\b/g, (match) =>
-      looksLikeAPassphrase(match) ? REDACTED : match,
-    );
+  // ⚠ The token shape only. ⚠ The word-list shape went with the passphrase (`docs/adr/0017`).
+  return value.replace(/[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, REDACTED);
 };
 
 /** ⚠ **Deep enough for anything worth logging.** ⚠ Past it, the value is replaced rather than walked. */
