@@ -136,6 +136,59 @@ export const arrivedAt = (s: Snapshot): number | null => {
 };
 
 /**
+ * ⚠ **The shape of one `RTCStats` entry, ⚠ as far as this file needs it.**
+ * ⚠ **Declared here, away from the browser, ⚠ so the selection below can be held to fixtures.**
+ */
+export type StatLike = {
+  readonly type?: string;
+  readonly id?: string;
+  readonly state?: string;
+  readonly nominated?: boolean;
+  readonly selected?: boolean;
+  readonly selectedCandidatePairId?: string;
+  readonly localCandidateId?: string;
+  readonly remoteCandidateId?: string;
+  readonly candidateType?: string;
+  readonly protocol?: string;
+  readonly kind?: string;
+  readonly framesDecoded?: number;
+};
+
+/**
+ * ⚠⚠ **Which candidate pair is actually carrying the call.**
+ *
+ * ⚠ **A first two-sided observation had the two ends disagree: ⚠ one reported `srflx/srflx`
+ * and the other `host/host` ⚠ about the same single connection.** ⚠ **They cannot both be right,
+ * ⚠ and the answer decides whether a NAT was traversed** ([kagima#16](https://github.com/hidetzu/kagima/issues/16)).
+ *
+ * ⚠ **The cause was here: ⚠ several pairs can be `nominated` and `succeeded` at once, ⚠ and the
+ * first version kept whichever the engine happened to enumerate last.**
+ * ⚠ **`transport.selectedCandidatePairId` is the authoritative answer, ⚠ so it is read first.**
+ *
+ * ⚠ **The fallbacks are named in order and none of them is "whatever came last".**
+ */
+export const selectedPairIdOf = (stats: Iterable<StatLike>): string | null => {
+  const pairs: StatLike[] = [];
+  let fromTransport: string | null = null;
+  let flaggedSelected: string | null = null;
+  for (const stat of stats) {
+    if (stat.type === "transport" && typeof stat.selectedCandidatePairId === "string") {
+      fromTransport = stat.selectedCandidatePairId;
+    }
+    if (stat.type !== "candidate-pair") continue;
+    pairs.push(stat);
+    // ⚠ Chromium sets this on the one in use. ⚠ Not every engine does, ⚠ so it is a fallback.
+    if (stat.selected === true && typeof stat.id === "string") flaggedSelected = stat.id;
+  }
+  if (fromTransport !== null && pairs.some((p) => p.id === fromTransport)) return fromTransport;
+  if (flaggedSelected !== null) return flaggedSelected;
+  // ⚠ Last resort. ⚠ ⚠ When more than one qualifies, ⚠ say so by returning nothing rather than
+  //   ⚠ picking one — ⚠ an arbitrary pick is what produced two ends contradicting each other.
+  const nominated = pairs.filter((p) => p.state === "succeeded" && p.nominated === true);
+  return nominated.length === 1 ? ((nominated[0] as StatLike).id ?? null) : null;
+};
+
+/**
  * ⚠ **When the clock for "first frame" may start: ⚠ on a decoded frame, ⚠ and on nothing else.**
  *
  * ⚠ **This lives here, ⚠ away from the browser, ⚠ so the fast tier can hold it.**

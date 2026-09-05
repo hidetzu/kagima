@@ -12,6 +12,7 @@ import {
   firstFrameAt,
   formatReport,
   msToFrameSinceArrival,
+  selectedPairIdOf,
   verdictOf,
 } from "../src/diagnostics/report.ts";
 
@@ -145,6 +146,60 @@ test("⚠ a relay candidate counts as reflexive for the purpose of that split", 
     selected: null,
   });
   assert.match(verdictOf(s), /NAT was not traversed/);
+});
+
+// ── ⚠ which pair is carrying the call ───────────────────────────────────────
+//
+// ⚠ **A first two-sided observation had the two ends disagree about one connection:**
+// ⚠ **`srflx/srflx` on one side, ⚠ `host/host` on the other.** ⚠ **They cannot both be right,
+//   ⚠ and which one is decides whether a NAT was traversed** (kagima#16).
+
+test("⚠⚠ the transport's own answer wins over anything else", () => {
+  // ⚠ Several pairs are nominated and succeeded at once. ⚠ ⚠ The first version kept whichever
+  //   ⚠ the engine enumerated last, ⚠ so two engines answered differently about one call.
+  const stats = [
+    { type: "candidate-pair", id: "P1", state: "succeeded", nominated: true },
+    { type: "candidate-pair", id: "P2", state: "succeeded", nominated: true },
+    { type: "transport", id: "T", selectedCandidatePairId: "P2" },
+  ];
+  assert.equal(selectedPairIdOf(stats), "P2");
+  // ⚠ And the order it is handed in must not change the answer.
+  assert.equal(selectedPairIdOf([...stats].reverse()), "P2");
+});
+
+test("⚠ a pair flagged selected is used when no transport says otherwise", () => {
+  const stats = [
+    { type: "candidate-pair", id: "P1", state: "succeeded", nominated: true },
+    { type: "candidate-pair", id: "P2", state: "succeeded", nominated: true, selected: true },
+  ];
+  assert.equal(selectedPairIdOf(stats), "P2");
+});
+
+test("⚠⚠ with several nominated and nothing to choose between them, it says nothing", () => {
+  // ⚠ ⚠ Reporting "none" is a gap. ⚠ Reporting an arbitrary one is a wrong answer that reads
+  //   ⚠ exactly like a right one — ⚠ and this project has to be able to tell those apart
+  //   (`.claude/rules/evidence.md`).
+  const stats = [
+    { type: "candidate-pair", id: "P1", state: "succeeded", nominated: true },
+    { type: "candidate-pair", id: "P2", state: "succeeded", nominated: true },
+  ];
+  assert.equal(selectedPairIdOf(stats), null);
+});
+
+test("⚠ a single nominated succeeded pair is the answer when nothing else points at one", () => {
+  const stats = [
+    { type: "candidate-pair", id: "P1", state: "failed", nominated: true },
+    { type: "candidate-pair", id: "P2", state: "succeeded", nominated: true },
+  ];
+  assert.equal(selectedPairIdOf(stats), "P2");
+});
+
+test("⚠ a transport naming a pair that is not there falls through rather than inventing one", () => {
+  const stats = [
+    { type: "candidate-pair", id: "P1", state: "succeeded", nominated: true },
+    { type: "transport", id: "T", selectedCandidatePairId: "gone" },
+  ];
+  assert.equal(selectedPairIdOf(stats), "P1");
 });
 
 // ── ⚠ what "time to first frame" is measured from, and what starts it ───────

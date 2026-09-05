@@ -10,28 +10,25 @@
 // ⚠ **The formatting, and the closed vocabulary that backs it, live outside the browser side so
 //   ⚠ the fast tier can check them** — ⚠ **`test/diagnostics.test.ts` hands them addresses on
 //   ⚠ purpose and confirms none come out.**
-import type { CandidateFact, PairFact, Snapshot, Transition } from "../diagnostics/report.ts";
-import { HOLD_TARGET_MS, firstFrameAt, formatReport } from "../diagnostics/report.ts";
+import type {
+  CandidateFact,
+  PairFact,
+  Snapshot,
+  StatLike,
+  Transition,
+} from "../diagnostics/report.ts";
+import {
+  HOLD_TARGET_MS,
+  firstFrameAt,
+  formatReport,
+  selectedPairIdOf,
+} from "../diagnostics/report.ts";
 
 export type Diagnostics = {
   noteSocketClosed(code: number): void;
   /** ⚠ Reads the connection as it is now. ⚠ Never stores anything between calls but the notes. */
   snapshot(): Promise<Snapshot>;
   report(): Promise<string>;
-};
-
-type StatLike = {
-  type?: string;
-  id?: string;
-  state?: string;
-  nominated?: boolean;
-  selected?: boolean;
-  localCandidateId?: string;
-  remoteCandidateId?: string;
-  candidateType?: string;
-  protocol?: string;
-  kind?: string;
-  framesDecoded?: number;
 };
 
 /** ⚠ **The two safe fields, and nothing else.** ⚠ Never the address, never the raw line. */
@@ -73,20 +70,22 @@ export const createDiagnostics = (
 
     async snapshot() {
       const byId = new Map<string, StatLike>();
+      const stats: StatLike[] = [];
       let framesDecoded = 0;
-      let pair: StatLike | undefined;
 
       for (const entry of await pc.getStats()) {
         const stat = entry[1] as StatLike;
+        stats.push(stat);
         if (stat.id !== undefined) byId.set(stat.id, stat);
         if (stat.type === "inbound-rtp" && stat.kind === "video") {
           framesDecoded = Math.max(framesDecoded, stat.framesDecoded ?? 0);
         }
-        // ⚠ The pair actually in use. ⚠ `succeeded` alone is not it — several can succeed.
-        if (stat.type === "candidate-pair" && (stat.nominated === true || stat.selected === true)) {
-          if (stat.state === "succeeded") pair = stat;
-        }
       }
+      // ⚠ Which pair is in use is decided in one place, ⚠ against fixtures
+      //   (`src/diagnostics/report.ts`). ⚠ Deciding it inline here is how the two ends of one
+      //   ⚠ call came to contradict each other.
+      const pairId = selectedPairIdOf(stats);
+      const pair = pairId === null ? undefined : byId.get(pairId);
 
       const localCandidates: CandidateFact[] = [];
       const remoteCandidates: CandidateFact[] = [];
