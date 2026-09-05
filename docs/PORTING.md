@@ -36,7 +36,7 @@ sequenceDiagram
 ```
 
 ⚠ **`hostKey` と `joinToken` はここで一度だけ渡され、⚠ 二度と渡されない。**
-⚠ **合言葉は無い**([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in.md))。
+⚠ **合言葉は無い**([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md))。
 
 ### 1-2. ⚠ ノックと、⚠ Host の判断
 
@@ -77,7 +77,7 @@ sequenceDiagram
 ```
 
 ⚠ **断られた / 部屋が閉じた / 待つ間に終わった、は Guest には 1 つの答えである**
-([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in.md))。
+([`adr/0017`](adr/0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md))。
 
 > ⚠⚠ **この図を描いていて見つけた。** ⚠ **ノックの通知は、⚠ その部屋の socket 全部に送られる**
 > (`hub.announce`)。⚠ **so 既に中に居る Guest のブラウザにも、⚠ 3 人目の `nickname` と

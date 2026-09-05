@@ -35,9 +35,25 @@ const stripMarkdown = (s) => s
   .replace(/```[\s\S]*?```/g, "")
   .replace(/<!--[\s\S]*?-->/g, "");
 
-const markdownFiles = () =>
-  execFileSync("git", ["ls-files", "*.md"], { cwd: ROOT, encoding: "utf8" })
+/**
+ * ⚠⚠ **Tracked files AND new ones that are not ignored.**
+ *
+ * ⚠ **`git ls-files` alone lists only what is tracked.** ⚠ **A document written a minute ago is
+ * invisible to it** — ⚠ **so the wall runs, says nothing, and is read as "the links are fine".**
+ * ⚠ **That happened on 2026-09-06** (`CLAUDE.md` § 9): ⚠ **`docs/PORTING.md` shipped with two
+ * broken links after a local run reported `8 of 8 cases passed`.**
+ *
+ * ⚠ **`--others --exclude-standard` adds the untracked-but-not-ignored ones**, ⚠ **which is
+ * exactly the set a person is about to commit.**
+ */
+const filesUnderGit = (...paths) =>
+  execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", ...paths], {
+    cwd: ROOT,
+    encoding: "utf8",
+  })
     .trim().split("\n").filter(Boolean);
+
+const markdownFiles = () => filesUnderGit("*.md");
 
 // ── the cases ──────────────────────────────────────────────────────────────
 // Each returns { ok, said } — `said` is what gets printed either way, so a pass
