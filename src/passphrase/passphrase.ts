@@ -21,7 +21,7 @@
 // ⚠ **`test/passphrase.test.ts` holds that shut**: ⚠ **normalising any generated passphrase must
 //   ⚠ return it unchanged.** ⚠ **The day the generator emits something non-canonical, the claim
 //   ⚠ breaks and that test fails.**
-import { randomBytes } from "node:crypto";
+import { randomBytes } from "../random.ts";
 import { SEPARATOR } from "./normalize.ts";
 import { BITS_PER_WORD, WORDS } from "./words.ts";
 

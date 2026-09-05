@@ -10,7 +10,7 @@
 // ⚠ **Every room dies with this process.** ⚠ **That is the specification** (`docs/adr/0005`).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { logger } from "./log.ts";
-import { randomBytes } from "node:crypto";
+import { randomToken } from "./random.ts";
 import { createRoom } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
 import {
@@ -317,7 +317,7 @@ const joinTokenSecret = (): string => {
   if (fromEnv && fromEnv.length > 0) return fromEnv;
   logger.warn("JOIN_TOKEN_SECRET is not set — using a random one for this process only");
   logger.warn("restarting will invalidate every join token it issued");
-  return randomBytes(32).toString("base64url");
+  return randomToken(32);
 };
 
 export const startServer = (
