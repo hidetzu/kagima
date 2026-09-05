@@ -57,11 +57,27 @@ export JOIN_TOKEN_SECRET="$(openssl rand -base64 32)"
 ⚠ **1 回の実験にはこれで足りる。** ⚠ **ログイン不要、⚠ 後片付けは Ctrl-C だけ。**
 
 ```bash
-cloudflared tunnel --url http://127.0.0.1:8787
+cloudflared --config /dev/null tunnel --url http://127.0.0.1:8787
 #   → https://<ランダムな名前>.trycloudflare.com が表示される
 ```
 
 ⚠ **表示された URL を、そのまま次で使う。** ⚠ **毎回変わる。**
+
+#### ⚠ `--config /dev/null` を外さないこと
+
+⚠ **このマシンで実際に踏んだ。** ⚠ **`~/.cloudflared/config.yml` があると、⚠ `--url` があっても
+そちらの `ingress` 規則が優先される。** ⚠ **trycloudflare の名前はどの `hostname` にも一致しないので、
+⚠ 最後の `- service: http_status:404` に落ちる。**
+
+⚠ **見分け方は起動ログの `Settings:` 行である:**
+
+```text
+⚠ 設定を読んでしまっている   Settings: map[cred-file:… ha-connections:1 …]
+   届く                     Settings: map[config:/dev/null … url:http://127.0.0.1:8787]
+```
+
+⚠ **症状は「`127.0.0.1:8787` は 200 なのに、⚠ トンネル越しだけ 404」である。**
+⚠ **cloudflared 側にエラーは出ない** — ⚠ **規則どおりに 404 を返しているのだから、⚠ 正常である。**
 
 ### 2-2. 名前を固定する場合
 
@@ -87,6 +103,25 @@ npm run dev
 ⚠ **`PUBLIC_BASE_URL` を間違えると、Host が配る URL が届かない先を指す。**
 ⚠ **`TRUSTED_SOURCE_HEADER` を省くと、⚠ トンネル越しでは全員が同じ 1 つの発信元に見え、
 ⚠ 誰か 1 人の失敗が全員の入室制限を使い切る。** ⚠ **起動時の警告がそれを言う。**
+
+### 2-4. ⚠ 出かける前に、届くことを確かめる
+
+⚠ **スマホを持って外に出てから気づくのは高い。** ⚠ **2 つとも、⚠ 見るのではなく問い合わせる。**
+
+```bash
+TUNNEL="https://<上で出た名前>"
+curl -s -o /dev/null -w "トンネル越し: %{http_code}\n" "$TUNNEL"
+curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
+```
+
+| ⚠ 見るもの | ⚠ そうでなければ |
+|---|---|
+| 1 行目が **200** | ⚠ **トンネルが kagima に届いていない**(§ 2-1 の `--config`) |
+| `shareUrl` が **`$TUNNEL` で始まる** | ⚠ **`PUBLIC_BASE_URL` が違う。** ⚠ **Host は届かない URL を配る** |
+
+⚠ **トンネルを張り直したら、⚠ kagima も起動し直す。** ⚠ **名前は毎回変わり、⚠ `PUBLIC_BASE_URL`
+は起動時にしか読まれない。** ⚠ **実際にこれを踏んだ** — ⚠ **kagima は、⚠ 止めたトンネルの名前を
+配り続けていた。** ⚠ **画面上は何も間違って見えない。**
 
 ## 3. ネットワークの組み合わせ
 
