@@ -370,7 +370,7 @@ Guest が入ったあとに Host が落ちた ⚠ 同上。⚠ 「終わった�
 | # | Issue | 何を | 誰が |
 |---|---|---|---|
 | **1** | [#47](https://github.com/hidetzu/kagima/issues/47) | ⚠ **Durable Objects の課金条件を確かめる。** ⚠ **数字は書かない** — ⚠ 調べていないからである | ⚠ **Owner** |
-| **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **ブラウザに配る `.ts` をどう作るか** — ⚠ **第二のビルドシステムを受け入れる形を決める** | AI + Owner |
+| **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **決定済** → [`adr/0016`](adr/0016-write-the-client-in-typescript-and-ship-built-javascript.md) | ⚠ **済** |
 | **3** | [#49](https://github.com/hidetzu/kagima/issues/49) | ⚠ **`signalling-drops` 相当をどう検査するか** — ⚠ **検証可能性を落として移らない** | AI |
 
 ### ⚠⚠ 調べて分かった、⚠ spike が見落としていたこと(2026-09-05)

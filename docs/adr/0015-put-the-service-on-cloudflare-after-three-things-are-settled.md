@@ -20,7 +20,7 @@
 | # | Issue | 何を片付けるか | ⚠ なぜ先か | 誰が |
 |---|---|---|---|---|
 | **1** | [#47](https://github.com/hidetzu/kagima/issues/47) | ⚠⚠ **ルーム状態をどこに置くか決める**(⚠ **課金条件を調べた結果、⚠ 問いが変わった**) | ⚠ **DO は 10 秒で in-memory state を捨てる。** ⚠ **「メモリだけ」は Node と等価ではない** | ⚠ **Owner + AI** |
-| **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **ブラウザに配る `.ts` をどう作るか決める** | ⚠ **いまは「配るだけ」である。** ⚠ **Worker では「作ってから配る」になり、⚠ それは `CLAUDE.md` § 3 の「第二のビルドシステム」に当たる** | AI + Owner |
+| **2** | [#48](https://github.com/hidetzu/kagima/issues/48) | ⚠ **決定済** → [`0016`](0016-write-the-client-in-typescript-and-ship-built-javascript.md) | ⚠ **TypeScript で書き、⚠ ビルドした JS を配る。** ⚠ **境界は「最終ゲートはビルド成果物に対して走る」** | ⚠ **済** |
 | **3** | [#49](https://github.com/hidetzu/kagima/issues/49) | ⚠ **`signalling-drops` 相当をどう検査するか決める** | ⚠ **いまは同一プロセスの内側から `stopAnswering()` を呼んでいる。** ⚠ **Worker では内側に手が入らない。** ⚠ **検証可能性を落として移らない** | AI |
 
 ⚠ **1 は当初「課金条件を確かめる」だった。** ⚠ **調べたら、⚠ 問いが変わった**
