@@ -24,10 +24,10 @@ export type CandidateFact = {
   /**
    * ⚠ `v4` / `v6` / `?`. ⚠ **Never an address** — ⚠ see `familyOf`.
    *
-   * ⚠⚠ **Why it is here: ⚠ `host/host` means "the two ends were on the same network" over IPv4
-   * ⚠ and the opposite over IPv6** — ⚠ **"there was no NAT to traverse".**
-   * ⚠ **Two opposite conclusions from one label, ⚠ and a first cross-network observation ran
-   * straight into it.**
+   * ⚠⚠ **Why it is here: ⚠ a `host/host` pair over IPv4 and one over IPv6 are different
+   * observations, ⚠ and without this they get written down identically.**
+   * ⚠ **It does not settle what the network was** — ⚠ **it stops two different things being
+   * recorded as one.**
    */
   readonly family: string;
 };
@@ -113,10 +113,11 @@ const KNOWN_FAMILIES = new Set(["v4", "v6", "?"]);
  * ⚠⚠ **The one place in kagima that is allowed to look at an address, ⚠ and all it may say is
  * which of two families it belongs to.**
  *
- * ⚠ **Why it exists: ⚠ a first cross-network observation selected `host/host`, ⚠ which over IPv4
- * would mean "the two ends were on the same network" ⚠ and over IPv6 means the opposite —
- * ⚠ "there was no NAT to traverse at all".** ⚠ **Without this bit, ⚠ that observation cannot be
- * interpreted, ⚠ and [kagima#16](https://github.com/hidetzu/kagima/issues/16) cannot be answered.**
+ * ⚠ **Why it exists: ⚠ a first cross-network observation selected `host/host`, ⚠ and a
+ * `host/host` pair over IPv4 and one over IPv6 are different observations that were being
+ * written down identically.** ⚠ **Recording the family keeps them apart.**
+ * ⚠ **It does not by itself say what the network was** — ⚠ **that is for whoever knows how the
+ * test was run** ([kagima#16](https://github.com/hidetzu/kagima/issues/16)).
  *
  * ⚠ **The address is not returned, ⚠ not stored, ⚠ not logged, ⚠ and not passed on.**
  * ⚠ **This function's return type is the wall: ⚠ three values, ⚠ and `test/diagnostics.test.ts`
@@ -199,7 +200,8 @@ export type StatLike = {
  *
  * ⚠ **A first two-sided observation had the two ends disagree: ⚠ one reported `srflx/srflx`
  * and the other `host/host` ⚠ about the same single connection.** ⚠ **They cannot both be right,
- * ⚠ and the answer decides whether a NAT was traversed** ([kagima#16](https://github.com/hidetzu/kagima/issues/16)).
+ * ⚠ and which pair carried the call is one of the few things the field test can record at all**
+ * ([kagima#16](https://github.com/hidetzu/kagima/issues/16)).
  *
  * ⚠ **The cause was here: ⚠ several pairs can be `nominated` and `succeeded` at once, ⚠ and the
  * first version kept whichever the engine happened to enumerate last.**
@@ -250,10 +252,16 @@ export const msToFrameSinceArrival = (s: Snapshot): number | null => {
 };
 
 /**
- * ⚠ **What a caller may conclude, split into the three failures the field test keeps apart**
- * (`docs/FIELD-TEST.md` § 5).
+ * ⚠ **How far the connection got, ⚠ said as what was observed and not as what caused it.**
  *
- * ⚠ **"failed" is not one thing.** ⚠ **Collapsing them is how a NAT gets blamed for a codec.**
+ * ⚠⚠ **This used to name causes** — ⚠ **"the NAT was not traversed", ⚠ "this is before NAT".**
+ * ⚠ **It cannot know that.** ⚠ **What it can see is which of three things happened: ⚠ no
+ * reflexive candidate was gathered, ⚠ candidates were gathered but no pair was selected, ⚠ or a
+ * pair was selected and no frame arrived.**
+ * ⚠ **Those three are worth keeping apart** — ⚠ **the reason for any of them is not here.**
+ *
+ * ⚠ **Naming a cause in the instrument puts a guess into the record as if it were measured**
+ * (`.claude/rules/evidence.md`), ⚠ **and it gets read back out of the record as evidence.**
  */
 export const verdictOf = (s: Snapshot): string => {
   if (s.framesDecoded > 0) {
@@ -264,9 +272,12 @@ export const verdictOf = (s: Snapshot): string => {
     const t = only(c.type, KNOWN_TYPES);
     return t === "srflx" || t === "relay";
   });
-  if (!gotReflexive) return "no frames — and no srflx: this is before NAT, not a NAT failure";
-  if (s.selected === null) return "no frames — srflx but no pair: the NAT was not traversed";
-  return "no frames — a pair formed: something other than the NAT";
+  // ⚠ Each says what was seen. ⚠ ⚠ None says why, ⚠ and each one says so out loud.
+  if (!gotReflexive) return "no frames — no reflexive candidate was gathered (cause undetermined)";
+  if (s.selected === null) {
+    return "no frames — candidates gathered, no ICE pair selected (cause undetermined)";
+  }
+  return "no frames — an ICE pair was selected (cause undetermined)";
 };
 
 /**
@@ -299,14 +310,15 @@ export const formatReport = (s: Snapshot): string => {
         ? "none"
         : `${only(s.selected.local.type, KNOWN_TYPES)}/${only(s.selected.remote.type, KNOWN_TYPES)}` +
           ` over ${only(s.selected.local.protocol, KNOWN_PROTOCOLS)}` +
-          ` ${only(s.selected.local.family, KNOWN_FAMILIES)}` +
-          // ⚠⚠ Said in words, ⚠ because "host/host" alone has meant two opposite things.
-          (
-            only(s.selected.local.family, KNOWN_FAMILIES) === "v6" &&
-            only(s.selected.local.type, KNOWN_TYPES) === "host"
-              ? "  ⚠ globally routable: there was no NAT to traverse"
-              : ""
-          )
+          ` ${only(s.selected.local.family, KNOWN_FAMILIES)}`
+      // ⚠⚠ The family, ⚠ and nothing read into it.
+      //
+      // ⚠ **This used to add "globally routable: there was no NAT to traverse" for a v6
+      //   ⚠ host pair.** ⚠ **That is a conclusion about somebody's network, ⚠ and the
+      //   ⚠ family does not establish it** — ⚠ **a v6 host pair forms just the same between
+      //   ⚠ two machines on one LAN that has IPv6.**
+      // ⚠ **The instrument reports candidate type, protocol, family and the selected pair.**
+      // ⚠ **What that means about a network is for whoever knows how the test was run.**
     }`,
   );
   lines.push(

@@ -40,3 +40,6 @@ coverage/
 .DS_Store
 .idea/
 *.swp
+
+# ⚠ Field-test scratch. ⚠ Observations belong on the issue, not in git.
+tmp/

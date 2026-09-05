@@ -169,8 +169,10 @@ test("⚠⚠ the collector never reads an address either", async () => {
 
 // ── ⚠ the three failures, kept apart ────────────────────────────────────────
 
-test("⚠⚠ no srflx is reported as before-NAT, not as a NAT failure", () => {
-  // ⚠ Collapsing these is how a NAT gets blamed for something that never reached it.
+test("⚠⚠ no reflexive candidate is reported as that, and no cause is named", () => {
+  // ⚠ The three are kept apart because they are different observations.
+  //   ⚠ ⚠ None may be reported as a cause: ⚠ the instrument cannot see one
+  //   (`.claude/rules/evidence.md` — ⚠ never dress a guess as a measurement).
   const s = snapshot({
     framesDecoded: 0,
     msToFirstFrame: null,
@@ -178,27 +180,31 @@ test("⚠⚠ no srflx is reported as before-NAT, not as a NAT failure", () => {
     localCandidates: [{ type: "host", protocol: "udp", family: "v4" }],
     selected: null,
   });
-  assert.match(verdictOf(s), /before NAT/);
+  assert.match(verdictOf(s), /no reflexive candidate was gathered/);
+  assert.match(verdictOf(s), /cause undetermined/);
 });
 
-test("⚠ srflx without a pair is reported as the NAT not being traversed", () => {
+test("⚠ srflx without a pair is reported as no pair, and not as a NAT failure", () => {
   const s = snapshot({
     framesDecoded: 0,
     msToFirstFrame: null,
     heldMs: null,
     selected: null,
   });
-  assert.match(verdictOf(s), /NAT was not traversed/);
+  assert.match(verdictOf(s), /no ICE pair selected/);
+  assert.match(verdictOf(s), /cause undetermined/);
 });
 
-test("⚠ a pair with no frames is reported as something other than the NAT", () => {
+test("⚠ a pair with no frames is reported as a pair with no frames", () => {
   const s = snapshot({ framesDecoded: 0, msToFirstFrame: null, heldMs: null });
-  assert.match(verdictOf(s), /other than the NAT/);
+  assert.match(verdictOf(s), /an ICE pair was selected/);
+  assert.match(verdictOf(s), /cause undetermined/);
 });
 
 test("⚠ a relay candidate counts as reflexive for the purpose of that split", () => {
-  // ⚠ If a relay was used, the NAT question was answered — ⚠ by relaying, which is the thing
-  //   ⚠ kagima#16 is deciding whether to allow. ⚠ Reporting it as "before NAT" would hide that.
+  // ⚠ A relay candidate was gathered, ⚠ so "nothing reflexive" is not what happened.
+  //   ⚠ A relay being in play at all is the thing
+  //   ⚠ kagima#16 is deciding about. ⚠ Lumping it in with "nothing was gathered" hides it.
   const s = snapshot({
     framesDecoded: 0,
     msToFirstFrame: null,
@@ -206,7 +212,7 @@ test("⚠ a relay candidate counts as reflexive for the purpose of that split", 
     localCandidates: [{ type: "relay", protocol: "udp", family: "v4" }],
     selected: null,
   });
-  assert.match(verdictOf(s), /NAT was not traversed/);
+  assert.match(verdictOf(s), /no ICE pair selected/);
 });
 
 // ── ⚠ which pair is carrying the call ───────────────────────────────────────
@@ -302,6 +308,45 @@ test("⚠⚠ the time is measured from the other side arriving, not from the pag
 test("⚠ with nobody having arrived, the wait says so rather than printing a zero", () => {
   const s = snapshot({ msToFirstFrame: null, heldMs: null, framesDecoded: 0, transitions: [] });
   assert.match(formatReport(s), /waited alone: *nobody arrived/);
+});
+
+test("⚠⚠ no verdict names a cause, and none names a network", () => {
+  // ⚠⚠ **The clause, asserted directly.** ⚠ **An instrument that names a cause puts our guess
+  //   ⚠ into the record, ⚠ and it comes back out of the record as evidence.**
+  const cases = [
+    snapshot(),
+    snapshot({ heldMs: 0 }),
+    snapshot({ framesDecoded: 0, msToFirstFrame: null, heldMs: null, selected: null }),
+    snapshot({ framesDecoded: 0, msToFirstFrame: null, heldMs: null }),
+    snapshot({
+      framesDecoded: 0,
+      msToFirstFrame: null,
+      heldMs: null,
+      selected: null,
+      localCandidates: [{ type: "host", protocol: "udp", family: "v4" }],
+    }),
+  ];
+  for (const s of cases) {
+    const said = verdictOf(s);
+    assert.doesNotMatch(said, /\bNAT\b/, `a verdict names the NAT: ${said}`);
+    assert.doesNotMatch(said, /same network|globally routable|traversed/i, said);
+  }
+});
+
+test("⚠⚠ the report never reads a network out of the address family", () => {
+  // ⚠ A v6 host pair forms just the same between two machines on one LAN that has IPv6.
+  //   ⚠ ⚠ Saying otherwise would put a conclusion about somebody's network into the record.
+  const said = formatReport(
+    snapshot({
+      selected: {
+        local: { type: "host", protocol: "udp", family: "v6" },
+        remote: { type: "host", protocol: "udp", family: "v6" },
+      },
+    }),
+  );
+  assert.match(said, /selected pair: *host\/host over udp v6/);
+  assert.doesNotMatch(said, /globally routable/, said);
+  assert.doesNotMatch(said, /no NAT to traverse/, said);
 });
 
 // ── ⚠ frames are the verdict, never a state name ────────────────────────────
