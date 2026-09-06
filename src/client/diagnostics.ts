@@ -24,6 +24,8 @@ import {
   HOLD_TARGET_MS,
   selectedPairIdOf,
 } from "../diagnostics/report.ts";
+import { watchLifecycle } from "./lifecycle.ts";
+import { heartbeatObservation } from "./transport.ts";
 
 export type Diagnostics = {
   noteSocketClosed(code: number): void;
@@ -51,6 +53,9 @@ export const createDiagnostics = (
   now: () => number = () => performance.now(),
 ): Diagnostics => {
   const startedAt = now();
+  // ⚠⚠ **Started here, ⚠ once per call** (`docs/adr/0020`). ⚠ **The page outlives its sockets,
+  //   ⚠ and the question being measured is about the page.**
+  const lifecycle = watchLifecycle();
   const transitions: Transition[] = [];
   let msToFirstFrame: number | null = null;
   let socketClosed: { code: number; at: number } | null = null;
@@ -131,6 +136,17 @@ export const createDiagnostics = (
         heldMs: msToFirstFrame === null ? null : Math.round(now() - startedAt - msToFirstFrame),
         socketClosed,
         framesDecoded,
+        // ⚠⚠ **The shadow heartbeat** (`docs/adr/0020`). ⚠ **Read from the two places that
+        //   ⚠ actually know: ⚠ the transport, which answers the pings, ⚠ and the page's own
+        //   ⚠ lifecycle.** ⚠ **Neither is inferred from the other.**
+        heartbeat: {
+          ...heartbeatObservation(),
+          longestHiddenMs: lifecycle().longestHiddenMs,
+          wasFrozen: lifecycle().wasFrozen,
+          // ⚠ ⚠ Whether this browser reports freezing at all. ⚠ Without it, `wasFrozen` is
+          //   ⚠ "not observed", ⚠ and the report must not print it as "no".
+          canSeeFreezing: "onfreeze" in document,
+        },
       };
     },
 

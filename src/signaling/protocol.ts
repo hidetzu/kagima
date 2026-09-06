@@ -19,6 +19,25 @@
  */
 export const TOKEN_PROTOCOL_PREFIX = "kagima.token.";
 
+/**
+ * ⚠⚠ **The heartbeat as a message, ⚠ running in shadow** (`docs/adr/0020`, kagima#62).
+ *
+ * ⚠ **A Worker's server-side WebSocket has no `ping`** (⚠ measured 2026-09-06, `docs/adr/0015`).
+ * ⚠ **So the heartbeat has to move to a text frame, ⚠ which both platforms have.**
+ *
+ * ⚠⚠ **Right now it decides nothing.** ⚠ **The protocol ping is still what closes a socket.**
+ * ⚠ **This one only records what it WOULD have concluded** — ⚠ **so the value it needs can be
+ * measured on real devices without anybody being hung up on for a guess.**
+ *
+ * ## ⚠ Why the number
+ *
+ * ⚠ **A pong that answers nothing is not an answer.** ⚠ **Without `n`, a page could send pongs
+ * it was never asked for, ⚠ and the heartbeat would say "alive" about a page that never received
+ * anything.** ⚠ **Echoing the number means the page took delivery** — ⚠ **which is the whole
+ * thing being measured.**
+ */
+export const pingLine = (n: number): string => JSON.stringify({ type: "ping", n });
+
 export const CLOSE_UNAUTHORIZED = 4001;
 export const CLOSE_ROOM_FULL = 4002;
 export const CLOSE_BAD_MESSAGE = 4003;

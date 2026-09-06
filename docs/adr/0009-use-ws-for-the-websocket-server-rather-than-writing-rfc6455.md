@@ -1,6 +1,19 @@
 # 0009. WebSocket サーバは `ws` を使い、RFC 6455 を自分で書かない
 
 - 状態: **決定**
+  — ⚠ **`ws` に求めているものが 1 つ減る途中である**(2026-09-06、[`0020`](0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md))
+
+> ⚠ **protocol ping は、⚠ `ws` に求めていたもののうち「自分で書きたくないもの」の 1 つだった。**
+> ⚠ **Worker のサーバ側 WebSocket には `ping` が無い**(⚠ 実測 2026-09-06、
+> [`0015`](0015-put-the-service-on-cloudflare-after-three-things-are-settled.md))。
+>
+> ⚠ **[`0020`](0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md) が、
+> ⚠ メッセージ版のハートビートを 影で 動かして測っている。**
+> ⚠ **それが本採用になった PR で、⚠ この ADR も同時に書き換える** — ⚠ **後回しにしない
+> (Owner、2026-09-06)。**
+>
+> ⚠ **RFC 6455 を自分で書かない、という決定そのものは変わらない。**
+> ⚠ **変わるのは「何を任せているか」の一覧である。**
 - 日付: 2026-09-04
 
 ## 決定

@@ -17,7 +17,7 @@ import { logger } from "../log.ts";
 import { issueJoinToken, type Role } from "../token/join-token.ts";
 import type { Hub, Peer } from "./hub.ts";
 import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.ts";
-import { CLOSE_BAD_MESSAGE, CLOSE_ROOM_FULL, CLOSE_SILENT } from "./protocol.ts";
+import { CLOSE_BAD_MESSAGE, CLOSE_ROOM_FULL, CLOSE_SILENT, pingLine } from "./protocol.ts";
 import type { SignalingSocket } from "./socket.ts";
 
 export { MAX_MESSAGE_BYTES };
@@ -144,6 +144,22 @@ export const createSessions = (options: SessionOptions) => {
     if (!roomOpenedAt.has(roomId)) roomOpenedAt.set(roomId, openedAt);
 
     let missed = 0;
+
+    // ⚠⚠ **The shadow heartbeat** (`docs/adr/0020`, kagima#62).
+    //
+    // ⚠ **It runs beside the real one and decides nothing.** ⚠ **`missed` above is what closes a
+    //   ⚠ socket; ⚠ these three only record what the message-shaped heartbeat WOULD have done.**
+    // ⚠ **So the value it needs can be measured on real devices, ⚠ under real use, ⚠ without
+    //   ⚠ anybody being hung up on for a number nobody has measured yet.**
+    //
+    // ⚠⚠ **This is time-limited and it has a retirement plan** — ⚠ **`docs/adr/0020`, ⚠ the same
+    //   ⚠ shape `docs/adr/0011` used and `docs/adr/0014` retired.**
+    // ⚠ **Two heartbeats is exactly what `CLAUDE.md` § 3 forbids** — ⚠ **which is why the end is
+    //   ⚠ written down before the beginning.**
+    let shadowMissed = 0;
+    let shadowSaid = false;
+    let pingNumber = 0;
+
     const beat = setInterval(() => {
       if (missed >= MISSED_PONGS_ALLOWED) {
         // ⚠ A timer expiring is not an answer; it is the absence of one
@@ -156,6 +172,21 @@ export const createSessions = (options: SessionOptions) => {
       // ⚠ Still here. ⚠ The room's idle clock is pushed back by the same beat that proves it.
       options.touch?.(roomId);
       socket.ping();
+
+      // ⚠⚠ Shadow only. ⚠ Said once, ⚠ and nothing is closed.
+      if (shadowMissed >= MISSED_PONGS_ALLOWED && !shadowSaid) {
+        shadowSaid = true;
+        // ⚠ What it WOULD have done, ⚠ named as such. ⚠ Never "the socket was silent" —
+        //   ⚠ the socket is right here, ⚠ answering the protocol ping.
+        logger.info("the shadow heartbeat would have closed this socket", {
+          roomId,
+          afterMs: Math.round(now() - openedAt),
+          unanswered: shadowMissed,
+        });
+      }
+      shadowMissed += 1;
+      pingNumber += 1;
+      socket.send(pingLine(pingNumber));
     }, heartbeatMs);
     // ⚠ Never hold the process open for a heartbeat.
     beat.unref?.();
@@ -183,6 +214,19 @@ export const createSessions = (options: SessionOptions) => {
         // ⚠ **An id we do not know is ignored in silence: ⚠ answering would say which ids are real.**
         // ⚠ **Nothing is said back on success either** — ⚠ **the Host learns the outcome by the
         //   ⚠ knock leaving its list, ⚠ which is what it already watches.**
+        // ⚠⚠ **The shadow heartbeat's answer** (`docs/adr/0020`).
+        //
+        // ⚠ **Handled here and never relayed** — ⚠ **the other participant has no use for it,
+        //   ⚠ and relaying it would hand them a liveness signal about somebody else.**
+        // ⚠ **Nothing is said back.** ⚠ **An answer to an answer is a loop.**
+        // ⚠ **Only the number we are waiting on counts.** ⚠ **An echo of an older ping says the
+        //   ⚠ page is behind, ⚠ not that it is here now** — ⚠ **and one we never sent says
+        //   ⚠ nothing at all.**
+        if (parsed.message.type === "pong") {
+          if (parsed.message.n === pingNumber) shadowMissed = 0;
+          return;
+        }
+
         if (parsed.message.type === "admit") {
           // ⚠⚠ **Only the Host opens the door** (`docs/adr/0018`, kagima#64).
           //

@@ -917,3 +917,60 @@ test(titleOf("the-host-comes-back"), async () => {
   await guest.page.context().close();
   await stranger.page.context().close();
 });
+
+test(titleOf("shadow-heartbeat"), async () => {
+  // ⚠⚠ **The heartbeat that a page has to answer** (`docs/adr/0020`, kagima#62).
+  //
+  // ⚠ **`test/shadow-heartbeat.test.ts` drives it with a fake socket, ⚠ which can only show that
+  //   ⚠ the server sends and counts.** ⚠ **Whether a real page actually answers is a different
+  //   ⚠ claim, ⚠ and it is the one the port depends on** — ⚠ **a Worker has no protocol ping,
+  //   ⚠ so this is what will be left.**
+  //
+  // ⚠ **The heartbeat is deliberately fast here.** ⚠ **The value in production is chosen, ⚠ not
+  //   ⚠ measured** (`docs/adr/0020`), ⚠ **and waiting it out would make this a check nobody runs.**
+  const { browser: b } = await ready();
+  const port = nextPort++;
+  const base = `http://127.0.0.1:${port}`;
+  process.env["JOIN_TOKEN_SECRET"] = "an-end-to-end-secret";
+  servers.push(startServer(port, base, { heartbeatMs: 150 }));
+  await new Promise((r) => setTimeout(r, 200));
+
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(host.page, "the host");
+
+  // ⚠ Waited for, ⚠ not slept through. ⚠ False until the page has answered, ⚠ so it cannot pass
+  //   ⚠ on something that was already true.
+  await host.page.waitForFunction(
+    () => {
+      const shown = document.getElementById("diagnostics-text")?.textContent ?? "";
+      return /heartbeats answered: *[1-9]/.test(shown);
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  const report = await host.page.evaluate(
+    () => document.getElementById("diagnostics-text")?.textContent ?? "",
+  );
+  const answered = /heartbeats answered: *(\d+)/.exec(report)?.[1];
+  console.log(`  observed: the page answered ${answered} heartbeats`);
+  console.log(`  observed: ${/frozen: *(.*)/.exec(report)?.[1] ?? "no line about freezing"}`);
+
+  // ⚠⚠ And nobody was hung up on for it. ⚠ The shadow decides nothing (`docs/adr/0020`).
+  const stillThere = await host.page.evaluate(
+    () =>
+      (globalThis as unknown as { kagimaCall?: { pc: RTCPeerConnection } }).kagimaCall?.pc
+        .connectionState ?? "gone",
+  );
+  assert.notEqual(stillThere, "closed", "the shadow heartbeat closed a call");
+
+  // ⚠ The address wall still holds with the new lines in the report (`docs/adr/0012`).
+  for (const pattern of [/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/, /[0-9a-f-]{20,}\.local\b/i]) {
+    assert.doesNotMatch(report, pattern, `an address reached the report:\n${report}`);
+  }
+
+  await host.context.close();
+  await guest.context.close();
+});
