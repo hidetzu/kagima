@@ -96,8 +96,25 @@ export type ParseResult =
   | { readonly ok: true; readonly message: ClientMessage }
   | { readonly ok: false; readonly why: ParseRejection };
 
+/**
+ * ⚠⚠ **How many bytes a string is on the wire.**
+ *
+ * ⚠ **`Buffer.byteLength` was here until 2026-09-06** (kagima#69). ⚠ **`Buffer` is Node's, ⚠ and
+ * this file is loaded by `session.ts`, ⚠ which claims to be platform-free** (`docs/adr/0015`).
+ * ⚠ **A Worker has it only through a compatibility layer** — ⚠ **so whether it worked depended on
+ * configuration rather than on intent.**
+ *
+ * ⚠ **`TextEncoder` is the platform-neutral name, ⚠ and it is what `src/random.ts` and
+ * `src/token/join-token.ts` already use.**
+ * ⚠ **Measured in `wrangler dev --local` on 2026-09-06: ⚠ the two agree, ⚠ 3 bytes for "あ".**
+ *
+ * ⚠ **A new encoder per call would be waste.** ⚠ **One is held here; ⚠ it has no state.**
+ */
+const utf8 = new TextEncoder();
+const utf8Bytes = (v: string): number => utf8.encode(v).length;
+
 const isString = (v: unknown, max: number): v is string =>
-  typeof v === "string" && v.length > 0 && Buffer.byteLength(v, "utf8") <= max;
+  typeof v === "string" && v.length > 0 && utf8Bytes(v) <= max;
 
 /**
  * ⚠ **The only way a client message becomes a value this program acts on.**
@@ -105,7 +122,7 @@ const isString = (v: unknown, max: number): v is string =>
  * ⚠ **Size is checked before parsing.** ⚠ **Parsing first means having already held it.**
  */
 export const parseClientMessage = (raw: string): ParseResult => {
-  if (Buffer.byteLength(raw, "utf8") > MAX_MESSAGE_BYTES) return { ok: false, why: "too-large" };
+  if (utf8Bytes(raw) > MAX_MESSAGE_BYTES) return { ok: false, why: "too-large" };
 
   let value: unknown;
   try {

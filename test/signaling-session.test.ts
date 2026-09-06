@@ -145,36 +145,56 @@ test("⚠ a participant leaving tells whoever is still there, and does not end t
   assert.equal(hub.peerCount(ROOM), 1);
 });
 
-test("⚠⚠ the platform-free half is platform-free", async () => {
+test("⚠⚠ the platform-free half is platform-free, ⚠ and so is everything it loads", async () => {
   // ⚠⚠ **This is the claim the whole split rests on** (`docs/adr/0015`).
   // ⚠ **`src/signaling/attach.ts` is the Node adapter and may reach for Node.**
-  // ⚠ **These three may not** — ⚠ **a Worker replaces the adapter and no other file, ⚠ and an
+  // ⚠ **These four may not** — ⚠ **a Worker replaces the adapter and no other file, ⚠ and an
   //   ⚠ import that only exists on Node would only be found there.**
+  //
+  // ⚠⚠ **Until 2026-09-06 this read the four files' own text and nothing else** (kagima#69).
+  // ⚠ **`session.ts` imports `./messages.ts`, ⚠ which used `Buffer`** — ⚠ **one step away was
+  //   ⚠ far enough to be invisible, ⚠ and the wall reported green the whole time.**
+  // ⚠ **Now it follows what they load.**
   const { readFile } = await import("node:fs/promises");
   const { codeOf } = await import("./source-text.ts");
+  const { reachableFrom } = await import("./reachable.ts");
 
-  const PLATFORM_FREE = [
+  const ENTRIES = [
     "src/signaling/authorize.ts",
     "src/signaling/session.ts",
     "src/signaling/socket.ts",
     "src/signaling/protocol.ts",
   ];
+  const files = await reachableFrom(ENTRIES);
+  // ⚠ The denominator, announced by the thing that measured it (`.claude/rules/evidence.md`).
+  console.log(`  observed: ${files.length} files reachable from ${ENTRIES.length} entry points`);
+  assert.ok(files.length > ENTRIES.length, "nothing was followed — this check has gone stale");
 
   const offenders: string[] = [];
-  for (const file of PLATFORM_FREE) {
+  for (const file of files) {
     const code = codeOf(await readFile(file, "utf8"));
     for (const [what, pattern] of [
       ["a node: module", /from\s+"node:/],
       ["the ws library", /from\s+"ws"/],
       ["Buffer", /\bBuffer\b/],
+      // ⚠ Node's own globals, ⚠ which a Worker does not have. ⚠ `process.env` is the one that
+      //   ⚠ reads as harmless and is not.
+      ["process", /\bprocess\s*\./],
     ] as const) {
       if (pattern.test(code)) offenders.push(`${file}: ${what}`);
     }
   }
   assert.deepEqual(offenders, [], `the platform reached into: ${offenders.join(", ")}`);
 
-  // ⚠ And the adapter is still the file that carries it — ⚠ otherwise this check is describing
-  //   ⚠ a split that no longer exists.
+  // ⚠⚠ **And the dependency runs one way.** ⚠ **The core must never load the adapter** —
+  //   ⚠ **if it did, ⚠ every file above would be reachable from Node's side and this whole
+  //   ⚠ check would be describing a split that no longer exists.**
+  assert.ok(
+    !files.includes("src/signaling/attach.ts"),
+    "the platform-free half loads the Node adapter",
+  );
+
+  // ⚠ And the adapter is still the file that carries it — ⚠ otherwise this describes nothing.
   const adapter = codeOf(await readFile("src/signaling/attach.ts", "utf8"));
   assert.match(
     adapter,
