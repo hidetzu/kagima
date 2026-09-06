@@ -3,6 +3,12 @@
   "compilerOptions": {
     "lib": ["esnext", "dom"]
   },
-  "include": ["e2e", "external", "measure", "test/reconnecting-transport.test.ts"],
+  "include": [
+    "e2e",
+    "external",
+    "measure",
+    "test/reconnecting-transport.test.ts",
+    "test/remember.test.ts"
+  ],
   "exclude": []
 }

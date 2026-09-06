@@ -48,6 +48,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a Host whose socket dropped coming back on its own, and being told who is at the door",
   },
   {
+    name: "host-comes-back-to-a-thrown-away-page",
+    sees: "a Host whose page the browser threw away getting back into its own room",
+  },
+  {
     name: "shadow-heartbeat",
     sees: "a real page answering the message-shaped heartbeat, and the report saying so",
   },
