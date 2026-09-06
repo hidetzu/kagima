@@ -19,11 +19,13 @@
 //
 // ⚠ **Four fields.** ⚠ **Never a knock, ⚠ never a token, ⚠ never a name.**
 import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
+import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
-import { createRoomStore, type Room } from "./room/store.ts";
+import { createRoomStore, ROOM_IDLE_MS, type Room } from "./room/store.ts";
 import { type Context, handle } from "./server.ts";
 import { upgrade, workerSocketPair } from "./signaling/attach-worker.ts";
 import { createHub } from "./signaling/hub.ts";
+import { CLOSE_ROOM_CLOSED } from "./signaling/protocol.ts";
 import { createSessions, type Sessions } from "./signaling/session.ts";
 
 /** ⚠ **The one key.** ⚠ **One room per object, ⚠ so there is nothing to key by.** */
@@ -52,6 +54,14 @@ export type RoomState = {
     get<T>(key: string): Promise<T | undefined>;
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
+    /**
+     * ⚠⚠ **When to wake this object up and let it go** (`docs/adr/0025`).
+     *
+     * ⚠ **Node has a sweeper** (`src/node-server.ts`). ⚠ **A Durable Object has no process to
+     * run one in** — ⚠ **so the room is what remembers when it is over.**
+     */
+    setAlarm(at: number): Promise<void>;
+    deleteAlarm(): Promise<void>;
   };
 };
 
@@ -212,6 +222,49 @@ export class RoomObject {
       createdAt: after.createdAt,
       lastSeenAt: after.lastSeenAt,
     });
+
+    // ⚠⚠ **When this room is over** (`docs/adr/0025`).
+    //
+    // ⚠ **Moved with `lastSeenAt`, ⚠ because that is what the life hangs on**
+    //   (`docs/adr/0010`). ⚠ **A room that is being used keeps pushing its own end away.**
+    await this.state.storage.setAlarm(after.lastSeenAt + ROOM_IDLE_MS);
+  }
+
+  /**
+   * ⚠⚠ **The room is over, ⚠ and lets go of itself** (`docs/adr/0025`).
+   *
+   * ⚠ **`docs/adr/0010` already said an expired room answers exactly like one that never
+   * existed, ⚠ and that it does not wait to be collected** — ⚠ **`store.get` refuses it the
+   * moment it expires.** ⚠ **This is the other half: ⚠ not keeping what nobody can reach.**
+   *
+   * ⚠ **`docs/adr/0023` said writing brings an obligation to delete.** ⚠ **This is it.**
+   */
+  async alarm(): Promise<void> {
+    const held = await this.state.storage.get<Room>(KEY);
+    if (held === undefined) {
+      // ⚠ Already gone. ⚠ Nothing to do, ⚠ and nothing to say.
+      await this.state.storage.deleteAlarm();
+      return;
+    }
+
+    // ⚠ Still in use. ⚠ A heartbeat moved it after the alarm was set, ⚠ so this is early
+    //   ⚠ rather than wrong — ⚠ come back when it is actually over.
+    const over = held.lastSeenAt + ROOM_IDLE_MS;
+    if (Date.now() < over) {
+      await this.state.storage.setAlarm(over);
+      return;
+    }
+
+    // ⚠ The sockets first, so nobody is left holding a room that no longer exists —
+    //   ⚠ the same order `src/node-server.ts` uses when its sweeper finds one.
+    this.ctx?.hub.closeRoom(held.id, CLOSE_ROOM_CLOSED, "this room was left open and has expired");
+    this.ctx?.store.close(held.id);
+    await this.state.storage.delete(KEY);
+    await this.state.storage.deleteAlarm();
+
+    // ⚠ Says the room is over, ⚠ and says nothing about who was in it
+    //   (`.claude/rules/security.md` § 2).
+    logger.info("a room expired", { roomId: held.id });
   }
 
   /** ⚠ **Which room this object is holding.** ⚠ For checks; ⚠ never served. */
