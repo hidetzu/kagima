@@ -57,6 +57,30 @@ export type Snapshot = {
   /** ⚠ The signalling socket. ⚠ `null` while it is still open. */
   readonly socketClosed: { readonly code: number; readonly at: number } | null;
   readonly framesDecoded: number;
+  /**
+   * ⚠⚠ **The shadow heartbeat, ⚠ and what the browser did to this page**
+   * (`docs/adr/0020`, kagima#62).
+   *
+   * ⚠ **`null` when nothing is watching** — ⚠ **which is the case for every check that predates
+   * this, ⚠ so they keep reporting exactly what they did before.**
+   */
+  readonly heartbeat: HeartbeatFacts | null;
+};
+
+/**
+ * ⚠ **What can be said about the heartbeat without saying anything about anybody.**
+ *
+ * ⚠ **Times are milliseconds since the page loaded.** ⚠ **Never a date, ⚠ never a clock.**
+ */
+export type HeartbeatFacts = {
+  readonly answered: number;
+  readonly lastAnsweredAt: number | null;
+  /** ⚠ **The longest stretch this page was not visible.** ⚠ `null` while it never left. */
+  readonly longestHiddenMs: number | null;
+  /** ⚠ **Whether the browser froze it.** ⚠ **`false` here is "not observed"**, ⚠ not "did not happen". */
+  readonly wasFrozen: boolean;
+  /** ⚠ **Whether this browser reports freezing at all.** ⚠ Without it, `wasFrozen` says nothing. */
+  readonly canSeeFreezing: boolean;
 };
 
 /** ⚠ **How long the field test asks a call to be held** (`docs/FIELD-TEST.md`). */
@@ -337,6 +361,28 @@ export const formatReport = (s: Snapshot): string => {
       `    ${num(t.at, "?")}ms  ${only(t.what, KNOWN_WHAT)} -> ${only(t.value, KNOWN_VALUES)}`,
     );
   }
+  // ⚠⚠ **The shadow heartbeat** (`docs/adr/0020`). ⚠ **Absent from a report that was not
+  //   ⚠ watching, ⚠ rather than printed as zeroes** — ⚠ **"not observed" and "none" are
+  //   ⚠ different things** (`.claude/rules/evidence.md`).
+  if (s.heartbeat !== null) {
+    const h = s.heartbeat;
+    lines.push(`  heartbeats answered: ${num(h.answered, "0")}`);
+    lines.push(`  last answered at: ${num(h.lastAnsweredAt, "never")}ms`);
+    lines.push(`  longest hidden:   ${num(h.longestHiddenMs, "never hidden")}ms`);
+    lines.push(
+      `  frozen:           ${
+        // ⚠ ⚠ Three answers, ⚠ not two. ⚠ "no" and "this browser would not tell us" are
+        //   ⚠ different, ⚠ and reporting them as one is exactly the mistake this file exists
+        //   ⚠ to avoid.
+        h.canSeeFreezing
+          ? h.wasFrozen
+            ? "yes"
+            : "not while this page was open"
+          : "not reported by this browser"
+      }`,
+    );
+  }
+
   lines.push("");
   lines.push("  ⚠ addresses are deliberately absent. ⚠ types and protocols only.");
   lines.push("  ⚠ this is one observation, on one pair of networks, at one moment.");

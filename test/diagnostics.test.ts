@@ -33,6 +33,9 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   heldMs: HOLD_TARGET_MS,
   socketClosed: null,
   framesDecoded: 900,
+  // ⚠ Absent unless a case asks for it. ⚠ Every case that predates the shadow heartbeat keeps
+  //   ⚠ reporting exactly what it reported before (`docs/adr/0020`).
+  heartbeat: null,
   ...over,
 });
 

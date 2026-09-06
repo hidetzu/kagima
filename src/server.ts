@@ -366,6 +366,13 @@ const joinTokenSecret = (): string => {
 export const startServer = (
   port = Number(process.env["PORT"] ?? DEFAULT_PORT),
   baseUrl = process.env["PUBLIC_BASE_URL"] ?? DEFAULT_BASE_URL,
+  /**
+   * ⚠ **For checks that would otherwise have to wait out a real heartbeat.**
+   *
+   * ⚠ **Not read from the environment** — ⚠ **a value that can be set from outside the process is
+   * a value somebody sets in production by accident** (`docs/adr/0011` paid for that lesson).
+   */
+  options: { readonly heartbeatMs?: number } = {},
 ) => {
   // ⚠⚠ **The build has to have run** (`docs/adr/0016`).
   //
@@ -444,6 +451,7 @@ export const startServer = (
     secret: ctx.secret,
     knocks: ctx.knocks,
     touch: (roomId) => ctx.store.touch(roomId),
+    ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
   });
 
   // ⚠ Rooms nobody is in do not linger. ⚠ `store.get` already refuses an expired one, so this is

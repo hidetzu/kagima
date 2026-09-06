@@ -49,6 +49,14 @@ export type ClientMessage =
    * silently: ⚠ answering "no such knock" would say which ids are real.**
    */
   | { readonly type: "admit"; readonly knockId: string; readonly allow: boolean }
+  /**
+   * ⚠ **The answer to the heartbeat** (`docs/adr/0020`).
+   *
+   * ⚠ **`n` is the ping's own number, echoed back.** ⚠ **A pong that echoes nothing we sent is
+   * not an answer to anything** — ⚠ **and answering without having been asked is exactly what
+   * a page that is not really there would still manage.**
+   */
+  | { readonly type: "pong"; readonly n: number }
   | { readonly type: "bye" };
 
 /**
@@ -156,6 +164,14 @@ export const parseClientMessage = (raw: string): ParseResult => {
       if (!isString(m["knockId"], MAX_KNOCK_ID_BYTES)) return { ok: false, why: "malformed" };
       if (typeof m["allow"] !== "boolean") return { ok: false, why: "malformed" };
       return { ok: true, message: { type: "admit", knockId: m["knockId"], allow: m["allow"] } };
+    }
+    case "pong": {
+      const n = m["n"];
+      // ⚠ A number we could have sent. ⚠ Anything else is malformed, ⚠ not "close enough".
+      if (typeof n !== "number" || !Number.isSafeInteger(n) || n < 0) {
+        return { ok: false, why: "malformed" };
+      }
+      return { ok: true, message: { type: "pong", n } };
     }
     case "bye":
       return { ok: true, message: { type: "bye" } };
