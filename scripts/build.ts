@@ -29,6 +29,7 @@ const SOURCES = [
   "src/client/host.ts",
   "src/client/guest.ts",
   "src/client/call.ts",
+  "src/client/reconnect.ts",
   "src/client/transport.ts",
   "src/client/diagnostics.ts",
   "src/status/status.ts",

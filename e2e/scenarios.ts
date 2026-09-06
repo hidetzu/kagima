@@ -44,6 +44,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "the call surviving kagima going away, and being described that way",
   },
   {
+    name: "the-host-comes-back",
+    sees: "a Host whose socket dropped coming back on its own, and being told who is at the door",
+  },
+  {
     name: "diagnostics",
     sees: "the field-test report carrying candidate types out of a real call, and no address",
   },

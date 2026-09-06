@@ -100,6 +100,26 @@ export const createSessions = (options: SessionOptions) => {
     //   ⚠ mentioned again from here on (`docs/adr/0004`).
     logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
 
+    // ⚠⚠ **Who is still at the door** (kagima#70).
+    //
+    // ⚠ **A knock is announced once, ⚠ to whoever is listening at that moment**
+    //   (`docs/adr/0018`: ⚠ **and that is only the Host**). ⚠ **If the Host's socket was away, the
+    //   ⚠ announcement reached nobody and is gone** — ⚠ **while the knock itself is still waiting
+    //   ⚠ in `knocks`, ⚠ and the person is still standing there.**
+    // ⚠ **So a Host that arrives is told the list, ⚠ not only the next arrival.**
+    //
+    // ⚠ **To a Host only.** ⚠ **The same rule as the announcement** (`docs/adr/0018`).
+    // ⚠ **On a first connection the list is empty and nothing is sent** — ⚠ **one code path, ⚠ no
+    //   ⚠ special case for "this is a reconnect", ⚠ because we cannot tell and do not need to.**
+    // ⚠ **The shape is the announcement's own**, ⚠ so the page needs no second way to read it.
+    if (role === "host") {
+      for (const k of options.knocks?.waiting(roomId) ?? []) {
+        // ⚠ The id and the name, ⚠ and nothing else. ⚠ Never the token: ⚠ that is the Guest's way
+        //   ⚠ in, ⚠ and the Host has no use for it (`.claude/rules/security.md` § 4).
+        peer.send(JSON.stringify({ type: "knock", knockId: k.id, nickname: k.nickname }));
+      }
+    }
+
     // ⚠⚠ **How long a WebSocket kept this room's object awake** (`docs/adr/0015`, kagima#47).
     //
     // ⚠ **On Durable Objects, ⚠ an accepted WebSocket keeps the object active for the whole time
