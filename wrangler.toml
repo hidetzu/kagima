@@ -8,19 +8,19 @@ name = "kagima"
 main = "src/worker.ts"
 compatibility_date = "2026-09-01"
 
-# ⚠⚠ **The room is not here yet** (`docs/adr/0022`, `docs/adr/0023`).
+# ⚠⚠ **One room, one object** (`docs/adr/0022`).
 #
-# ⚠ **Its shape is decided — ⚠ one Durable Object per room, ⚠ writing four fields — ⚠ and it is
-#   ⚠ the next step.** ⚠ **The binding is declared when the class exists, ⚠ not before:**
-#   ⚠ **wrangler refuses to start otherwise, ⚠ which is the right way round.**
-#
-# [[durable_objects.bindings]]
-# name = "ROOM"
-# class_name = "Room"
-#
-# [[migrations]]
-# tag = "v1"
-# new_sqlite_classes = ["Room"]
+# ⚠ **Everything a room knows lives here** — ⚠ **the room itself, ⚠ who is at the door, ⚠ who is
+#   ⚠ connected.** ⚠ **Splitting them would put state in two places** (`docs/adr/0005`).
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# ⚠ **SQLite-backed, ⚠ because that is what a new class gets.**
+# ⚠ **What is written is four fields** (`docs/adr/0023`) — ⚠ **never a knock, ⚠ never a token.**
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
 
 # ⚠⚠ **The browser's own files** (`docs/adr/0016`).
 #

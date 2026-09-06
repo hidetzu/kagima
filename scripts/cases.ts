@@ -28,6 +28,14 @@ export const CASES: readonly Case[] = [
     command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.json"],
   },
   {
+    // ⚠⚠ **The Worker's half, ⚠ checked against Cloudflare's own types** — ⚠ **not Node's.**
+    // ⚠ **Same reasoning as `types-client`**: ⚠ **if it were checked with Node's globals, ⚠ code
+    //   ⚠ that reaches for `process` would type-check and only fail in workerd.**
+    name: "types-worker",
+    sees: "the Worker's types, checked against Cloudflare's runtime instead of node",
+    command: ["node_modules/.bin/tsc", "--noEmit", "-p", "tsconfig.worker.json"],
+  },
+  {
     name: "types-client",
     // ⚠ A second config, not a second build system. ⚠ The browser's code is checked against the
     //   DOM and the server's is not — ⚠ so server code cannot reach for `navigator.mediaDevices`
