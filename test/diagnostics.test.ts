@@ -16,6 +16,10 @@ import {
   selectedPairIdOf,
   verdictOf,
   outagesOf,
+  gatherFrom,
+  inUseOf,
+  nothingGathered,
+  type Seen,
 } from "../src/diagnostics/report.ts";
 import { codeOf } from "./source-text.ts";
 
@@ -33,6 +37,9 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   msToFirstFrame: 800,
   heldMs: HOLD_TARGET_MS,
   socketClosed: null,
+  // ⚠ The call is up in the base fixture, ⚠ so what it holds now matches what it gathered
+  //   ⚠ (kagima#91). ⚠ A case that wants a drop says so.
+  inUseNow: { localCandidates: 2, remoteCandidates: 1, pairSelected: true },
   framesDecoded: 900,
   // ⚠ Absent unless a case asks for it. ⚠ Every case that predates the shadow heartbeat keeps
   //   ⚠ reporting exactly what it reported before (`docs/adr/0020`).
@@ -558,4 +565,112 @@ test("⚠⚠ a call that ran with video does not report `no frames` after it dro
 test("⚠ a call where no frame ever arrived still says so", () => {
   const s = snapshot({ framesDecoded: 0, msToFirstFrame: null, selected: null, heldMs: null });
   assert.match(verdictOf(s), /^no frames —/);
+});
+
+// ── ⚠ what the call gathered, and what it holds now ─────────────────────────
+//
+// ⚠⚠ **Measured 2026-09-06: ⚠ a call that had carried video for 176 seconds and then dropped
+//   ⚠ reported `local candidates: none`, `remote candidates: none`, `selected pair: none`.**
+// ⚠ **Those are the words a call that never gathered anything prints.** ⚠ **`getStats()` answers
+//   ⚠ about the connection as it stands, ⚠ and a dropped connection stands empty**
+//   (`.claude/rules/evidence.md`: ⚠ **could not be obtained ≠ not there**).
+
+const fact = (type: string) => ({ type, protocol: "udp", family: "v4" }) as const;
+
+const seen = (over: Partial<Seen> = {}): Seen => ({
+  local: new Map([
+    ["l1", fact("host")],
+    ["l2", fact("srflx")],
+  ]),
+  remote: new Map([["r1", fact("srflx")]]),
+  selected: { local: fact("srflx"), remote: fact("srflx") },
+  ...over,
+});
+
+/** ⚠ **The connection after it dropped: ⚠ it holds nothing at all.** */
+const holdsNothing: Seen = { local: new Map(), remote: new Map(), selected: null };
+
+test("⚠⚠ what a call gathered survives the connection dropping", () => {
+  const g = gatherFrom(gatherFrom(nothingGathered(), seen()), holdsNothing);
+
+  assert.equal(g.local.size, 2, "the candidates went away with the connection");
+  assert.equal(g.remote.size, 1, "the remote candidates went away with the connection");
+  assert.notEqual(g.lastSelected, null, "the pair that carried the call went away with it");
+  // ⚠ And the other half: ⚠ the report must still be able to say it is gone now.
+  assert.deepEqual(inUseOf(holdsNothing), {
+    localCandidates: 0,
+    remoteCandidates: 0,
+    pairSelected: false,
+  });
+});
+
+test("⚠ folding two readings out of order gives the same pile", () => {
+  // ⚠ **The panel reads every 250ms, ⚠ so two readings can be in flight and the older one can
+  //   ⚠ finish last** (`.claude/skills/change-review/SKILL.md` § 4).
+  // ⚠ **A union does not care.** ⚠⚠ **"What it holds right now" would have** — ⚠ **which is why
+  //   ⚠ it is not in `Gathered` at all.** ⚠ **`inUseOf` reads the one reading being reported,
+  //   ⚠ so there is no older value for a late fold to leave behind.**
+  const inOrder = gatherFrom(gatherFrom(nothingGathered(), seen()), holdsNothing);
+  const outOfOrder = gatherFrom(gatherFrom(nothingGathered(), holdsNothing), seen());
+
+  assert.deepEqual([...outOfOrder.local.keys()].sort(), [...inOrder.local.keys()].sort());
+  assert.deepEqual([...outOfOrder.remote.keys()].sort(), [...inOrder.remote.keys()].sort());
+});
+
+test("⚠ the same candidate read again is one candidate, not two", () => {
+  // ⚠ The panel reads every 250ms. ⚠ Without ids, a 19-minute call would report thousands.
+  let g = nothingGathered();
+  for (let i = 0; i < 5; i += 1) g = gatherFrom(g, seen());
+  assert.equal(g.local.size, 2);
+  assert.equal(g.remote.size, 1);
+});
+
+test("⚠ a candidate gathered after a restart is another candidate", () => {
+  // ⚠ New ids, ⚠ because ICE gathered again. ⚠ That is a different candidate and it counts.
+  const after = seen({ local: new Map([["l3", fact("relay")]]), remote: new Map() });
+  const g = gatherFrom(gatherFrom(nothingGathered(), seen()), after);
+  assert.equal(g.local.size, 3);
+});
+
+test("⚠⚠ the panel of a dropped call still says how the two ends reached each other", () => {
+  const said = formatReport(
+    snapshot({
+      inUseNow: { localCandidates: 0, remoteCandidates: 0, pairSelected: false },
+      transitions: [down(3_400, "connected"), down(58_913, "disconnected")],
+      atMs: 234_704,
+    }),
+  );
+  assert.match(
+    said,
+    /local candidates: host\/udp\/v4×1, srflx\/udp\/v4×1  \(gathered during this call\)/,
+  );
+  assert.match(said, /selected pair:.*\(last selected\)/);
+  assert.match(said, /in use right now: nothing — the connection holds no candidates and no pair/);
+  assert.doesNotMatch(said, /local candidates: none/, "it reported gathering nothing");
+});
+
+test("⚠ a call that is still up says the pair is still held", () => {
+  assert.match(formatReport(snapshot()), /in use right now: the same pair, still held/);
+});
+
+test("⚠ candidates with no pair selected right now is its own answer", () => {
+  const said = formatReport(
+    snapshot({ inUseNow: { localCandidates: 2, remoteCandidates: 1, pairSelected: false } }),
+  );
+  assert.match(said, /in use right now: candidates, but no pair selected/);
+});
+
+test("⚠⚠ a call that gathered nothing still says `none`, and does not claim it gathered", () => {
+  // ⚠ **The qualifier goes on a line that has something to qualify, ⚠ and on no other.**
+  //   ⚠ **`none (gathered during this call)` would be saying two things at once.**
+  const said = formatReport(
+    snapshot({
+      localCandidates: [],
+      remoteCandidates: [],
+      selected: null,
+      inUseNow: { localCandidates: 0, remoteCandidates: 0, pairSelected: false },
+    }),
+  );
+  assert.match(said, /local candidates: none\n/);
+  assert.doesNotMatch(said, /none  \(gathered during this call\)/);
 });

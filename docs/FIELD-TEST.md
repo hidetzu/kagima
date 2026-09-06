@@ -220,8 +220,10 @@ curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
 | **ms to 1st frame** | ⚠ 「つながらない」と「遅い」は別物。⚠ **相手が来た瞬間から**測っている |
 | **waited alone** | ⚠ Host が 1 人で待っていた時間。⚠ **上の数字とは別物であり、混ぜない** |
 | **held for** | ⚠ **30 秒保ったか。** ⚠ つながってから落ちるのが、いちばん見落とされる失敗 |
-| **local / remote candidates** | ⚠ srflx が出たか = ⚠ **STUN に届いたか** |
-| **selected pair** | ⚠ 実際に使われた経路。⚠ `relay` が出たなら TURN が使われている |
+| **of which no media** | ⚠ **`held for` は最初のフレームからの壁時計で、⚠ 断絶を含んだままである。** ⚠ 実際に映っていなかった時間は、⚠ **この行にしかない** |
+| **local / remote candidates** | ⚠ srflx が出たか = ⚠ **STUN に届いたか。** ⚠ **通話ぜんぶで集めたもので、⚠ いま接続が持っているものではない** |
+| **selected pair** | ⚠ 実際に使われた経路。⚠ `relay` が出たなら TURN が使われている。⚠ **最後に選ばれたもの** |
+| **in use right now** | ⚠ **上の 3 行は通話ぜんぶの話である。** ⚠ **いま接続が何を持っているかを言うのは、⚠ この行だけ** |
 | **signalling socket** | ⚠ 切れたか。⚠ **切れても通話は続くはず**([`adr/0010`](adr/0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md)) |
 | **transitions** | ⚠ どこまで進んで止まったか |
 
