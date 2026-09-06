@@ -354,9 +354,26 @@ export const msToFrameSinceArrival = (s: Snapshot): number | null => {
  * (`.claude/rules/evidence.md`), ⚠ **and it gets read back out of the record as evidence.**
  */
 export const verdictOf = (s: Snapshot): string => {
-  if (s.framesDecoded > 0) {
-    if (s.heldMs !== null && s.heldMs >= HOLD_TARGET_MS) return "frames, held";
-    return "frames, but not held for the full time";
+  // ⚠⚠ **`msToFirstFrame`, ⚠ not `framesDecoded`** (kagima#91, ⚠ owner decision 2026-09-06).
+  //
+  // ⚠ **`framesDecoded` is read off the stream in use now, ⚠ and a stream that was re-made
+  //   ⚠ starts at zero.** ⚠ **Measured: ⚠ a panel opened after a drop said `no frames` for a
+  //   ⚠ call that had run 175 seconds with video** — ⚠ **three lines above `ms to 1st frame: 504`.**
+  // ⚠ **`msToFirstFrame` is set once and never unset.** ⚠ **"a frame arrived at some point" is a
+  //   ⚠ fact about the call; ⚠ `framesDecoded` is a fact about this moment.**
+  if (s.msToFirstFrame !== null) {
+    const out = outagesOf(s);
+    // ⚠⚠ **Still down when this was read.** ⚠ **Whatever it held earlier, ⚠ that is the first
+    //   ⚠ thing the reader needs** — ⚠ **and it is the one case where "held" reads as a lie.**
+    if (out.openAtEnd) return "frames, then it dropped and did not come back";
+    const held =
+      s.heldMs !== null && s.heldMs >= HOLD_TARGET_MS
+        ? "frames, held"
+        : "frames, but not held for the full time";
+    if (out.count === 0) return held;
+    // ⚠ The count goes in the verdict itself, ⚠ so a reader who reads one line still learns it
+    //   ⚠ (owner decision 2026-09-06). ⚠ `of which no media` carries how long.
+    return `${held} — but it dropped ${out.count === 1 ? "once" : `${out.count} times`}`;
   }
   const gotReflexive = s.localCandidates.some((c) => {
     const t = only(c.type, KNOWN_TYPES);

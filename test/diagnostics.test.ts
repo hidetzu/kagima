@@ -483,3 +483,77 @@ test("⚠ `frames decoded` says which stream it counted", () => {
     /frames decoded: {3}550 {2}\(on the stream in use now\)/,
   );
 });
+
+// ── ⚠⚠ the verdict, after the owner decision of 2026-09-06 ──────────────────
+
+test("⚠⚠ a call that dropped and came back says so in the verdict itself", () => {
+  const s = snapshot({
+    msToFirstFrame: 800,
+    framesDecoded: 900,
+    heldMs: 200_000,
+    transitions: [
+      down(1_000, "connected"),
+      down(11_000, "disconnected"),
+      down(21_000, "connected"),
+      down(31_000, "disconnected"),
+      down(41_000, "connected"),
+    ],
+    atMs: 200_800,
+  });
+  assert.equal(verdictOf(s), "frames, held — but it dropped 2 times");
+});
+
+test("⚠ one drop reads as `once`, ⚠ not as `1 times`", () => {
+  const s = snapshot({
+    heldMs: 200_000,
+    transitions: [
+      down(1_000, "connected"),
+      down(11_000, "disconnected"),
+      down(21_000, "connected"),
+    ],
+    atMs: 200_800,
+  });
+  assert.equal(verdictOf(s), "frames, held — but it dropped once");
+});
+
+test("⚠⚠ still down when the panel was read outranks whatever it held earlier", () => {
+  const s = snapshot({
+    heldMs: 515_000,
+    transitions: [
+      down(58_913, "connected"),
+      down(233_813, "disconnected"),
+      down(243_814, "failed"),
+    ],
+    atMs: 584_244,
+  });
+  assert.equal(verdictOf(s), "frames, then it dropped and did not come back");
+});
+
+test("⚠⚠ a call that ran with video does not report `no frames` after it drops", () => {
+  // ⚠ The real panel of 2026-09-06: ⚠ `frames decoded: 0` and `ms to 1st frame: 504` on the
+  //   ⚠ same page, ⚠ and the verdict said `no frames`. ⚠ 175 seconds of video had been decoded.
+  const s = snapshot({
+    framesDecoded: 0,
+    msToFirstFrame: 59_251,
+    heldMs: 515_000,
+    remoteCandidates: [],
+    selected: null,
+    transitions: [
+      down(58_913, "connected"),
+      down(233_813, "disconnected"),
+      down(243_814, "failed"),
+    ],
+    atMs: 584_244,
+  });
+  const verdict = verdictOf(s);
+  assert.ok(
+    !verdict.includes("no frames"),
+    `frames had arrived, and the verdict denied it: ${verdict}`,
+  );
+  assert.equal(verdict, "frames, then it dropped and did not come back");
+});
+
+test("⚠ a call where no frame ever arrived still says so", () => {
+  const s = snapshot({ framesDecoded: 0, msToFirstFrame: null, selected: null, heldMs: null });
+  assert.match(verdictOf(s), /^no frames —/);
+});
