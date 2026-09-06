@@ -8,6 +8,16 @@ name = "kagima"
 main = "src/worker.ts"
 compatibility_date = "2026-09-01"
 
+# ⚠⚠ **`account_id` is deliberately absent.**
+#
+# ⚠ **This repository is public** (`.claude/rules/git.md`: ⚠ **never put the working environment
+#   ⚠ into anything public**). ⚠ **An account id is not a credential, ⚠ but it is an identifier of
+#   ⚠ somebody's account, ⚠ and it does not become less so for being committed.**
+# ⚠ **wrangler reads `CLOUDFLARE_ACCOUNT_ID` from the environment** — ⚠ **so a deploy sets it
+#   ⚠ there, ⚠ and nothing lands in git.**
+#
+# ⚠ **`wrangler dev --local` needs none of this.**
+
 # ⚠⚠ **One room, one object** (`docs/adr/0022`).
 #
 # ⚠ **Everything a room knows lives here** — ⚠ **the room itself, ⚠ who is at the door, ⚠ who is
