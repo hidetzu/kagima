@@ -71,6 +71,14 @@ jobs:
           set -o pipefail
           npm run external 2>&1 | tee /tmp/external.log
 
+      # ⚠⚠ kagima on Cloudflare, ⚠ in workerd (`docs/adr/0015`).
+      # ⚠ No account, ⚠ no deploy, ⚠ nothing that costs anything.
+      - name: npm run worker
+        id: worker
+        run: |
+          set -o pipefail
+          npm run worker 2>&1 | tee /tmp/worker.log
+
       # ⚠ Runs even when something above failed. ⚠ A failing run is exactly when a reader needs
       #   to know which tiers were never reached.
       - name: What ran, and ⚠ what did not
@@ -86,6 +94,7 @@ jobs:
             head -n 1 /tmp/docs.log  2>/dev/null || echo "docs-check — did not reach it"
             head -n 1 /tmp/e2e.log   2>/dev/null || echo "npm run e2e — did not reach it"
             head -n 1 /tmp/external.log 2>/dev/null || echo "npm run external — did not reach it"
+            head -n 1 /tmp/worker.log 2>/dev/null || echo "npm run worker — did not reach it"
             echo '```'
             echo ""
             echo "## ⚠ Tiers this run did NOT cover"

@@ -11,7 +11,8 @@
     "check": "node scripts/check.ts",
     "dev": "node scripts/build.ts && node src/node-server.ts",
     "e2e": "node scripts/e2e.ts",
-    "external": "node scripts/external.ts"
+    "external": "node scripts/external.ts",
+    "worker": "node scripts/worker.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",

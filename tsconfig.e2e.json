@@ -8,7 +8,8 @@
     "external",
     "measure",
     "test/reconnecting-transport.test.ts",
-    "test/remember.test.ts"
+    "test/remember.test.ts",
+    "worker-gate"
   ],
   "exclude": []
 }
