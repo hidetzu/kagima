@@ -10,6 +10,7 @@
 // ⚠ **That is the whole reason for the split** (`CLAUDE.md` § 3: ⚠ **never two implementations of
 //   ⚠ the same question**).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isGated, mayPass } from "./gate.ts";
 import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
@@ -71,6 +72,13 @@ export const startServer = (
   }
 
   const trustedSourceHeader = process.env["TRUSTED_SOURCE_HEADER"] ?? "";
+
+  // ⚠⚠ **A door before the door** (`docs/adr/0024`). ⚠ **Absent means there is no gate** —
+  //   ⚠ **said out loud rather than passed silently** (`.claude/rules/security.md` § 6).
+  const roomGate = process.env["ROOM_GATE"];
+  if (roomGate === undefined || roomGate === "") {
+    logger.warn("ROOM_GATE is not set — anybody who can reach this can make a room");
+  }
   if (trustedSourceHeader === "") {
     logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
     logger.warn("behind a tunnel that makes every caller look like one source");
@@ -116,7 +124,12 @@ export const startServer = (
         headers,
         ...(hasBody ? { body: req as unknown as ReadableStream, duplex: "half" } : {}),
       } as RequestInit);
-      const answer = await handle(ctx, request);
+      // ⚠⚠ **A door before the door** (`docs/adr/0024`). ⚠ **One implementation, ⚠ two runtimes**
+      //   (`CLAUDE.md` § 3) — ⚠ **the same `src/gate.ts` the Worker uses.**
+      const gated = isGated(request.method, new URL(request.url).pathname)
+        ? await mayPass(request, roomGate)
+        : null;
+      const answer = gated ?? (await handle(ctx, request));
       res.writeHead(answer.status, Object.fromEntries(answer.headers));
       res.end(await answer.text());
     })().catch(() => {

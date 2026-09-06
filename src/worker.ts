@@ -17,6 +17,7 @@
 //   ⚠ different thing from "unavailable", ⚠ and the reader's next move depends on which**
 //   (`CLAUDE.md` § 4-1).
 import { servedHeaders, servedPath } from "./assets.ts";
+import { isGated, mayPass } from "./gate.ts";
 import { MAX_ID_ATTEMPTS } from "./room/create-room.ts";
 import { generateRoomId } from "./room/room-id.ts";
 import { ROOM_HEADER } from "./room-object.ts";
@@ -38,6 +39,14 @@ export type Env = {
   };
   /** ⚠ **The signing secret** (`.claude/rules/security.md` § 6). ⚠ **Never a default.** */
   readonly JOIN_TOKEN_SECRET?: string;
+  /**
+   * ⚠⚠ **A door before the door** (`docs/adr/0024`). ⚠ **`user:secret`, as Basic sends it.**
+   *
+   * ⚠ **Absent means there is no gate.** ⚠ **Anyone can make a room** — ⚠ **which is what
+   * `wrangler dev --local` and the checks want, ⚠ and what a deploy must not.**
+   * ⚠ **It is time-limited; ⚠ `docs/adr/0024` says how it ends.**
+   */
+  readonly ROOM_GATE?: string;
 };
 
 /**
@@ -88,6 +97,16 @@ const asset = async (env: Env, origin: string, pathname: string): Promise<Respon
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // ⚠⚠ **Before anything else** (`docs/adr/0024`).
+    //
+    // ⚠ **Two paths only** — ⚠ **the Host's page and making a room.** ⚠ **A Guest never meets
+    //   ⚠ this: ⚠ `/r/{id}`, ⚠ the knock, ⚠ reading a knock and the socket are all outside it**
+    //   (`docs/adr/0017` took the passphrase off the door, ⚠ and this does not put it back).
+    if (isGated(request.method, url.pathname)) {
+      const refused = await mayPass(request, env.ROOM_GATE);
+      if (refused !== null) return refused;
+    }
 
     if (request.method === "GET") {
       const found = await asset(env, url.origin, url.pathname);
