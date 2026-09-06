@@ -232,13 +232,19 @@ Node 版と Worker 版を両方持たない   ⚠ CLAUDE.md § 3。⚠ 必ず片
 
 | ADR | ⚠ どうなるか |
 |---|---|
-| [`0002`](0002-serve-web-and-signaling-from-one-typescript-process.md) | ⚠ **「1 つの Node プロセス」が成り立たなくなる。** ⚠ **ビルドステップが無いという中身も** |
+| [`0002`](0002-serve-web-and-signaling-from-one-typescript-process.md) | ⚠ **半分は もう置き換わった**(2026-09-06)。⚠ **「ビルドステップが無い」は [`0016`](0016-write-the-client-in-typescript-and-ship-built-javascript.md) が、⚠ 移植を待たずに外した。** ⚠ **「1 つの Node プロセス」のほうはまだ効いている** |
 | [`0003`](0003-expose-only-http-and-websocket-through-cloudflare-tunnel.md) | ⚠ **本番では Tunnel を使わない。** ⚠ **実測の手順としては残る**([`../FIELD-TEST.md`](../FIELD-TEST.md)) |
 | [`0009`](0009-use-ws-for-the-websocket-server-rather-than-writing-rfc6455.md) | ⚠ **`ws` が不要になる。** ⚠ **唯一の実行時依存が消える** |
 | [`0010`](0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) | ⚠ **「プロセスが終われば消える」の主語が変わる。** ⚠ **再検討が要る** |
 
 ⚠ **[`0005`](0005-keep-room-state-in-process-memory-only.md) は置き換わらない。**
 ⚠ **「書かない」は移っても守れることを、⚠ 実測で確かめた。**
+⚠ **ただし、⚠ それを守る壁には名前のついた例外が 1 つ在る**(⚠ `src/static.ts` は配るために読む。
+⚠ [`0005`](0005-keep-room-state-in-process-memory-only.md) の冒頭に書いた)。
+
+⚠ **[`0018`](0018-give-the-host-a-short-lived-role-inside-one-room.md) も置き換わらない。**
+⚠ **役割は署名済みの token が運んでおり、⚠ プロセスの記憶に依っていない** — ⚠ **so 移植先でも
+そのまま効く。** ⚠ **`spike/` で、⚠ 発行と検証が workerd 上で無改変に動くことを測った。**
 
 ## 却下した案
 

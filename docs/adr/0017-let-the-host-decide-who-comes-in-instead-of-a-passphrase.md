@@ -1,6 +1,12 @@
 # 0017. 入口を合言葉から Host の招待に変える
 
 - 状態: **決定**
+  — ⚠ **[`0018`](0018-give-the-host-a-short-lived-role-inside-one-room.md) が続きを決めた**(2026-09-06)
+
+> ⚠⚠ **この ADR は「Host が決める」と書いたが、⚠ 「誰が Host か」を書いていなかった。**
+> ⚠ **その隙間から、⚠ 既に中に居る Guest が Host の代わりに決められた**
+> ([kagima#64](https://github.com/hidetzu/kagima/issues/64))。
+> ⚠ **[`0018`](0018-give-the-host-a-short-lived-role-inside-one-room.md) がそこを埋めた。**
 - 日付: 2026-09-06
 - 決めた人: **Owner**
 - ⚠ **[`../PRODUCT.md`](../PRODUCT.md) § 1 の概念を変えた決定である。** ⚠ **最も上位の変更である。**
@@ -153,15 +159,16 @@ challenge        ⚠ 第三者スクリプト。⚠ そして challenge の有�
   ⚠ **URL が漏れる頻度を測っていない。**
 - ⚠ **24 秒は 1 回の観測である。** ⚠ **平均でも最悪でもない。**
 
-## ⚠ これから置き換わるもの(⚠ まだ置き換えていない)
+## ⚠ 置き換えたもの(2026-09-06 に完了)
 
-| | |
+| | ⚠ どうなったか |
 |---|---|
-| [`0004`](0004-exchange-the-passphrase-for-a-short-lived-join-token.md) | ⚠ **合言葉を token に交換する決定。** ⚠ **token 自体は残りうる** — ⚠ **交換の対象が変わる** |
-| [`0007`](0007-say-a-passphrase-in-four-words-chosen-to-be-heard-correctly.md) | ⚠ **4 語の語彙。** ⚠ **入口から消える** |
-| [`../../.claude/rules/security.md`](../../.claude/rules/security.md) §§ 1/3/4 | ⚠ **合言葉・レート制限・join token。** ⚠ **コードが動くまで、⚠ いまの実装に対して有効なままにする** |
-| [`../SPEC.md`](../SPEC.md) | ⚠ **実装が変わってから。** ⚠ **主張は実装より先に動かさない** |
+| [`0004`](0004-exchange-the-passphrase-for-a-short-lived-join-token.md) | ⚠ **置き換え済み。** ⚠ **「合言葉を検証する」半分は効いていない。** ⚠ **「一度だけ確かめ、⚠ 短命な token と交換し、⚠ 以後読み直さない」という 形 だけが残り、⚠ この ADR と [`0018`](0018-give-the-host-a-short-lived-role-inside-one-room.md) が使っている** |
+| [`0007`](0007-say-a-passphrase-in-four-words-chosen-to-be-heard-correctly.md) | ⚠ **終了。** ⚠ **語彙はどこからも使われていない。** ⚠ **`generateShortPassphrase` と `SHORT_ALPHABET` の不在は `docs-check` が押さえている** |
+| [`../../.claude/rules/security.md`](../../.claude/rules/security.md) §§ 1/3/4 | ⚠ **書き換え済み。** ⚠ **§ 1 は「扉に当てる秘密は無い」、⚠ § 3 は「答えは 1 つ」、⚠ § 4 は join token を扱う** |
+| [`../SPEC.md`](../SPEC.md) | ⚠ **書き換え済み。** ⚠ **入口の 2 行が e2e のケース名を伴って在り、⚠ 「合言葉による入室」は 非目標 の表に移った** |
 
-⚠⚠ **`security.md` を今すぐ書き換えない理由:**
-⚠ **コードにはまだ合言葉がある。** ⚠ **拘束は、⚠ 存在するコードに対して正しくなければならない。**
-⚠ **先に書き換えれば、⚠ いま動いているものを誰も縛らなくなる。**
+⚠⚠ **順序は守られた。**
+⚠ **拘束と主張は、⚠ 実装が変わってから 動かした。**
+⚠ **コードに合言葉が在るあいだに `security.md` を書き換えていれば、⚠ その拘束は
+いま動いているものに対して間違っていたことになる。**
