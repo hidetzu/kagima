@@ -229,7 +229,14 @@
         render();
       });
 
-      call = await createCall({ transport, isOfferer: false });
+      // ⚠ **The host does not offer, ⚠ so it does not restart** (`src/call/restart.ts`).
+      //   ⚠ **The answer is still given honestly: ⚠ this page's transport reconnects, ⚠ so it
+      //   ⚠ genuinely can be between sockets** (`src/client/reconnect.ts`).
+      call = await createCall({
+        transport,
+        isOfferer: false,
+        canSignal: () => transport.currentSocket()?.readyState === WebSocket.OPEN,
+      });
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;

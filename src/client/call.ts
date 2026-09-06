@@ -15,6 +15,8 @@
 // ⚠ **So this exposes what a check needs to read frames**, ⚠ **and never reports success on the
 //   ⚠ strength of a state name.**
 
+import { driveRestart } from "../call/restart.ts";
+
 /**
  * ⚠ **STUN only.** ⚠ **TURN is not here, and adding it is not this file's decision** —
  * ⚠ **it costs money continuously, which makes it the owner's** (`docs/PRODUCT.md` § 6, kagima#16).
@@ -47,6 +49,13 @@ export type CallState = {
   /** ⚠ **What ICE actually produced**, kept so a report can say it rather than assume it. */
   readonly candidateTypes: readonly string[];
   readonly remoteTrackCount: number;
+  /**
+   * ⚠ **How many times this side has re-offered with ICE restarted** (kagima#89).
+   *
+   * ⚠ **Counted after the offer is sent, ⚠ not when one is decided on** — ⚠ **"we tried" and
+   * ⚠ "we meant to" are different facts** (`.claude/rules/evidence.md`).
+   */
+  readonly iceRestarts: number;
 };
 
 export type Call = {
@@ -67,6 +76,18 @@ export type CallOptions = {
   readonly iceServers?: RTCIceServer[];
   /** ⚠ Injected so a check can run without a camera. ⚠ The default is the real one. */
   readonly getMedia?: () => Promise<MediaStream>;
+  /**
+   * ⚠⚠ **Whether an offer sent right now would actually leave this page** (kagima#89).
+   *
+   * ⚠ **The page owns the socket, ⚠ not this file.** ⚠ **Defaulting to "yes" keeps every existing
+   * caller behaving exactly as it did** — ⚠ **and a caller that does not pass it gets a recovery
+   * that may spend attempts into a closed socket, ⚠ which is why both pages pass it.**
+   */
+  readonly canSignal?: () => boolean;
+  /** ⚠ Injected so a check does not wait out real seconds. */
+  readonly wait?: (ms: number) => Promise<void>;
+  /** ⚠ **The bound on recovery attempts.** ⚠ Its length is the bound (`src/call/restart.ts`). */
+  readonly restartDelaysMs?: readonly number[];
 };
 
 /** ⚠ **The only call to `getUserMedia` in kagima.** ⚠ It asks for both, because a call is both. */
@@ -173,6 +194,46 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
     }
   });
 
+  // ⚠⚠ **Getting the media path back when it fails and the signalling path has not**
+  //   (`docs/adr/0026`, kagima#89).
+  //
+  // ⚠ **Measured on 2026-09-06: ⚠ a real call sat in `failed` for 48.6 seconds while both ends'
+  //   ⚠ signalling sockets stayed open and answered every heartbeat.** ⚠ **Everything needed to
+  //   ⚠ re-negotiate was on both machines, ⚠ and nothing reached for it.**
+  //
+  // ⚠ **`failed` rather than `disconnected`**: ⚠ **`disconnected` heals on its own, ⚠ and acting
+  //   ⚠ on it would tear down connections that were about to be fine.**
+  // ⚠ **Only the offerer restarts**, ⚠ **for the same reason only the offerer starts: ⚠ two
+  //   ⚠ offers in flight is glare.** ⚠ **The offerer sees `failed` too — ⚠ it is one connection.**
+  //   ⚠ **The case this cannot cover is the offerer's page being gone, ⚠ which is kagima#90.**
+  let iceRestarts = 0;
+  // ⚠ **One sequence at a time, ⚠ and once spent it is not re-armed until the call is back.**
+  //   ⚠ **Without this, ⚠ every `connectionstatechange` would start another sequence.**
+  let recovering = false;
+  let spent = false;
+  const world = {
+    connectionState: () => pc.connectionState as string,
+    canSignal: options.canSignal ?? (() => true),
+    wait: options.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))),
+    offerAgain: async () => {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      options.transport.send({ type: "offer", sdp: offer.sdp ?? "" });
+      // ⚠ After the send. ⚠ Counting before it would count an offer that never left.
+      iceRestarts += 1;
+    },
+  };
+  pc.addEventListener("connectionstatechange", () => {
+    if (pc.connectionState !== "failed") return;
+    if (!options.isOfferer || recovering || spent) return;
+    recovering = true;
+    void driveRestart(world, options.restartDelaysMs).then((outcome) => {
+      // ⚠ `gone` is not a failure to recover — ⚠ somebody hung up. ⚠ Neither re-arms anything.
+      if (outcome === "exhausted") spent = true;
+      recovering = false;
+    });
+  });
+
   return {
     pc,
     localStream,
@@ -189,6 +250,7 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
         iceConnectionState: pc.iceConnectionState,
         candidateTypes: [...candidateTypes],
         remoteTrackCount: remoteStream.getTracks().length,
+        iceRestarts,
       };
     },
     hangUp() {
