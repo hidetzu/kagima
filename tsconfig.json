@@ -25,6 +25,7 @@
     "test/reconnecting-transport.test.ts",
     "test/remember.test.ts",
     "src/worker.ts",
-    "src/room-object.ts"
+    "src/room-object.ts",
+    "worker-gate"
   ]
 }

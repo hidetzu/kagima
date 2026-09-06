@@ -60,7 +60,12 @@ export type SessionOptions = {
  * the process** — ⚠ **which is one in production and several in the checks, ⚠ where it leaked one
  * room's line into another's measurement.**
  */
-export const createSessions = (options: SessionOptions) => {
+/** ⚠ **What an adapter is handed.** ⚠ Named so the two adapters share one shape. */
+export type Sessions = {
+  open(socket: SignalingSocket, roomId: string, sessionId: string, role?: Role): void;
+};
+
+export const createSessions = (options: SessionOptions): Sessions => {
   const now = options.now ?? Date.now;
   const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
 
@@ -171,7 +176,10 @@ export const createSessions = (options: SessionOptions) => {
       socket.send(pingLine(pingNumber));
     }, heartbeatMs);
     // ⚠ Never hold the process open for a heartbeat.
-    beat.unref?.();
+    // ⚠ **Node's timer has `unref`; ⚠ a Worker's is a number and has none.** ⚠ **The `?.` is
+    //   ⚠ what makes one line work on both** — ⚠ **and the cast is what lets both type-checks
+    //   ⚠ see it** (`npm run check`: ⚠ `types` and `types-worker`).
+    (beat as { unref?: () => void }).unref?.();
 
     socket.on({
       // ⚠ Signalling is text. ⚠ The frame's content is never looked at — ⚠ so nothing a stranger

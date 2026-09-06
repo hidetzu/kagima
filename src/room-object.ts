@@ -22,7 +22,9 @@ import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
 import { randomToken } from "./random.ts";
 import { createRoomStore, type Room } from "./room/store.ts";
 import { type Context, handle } from "./server.ts";
+import { upgrade, workerSocketPair } from "./signaling/attach-worker.ts";
 import { createHub } from "./signaling/hub.ts";
+import { createSessions, type Sessions } from "./signaling/session.ts";
 
 /** ⚠ **The one key.** ⚠ **One room per object, ⚠ so there is nothing to key by.** */
 const KEY = "room";
@@ -63,6 +65,7 @@ export class RoomObject {
   env: RoomEnv;
 
   private ctx: Context | null = null;
+  private sessions: Sessions | null = null;
   /** ⚠ **The id this object is holding.** ⚠ Learned from the Worker, ⚠ never from a caller. */
   private roomId: string | null = null;
 
@@ -107,6 +110,22 @@ export class RoomObject {
     const held = await this.state.storage.get<Room>(KEY);
     if (held !== undefined) store.add(held);
 
+    // ⚠⚠ **The heartbeat moves `lastSeenAt`, ⚠ and that is what keeps the room alive**
+    //   (`docs/adr/0010`, `docs/adr/0023`).
+    // ⚠ **It happens on a timer, ⚠ outside any request** — ⚠ **so writing only after `fetch`
+    //   ⚠ would leave the moved value in memory and lose it at the next eviction.**
+    this.sessions = createSessions({
+      hub: ctx.hub,
+      secret: ctx.secret,
+      knocks: ctx.knocks,
+      touch: (id) => {
+        ctx.store.touch(id);
+        // ⚠ Not awaited: ⚠ a heartbeat must not wait on storage, ⚠ and a failed write only
+        //   ⚠ means the room ages from the last one that landed.
+        void this.persist(null, ctx.store.get(id) ?? null);
+      },
+    });
+
     this.ctx = ctx;
     return ctx;
   }
@@ -139,6 +158,22 @@ export class RoomObject {
     this.roomId = roomId;
 
     const ctx = await this.context(roomId);
+
+    // ⚠⚠ **The signalling socket** (`src/signaling/attach-worker.ts`).
+    //
+    // ⚠ **`handle` does not do WebSocket on either platform** — ⚠ **Node has `attachSignaling`,
+    //   ⚠ and this is the same seam here.** ⚠ **Both go through `authorizeUpgrade`, ⚠ so the one
+    //   ⚠ refusal is the one refusal** (`.claude/rules/security.md` § 3).
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      const sessions = this.sessions;
+      if (sessions === null) return new Response(null, { status: 401 });
+      return upgrade(request, {
+        sessions,
+        secret: ctx.secret,
+        pair: workerSocketPair,
+      });
+    }
+
     const before = ctx.store.get(roomId) ?? null;
 
     const answer = await handle(ctx, request);

@@ -184,11 +184,31 @@ const CASES = [
       const wf = ".github/workflows/ci.yml";
       if (!existsSync(join(ROOT, wf))) return { ok: false, said: `${wf} is missing` };
       const scripts = JSON.parse(read("package.json")).scripts ?? {};
-      // ⚠ The names that mean "a verification tier", not every script.
-      const entry = Object.keys(scripts).filter((n) => /^(check|e2e|external)(:|$)/.test(n));
+      // ⚠ Which scripts are a verification tier, ⚠ and which are not.
+      //
+      // ⚠⚠ **Named by what they are NOT**, ⚠ because the list that grows is the tiers.
+      // ⚠ **It used to name the tiers instead** — ⚠ **`/^(check|e2e|external)$/`** — ⚠ **and when
+      //   ⚠ `npm run worker` was added on 2026-09-06 the case passed while saying
+      //   ⚠ "(check, e2e, external)", ⚠ which read as covering it.**
+      // ⚠ **A list of exceptions goes stale loudly** (⚠ a new tier is caught);
+      //   ⚠ **a list of members goes stale silently** (⚠ a new tier is skipped).
+      const NOT_A_TIER = ["build", "dev", "start", "prepare", "postinstall"];
+      const entry = Object.keys(scripts).filter((n) => !NOT_A_TIER.includes(n.split(":")[0]));
       if (entry.length === 0) return { ok: false, said: "package.json declares no tier entry point — nothing to hold CI to" };
+      // ⚠⚠ **A command, ⚠ not a mention.**
+      //
+      // ⚠ **This used to search the whole file for the string.** ⚠ **Two things satisfied it
+      //   ⚠ without running anything** (⚠ both found by mutation, 2026-09-06):
+      //
+      // ```text
+      // - name: npm run e2e                                    ⚠ a label
+      // ... || echo "npm run e2e — did not reach it"            ⚠ the report that says it did NOT run
+      // ```
+      //
+      // ⚠⚠ **So the case could not fail, ⚠ for any tier, ⚠ ever.**
+      // ⚠ **A command starts its own line.** ⚠ **A label and an `echo` do not.**
       const yml = read(wf);
-      const missing = entry.filter((n) => !yml.includes(`npm run ${n}`));
+      const missing = entry.filter((n) => !new RegExp(`^\\s*npm run ${n}\\b`, "m").test(yml));
       return missing.length
         ? { ok: false, said: `${wf} never runs ${missing.map((n) => `npm run ${n}`).join(", ")} — a tier would be silently absent from CI` }
         : { ok: true, said: `${wf} runs every tier entry point package.json declares (${entry.join(", ")})` };
