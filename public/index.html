@@ -79,20 +79,26 @@
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
   import { connectReconnecting } from "/client/reconnect.js";
+  import { forget, recall, remember } from "/client/remember.js";
   import { hostStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const status = $("status");
 
-  // ⚠ Held here and nowhere else. ⚠ No storage, no URL, no cookie (docs/adr/0005).
   let room = null;
   let call = null;
 
-  $("create").addEventListener("click", async () => {
+  // ⚠⚠ **Opening the room, ⚠ whether it was just made or is being come back to**
+  //   (`docs/adr/0021`, kagima#75).
+  //
+  // ⚠ **One path for both.** ⚠ **A second one would drift, ⚠ and the one that drifts is the
+  //   ⚠ rarely-taken one** — ⚠ **which here is the one that runs after a phone put the tab away.**
+  const openTheRoom = async () => {
     $("create").disabled = true;
     try {
-      room = await createRoom();
-      $("share-url").textContent = room.shareUrl;
+      // ⚠ The share URL is rebuilt rather than remembered. ⚠ It follows from the room id, ⚠ and a
+      //   ⚠ remembered one would go stale the moment the address changes.
+      $("share-url").textContent = new URL(`/r/${room.roomId}`, location.origin).toString();
       $("before").hidden = true;
       $("after").hidden = false;
 
@@ -209,6 +215,8 @@
         closedCode ??= code;
         noteSocketClosed(code);
         if (code === 4005) {
+          // ⚠⚠ The room is over. ⚠ Its key opens nothing now (`docs/adr/0021`).
+          forget();
           call?.hangUp();
           ending = outranks(ending, "closed");
           render();
@@ -306,12 +314,41 @@
       $("before").hidden = true;
       $("after").hidden = false;
     }
+  };
+
+  // ⚠⚠ **Made now.** ⚠ **Written down before anything can go wrong with the socket** —
+  //   ⚠ **a room that exists and is not remembered is a room its own Host cannot get back to.**
+  $("create").addEventListener("click", async () => {
+    room = await createRoom();
+    remember(room);
+    await openTheRoom();
   });
+
+  // ⚠⚠ **Came back to a page the browser threw away** (kagima#75, measured 2026-09-06).
+  //
+  // ⚠ **The room may be gone** — ⚠ **closed, ⚠ or expired.** ⚠ **Then the key opens nothing and
+  //   ⚠ is dropped**, ⚠ **and the person sees the ordinary first screen rather than an error
+  //   ⚠ about something they never did** (`CLAUDE.md` § 4-1).
+  const comeBack = async () => {
+    const kept = recall();
+    if (kept === null) return;
+    try {
+      // ⚠ Asking is the check. ⚠ There is no "does this room exist" endpoint, on purpose
+      //   (`docs/adr/0017`), ⚠ and this is the Host's own key rather than a guess.
+      await hostSession(kept.roomId, kept.hostKey);
+    } catch {
+      forget();
+      return;
+    }
+    room = { roomId: kept.roomId, hostKey: kept.hostKey };
+    await openTheRoom();
+  };
+  void comeBack();
 
   // ⚠ One control, one thing. ⚠ The URL is the only thing there is to hand over now
   //   (`docs/adr/0017`).
   $("copy-url").addEventListener("click", async () => {
-    $("copy-url").textContent = (await copyOne(room.shareUrl))
+    $("copy-url").textContent = (await copyOne($("share-url").textContent))
       ? "URL をコピーしました"
       : "コピーできませんでした。手で選んでください";
   });
@@ -319,6 +356,8 @@
   $("close").addEventListener("click", async () => {
     if (room === null) return;
     await closeRoom(room.roomId, room.hostKey);
+    // ⚠⚠ The room is over. ⚠ Holding its key is how one becomes a pile (`docs/adr/0021`).
+    forget();
     call?.hangUp();
     // ⚠ Through the one writer, like everything else on this line.
     ending = outranks(ending, "closed");

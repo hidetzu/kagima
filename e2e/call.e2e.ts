@@ -974,3 +974,67 @@ test(titleOf("shadow-heartbeat"), async () => {
   await host.context.close();
   await guest.context.close();
 });
+
+test(titleOf("host-comes-back-to-a-thrown-away-page"), async () => {
+  // ⚠⚠ **Measured on a real phone on 2026-09-06** (kagima#75):
+  //   ⚠ **the browser discarded the backgrounded tab and reloaded it from scratch.**
+  // ⚠ **The Host's key was a variable, ⚠ so it went with the page** — ⚠ **and the room stayed
+  //   ⚠ alive on the server with nobody able to open its door.**
+  //
+  // ⚠ **`page.reload()` is that, ⚠ exactly: ⚠ every variable gone, ⚠ the socket gone, ⚠ the
+  //   ⚠ document built again from nothing.** ⚠ **What survives is what was written down.**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const before = host.shareUrl;
+
+  // ⚠ Somebody knocks while the Host still has the page. ⚠ Then the page is thrown away.
+  const guest = await openGuest(b, before, "アン");
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === false,
+    undefined,
+    {
+      timeout: 20_000,
+    },
+  );
+
+  await host.page.reload({ waitUntil: "domcontentloaded" });
+  console.log("  observed: the page was thrown away and built again");
+
+  // ⚠⚠ Waited for, ⚠ not slept through. ⚠ The share URL is empty on a fresh page, ⚠ so this is
+  //   ⚠ false until the Host is actually back in its own room.
+  await host.page.waitForFunction(
+    (expected) => (document.getElementById("share-url")?.textContent ?? "") === expected,
+    before,
+    { timeout: 20_000 },
+  );
+  console.log("  observed: the Host is back in the same room");
+
+  // ⚠ And the person who was waiting is shown again (`docs/adr/0019`).
+  await host.page.waitForFunction(
+    () => (document.getElementById("door-who")?.textContent ?? "").includes("アン"),
+    undefined,
+    { timeout: 20_000 },
+  );
+  console.log(`  observed: the door still shows "${await text(host.page, "door-who")}"`);
+
+  // ⚠⚠ **What is on the device, ⚠ read as text.** ⚠ **Two strings, ⚠ and nothing that is a
+  //   ⚠ secret with a lifetime** (`.claude/rules/security.md` § 4).
+  const kept = await host.page.evaluate(() => JSON.stringify(localStorage));
+  console.log(`  observed: the device holds ${kept}`);
+  assert.doesNotMatch(kept, /token/i, `a token is on the device: ${kept}`);
+  assert.doesNotMatch(kept, /アン/, `somebody's name is on the device: ${kept}`);
+
+  // ⚠ Closing the room takes the key with it. ⚠ A dead key is how one becomes a pile.
+  //
+  // ⚠⚠ **Two paths reach this**: ⚠ **the button, ⚠ and the 4005 the server sends back.**
+  // ⚠ **A mutation showed that removing either one alone left this green** — ⚠ **so this case
+  //   ⚠ asserts that the key is gone, ⚠ not which path took it.**
+  // ⚠ **`test/remember.test.ts` carries the smaller claim that forgetting twice is the same as
+  //   ⚠ forgetting once.**
+  await host.page.click("#close");
+  await host.page.waitForFunction(() => localStorage.length === 0, undefined, { timeout: 20_000 });
+  console.log("  observed: closing the room left nothing on the device");
+
+  await host.context.close();
+  await guest.context.close();
+});

@@ -31,6 +31,7 @@ const SOURCES = [
   "src/client/call.ts",
   "src/client/reconnect.ts",
   "src/client/lifecycle.ts",
+  "src/client/remember.ts",
   "src/client/transport.ts",
   "src/client/diagnostics.ts",
   "src/status/status.ts",
