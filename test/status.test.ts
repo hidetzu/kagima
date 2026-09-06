@@ -113,11 +113,19 @@ test("⚠⚠ both pages listen before the camera prompt, and remember what arriv
   //   ⚠ "we never saw it close", ⚠ not "it stayed open".**
   // ⚠⚠ **Fake cameras grant instantly, ⚠ so no browser check could have found this.**
   //   ⚠ **This one is held in source, ⚠ by order.**
-  for (const page of ["public/index.html", "public/room.html"]) {
+  // ⚠ Two ways to hear it, ⚠ and the claim is about the order, ⚠ not about the name.
+  //   ⚠ The Host reconnects, ⚠ so its page hears "there is no coming back" rather than
+  //   ⚠ "the socket closed" (kagima#70, `src/client/reconnect.ts`).
+  //   ⚠ The Guest's page still listens to the socket itself.
+  const HEARS_IT = [
+    { page: "public/index.html", needle: "transport.onGaveUp(" },
+    { page: "public/room.html", needle: 'socket.addEventListener("close"' },
+  ];
+  for (const { page, needle } of HEARS_IT) {
     const code = (await readFile(page, "utf8")).replace(/^\s*\/\/.*$/gm, "");
-    const listen = code.indexOf('socket.addEventListener("close"');
+    const listen = code.indexOf(needle);
     const slow = code.indexOf("await createCall");
-    assert.ok(listen >= 0, `${page} never listens for the socket closing`);
+    assert.ok(listen >= 0, `${page} never listens for the socket going away (${needle})`);
     assert.ok(slow >= 0, `${page} does not await createCall — this check needs rewriting`);
     assert.ok(
       listen < slow,

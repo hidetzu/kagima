@@ -93,7 +93,11 @@ const ready = async (): Promise<{
  *
  * ⚠ **Media does not pass through here.** ⚠ **It never touches us at all** (`docs/adr/0001`).
  */
-const behindAProxy = async (): Promise<{ base: string; dropTheNetwork: () => void }> => {
+const behindAProxy = async (): Promise<{
+  base: string;
+  dropTheNetwork: () => void;
+  cutEverythingOpen: () => void;
+}> => {
   const upstream = nextPort++;
   const front = nextPort++;
   const base = `http://127.0.0.1:${front}`;
@@ -130,6 +134,16 @@ const behindAProxy = async (): Promise<{ base: string; dropTheNetwork: () => voi
       //   ⚠ from the browser this is the network going, ⚠ which is what it is.
       proxy.close();
       for (const socket of live) socket.destroy();
+    },
+    /**
+     * ⚠⚠ **A blip, ⚠ not an outage** (kagima#70).
+     *
+     * ⚠ **Everything open is cut, ⚠ and the door is left open for whatever comes next.**
+     * ⚠ **`dropTheNetwork` cannot stand in for this: ⚠ it stops accepting, ⚠ so a page that
+     * ⚠ tries to come back has nowhere to come back to.**
+     */
+    cutEverythingOpen() {
+      for (const socket of live.splice(0)) socket.destroy();
     },
   };
 };
@@ -555,10 +569,17 @@ test(titleOf("signalling-drops"), async () => {
   //   ⚠ to Worker + Durable Objects (kagima#49).
   dropTheNetwork();
 
+  // ⚠⚠ **The Host now tries to come back before saying anything** (kagima#70).
+  //
+  // ⚠ **So this is no longer "the socket closed" — ⚠ it is "it closed, ⚠ we tried the whole
+  //   ⚠ budget, ⚠ and nothing came back".** ⚠ **The wait has to outlast the budget**
+  //   (`RETRY_DELAYS_MS` in `src/client/reconnect.ts`).
+  // ⚠ **The budget is not shortened to make this quicker** — ⚠ **that would be tuning a product
+  //   ⚠ value to fit a check** (`.claude/rules/verification.md`).
   await host.page.waitForFunction(
     () => (document.getElementById("status")?.textContent ?? "").includes("切れました"),
     undefined,
-    { timeout: 15_000 },
+    { timeout: 60_000 },
   );
   const said = await text(host.page, "status");
   console.log(`  observed: the host was told "${said}"`);
@@ -840,4 +861,59 @@ test(titleOf("third-person"), async () => {
   await host.context.close();
   await guest.context.close();
   await third.context.close();
+});
+
+test(titleOf("the-host-comes-back"), async () => {
+  // ⚠⚠ **The Host's socket dropping used to be the end of the Host** (kagima#70).
+  //
+  // ⚠ **Observed before this existed: ⚠ a knock arriving while the Host was away reached nobody,
+  //   ⚠ and the announcement is sent once.** ⚠ **The knock itself was still in `knocks`, ⚠ and the
+  //   ⚠ person was still standing there** — ⚠ **only the Host had no way to learn it.**
+  //
+  // ⚠ **Two claims that only a browser can carry:**
+  //   ⚠ **1. the page comes back on its own, ⚠ and is told who is at the door**
+  //   ⚠ **2. the tracks are not stopped on the way** (`docs/adr/0010`)
+  const { browser: b } = await ready();
+  const { base, cutEverythingOpen } = await behindAProxy();
+
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  const framesBefore = await waitForFrames(host.page, "the host");
+
+  // ⚠⚠ A blip. ⚠ Everything open is cut; ⚠ the door is left open for whatever comes next.
+  cutEverythingOpen();
+  console.log("  observed: every open socket was cut");
+
+  // ⚠ Somebody knocks while the Host is away. ⚠ This is the case's whole reason for existing.
+  const stranger = await openGuest(b, host.shareUrl, "とおりすがり");
+
+  // ⚠ Waited for, ⚠ not slept through: ⚠ the door appearing IS the page having come back.
+  //   ⚠ It is false until it happens, ⚠ so it cannot pass on something that was already true.
+  await host.page.waitForFunction(
+    () => (document.getElementById("door-who")?.textContent ?? "").includes("とおりすがり"),
+    undefined,
+    { timeout: 40_000 },
+  );
+  console.log(
+    `  observed: the Host came back and was shown "${await text(host.page, "door-who")}"`,
+  );
+
+  // ⚠⚠ The call never stopped. ⚠ Media goes browser to browser and does not need us
+  //   (`docs/adr/0001`, `docs/adr/0003`). ⚠ Stopping the tracks on a reconnect would be us
+  //   ⚠ ending a call nobody ended.
+  const framesAfter = await waitForFrames(host.page, "the host");
+  console.log(`  observed: frames decoded ${framesBefore} before the cut, ${framesAfter} after`);
+  assert.ok(
+    framesAfter > framesBefore,
+    `the call stopped across the reconnect (${framesBefore} -> ${framesAfter})`,
+  );
+
+  // ⚠ And nothing alarming was said, ⚠ because nothing was broken (Owner decision, 2026-09-06).
+  const said = await text(host.page, "status");
+  assert.doesNotMatch(said, /つながりが切れました/, `the Host was told the call broke: ${said}`);
+
+  await host.page.context().close();
+  await guest.page.context().close();
+  await stranger.page.context().close();
 });

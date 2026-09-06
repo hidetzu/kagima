@@ -78,7 +78,7 @@
   import { classifyMediaError, createCall } from "/client/call.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
-  import { connectSignaling } from "/client/transport.js";
+  import { connectReconnecting } from "/client/reconnect.js";
   import { hostStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
@@ -99,8 +99,15 @@
       // ⚠ The Host's own way in came with the room (`docs/adr/0017`). ⚠ There is nothing to exchange.
       // ⚠⚠ **The Host connects with a host role, ⚠ not with the token creation handed back**
       //   (`docs/adr/0018`). ⚠ **Only this one opens its own door.**
-      const token = await hostSession(room.roomId, room.hostKey);
-      const transport = await connectSignaling(room.roomId, token);
+      // ⚠⚠ **A transport that comes back** (kagima#70).
+      //
+      // ⚠ **A fresh host session on every attempt** — ⚠ **a join token is short-lived, ⚠ so the
+      //   ⚠ one that worked before the socket dropped is the one that will not work now**
+      //   (`docs/adr/0018`). ⚠ **`hostKey` never leaves this page except to that endpoint.**
+      const transport = await connectReconnecting({
+        roomId: room.roomId,
+        token: () => hostSession(room.roomId, room.hostKey),
+      });
 
       // ⚠ Listen BEFORE anything slow. ⚠ `createCall` awaits getUserMedia, and the guest can
       //   ⚠ arrive and say hello while that is still running — ⚠ a handler registered afterwards
@@ -192,10 +199,16 @@
       //   ⚠ 4005 is the room being over. ⚠ Anything else is this connection going away, which
       //   ⚠ may come back. ⚠ Saying "ended" for the second one would be telling the person
       //   ⚠ something we do not know.
-      transport.socket.addEventListener("close", (event) => {
-        closedCode ??= event.code;
-        noteSocketClosed(event.code);
-        if (event.code === 4005) {
+      // ⚠⚠ **Only when there is no coming back** (kagima#70).
+      //
+      // ⚠ **Nothing is said while it is being fixed.** ⚠ **A blip would otherwise put
+      //   ⚠ "つながりが切れました" on screen for something that is about to be fine** — ⚠ **and
+      //   ⚠ that sentence is about the call, ⚠ which never stopped** (`CLAUDE.md` § 4-1).
+      // ⚠ **Owner decision, 2026-09-06: ⚠ show nothing while retrying.**
+      transport.onGaveUp((code) => {
+        closedCode ??= code;
+        noteSocketClosed(code);
+        if (code === 4005) {
           call?.hangUp();
           ending = outranks(ending, "closed");
           render();
