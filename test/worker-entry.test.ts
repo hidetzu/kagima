@@ -66,12 +66,34 @@ test("⚠ the Worker never reads a path the caller sent", async () => {
   );
 });
 
-test("⚠ the Worker says what is not built yet, ⚠ rather than what is unavailable", async () => {
-  // ⚠ `CLAUDE.md` § 4-1. ⚠ "not implemented yet" leaves a reason to come back; ⚠ "unavailable"
-  //   ⚠ reads as something broken on the reader's side.
+test("⚠⚠ the Worker never decides anything a room decides", async () => {
+  // ⚠⚠ **The whole point of the seam** (`CLAUDE.md` § 3).
+  // ⚠ **`handle` knows about the door, the host key, the knock and the one answer.**
+  // ⚠ **This file knows about bindings.** ⚠ **A rule that appeared here would be a second copy,
+  //   ⚠ and the second copy is the one that drifts.**
   const code = codeOf(await readFile("src/worker.ts", "utf8"));
-  assert.match(code, /501/, "the API routes do not say they are not built yet");
-  assert.match(code, /まだ動いていません/, "the wording does not say what it is");
+
+  for (const [what, pattern] of [
+    ["the host key", /hostKey/],
+    ["the door", /knock/i],
+    ["tokens", /issueJoinToken|verifyJoinToken/],
+    ["the room store", /createRoomStore/],
+  ] as const) {
+    assert.doesNotMatch(code, pattern, `the Worker decides something about ${what}`);
+  }
+});
+
+test("⚠⚠ the room's name is minted before the room, and the collision check did not move", async () => {
+  // ⚠ **A Durable Object is addressed by name** (`docs/adr/0022`), ⚠ **so the name comes first.**
+  // ⚠ **That is the one thing this file does that Node does not** — ⚠ **and it must not become
+  //   ⚠ a second id generator, ⚠ nor a second retry rule.**
+  const code = codeOf(await readFile("src/worker.ts", "utf8"));
+
+  assert.match(code, /generateRoomId\(\)/, "the Worker mints ids some other way");
+  assert.match(code, /MAX_ID_ATTEMPTS/, "the Worker has its own retry count");
+  assert.doesNotMatch(code, /randomToken\(/, "the Worker draws ids past the one seam");
+  // ⚠ And the refusal it retries on is the one `handle` gives, ⚠ not a shape of its own.
+  assert.match(code, /status !== 503/, "the Worker reads a refusal some other way");
 });
 
 test("⚠⚠ the Worker is platform-free about everything except its bindings", async () => {
@@ -86,4 +108,43 @@ test("⚠⚠ the Worker is platform-free about everything except its bindings", 
   ] as const) {
     assert.doesNotMatch(code, pattern, `the Worker reaches for ${what}`);
   }
+});
+
+test("⚠⚠ a caller cannot choose which room it is talking to", async () => {
+  // ⚠⚠ **The room's name is set here, ⚠ overwriting whatever arrived** (`src/room-object.ts`).
+  // ⚠ **Without that, ⚠ anyone could send a header and be handed another room's object** —
+  //   ⚠ **and the object would believe it, ⚠ because only this file can reach it.**
+  // ⚠ **A mutation that respected an incoming header passed every other check.**
+  const { default: worker } = await import("../src/worker.ts");
+  const { ROOM_HEADER } = await import("../src/room-object.ts");
+
+  const asked: string[] = [];
+  const env = {
+    ASSETS: { fetch: async () => new Response(null, { status: 404 }) },
+    ROOM: {
+      idFromName: (name: string) => {
+        asked.push(name);
+        return name;
+      },
+      get: () => ({
+        fetch: async (request: Request) =>
+          new Response(JSON.stringify({ sawHeader: request.headers.get(ROOM_HEADER) }), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+          }),
+      }),
+    },
+  } as never;
+
+  const forged = new Request("http://127.0.0.1:9096/api/rooms/aaaaaaaaaaaaaaaa/knock", {
+    method: "POST",
+    body: JSON.stringify({ nickname: "アン" }),
+  });
+  forged.headers.set(ROOM_HEADER, "bbbbbbbbbbbbbbbb");
+
+  const answer = await worker.fetch(forged, env);
+  const { sawHeader } = (await answer.json()) as { sawHeader: string };
+
+  console.log(`  observed: the caller asked for bbbb…, the object was told ${sawHeader}`);
+  assert.equal(sawHeader, "aaaaaaaaaaaaaaaa", "a caller chose the room by sending a header");
+  assert.deepEqual(asked, ["aaaaaaaaaaaaaaaa"], "the object addressed was not the one in the path");
 });

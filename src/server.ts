@@ -18,7 +18,7 @@ import {
 } from "./knock/knocks.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
-import { createRoom } from "./room/create-room.ts";
+import { createRoom, defaultDeps as defaultCreateRoomDeps } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
 import { createRoomStore, type RoomStore } from "./room/store.ts";
 import { createHub, type Hub } from "./signaling/hub.ts";
@@ -56,6 +56,18 @@ export type Context = {
    * caller carries on routing after the first.**
    */
   readonly asset: (pathname: string) => Promise<Response | null>;
+  /**
+   * ⚠⚠ **The id a new room must take** (`docs/adr/0022`).
+   *
+   * ⚠ **On Cloudflare a Durable Object is addressed by name, ⚠ so the id has to exist before the
+   * room does** — ⚠ **the caller mints it, ⚠ then talks to that object.**
+   * ⚠ **`undefined` means "mint one here", ⚠ which is what Node does.**
+   *
+   * ⚠ **The collision check does not move**: ⚠ **`store.add` still refuses rather than
+   * overwrites, ⚠ so an id that is already a live room is refused and the caller retries**
+   * (`src/room/create-room.ts`).
+   */
+  readonly newRoomId?: () => string;
   readonly store: RoomStore;
   readonly baseUrl: string;
   readonly secret: string;
@@ -188,7 +200,13 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
       return json(405, { error: "rooms are created with POST" }, { allow: "POST" });
     }
     try {
-      const { room, shareUrl } = createRoom(ctx.store, ctx.baseUrl);
+      const { room, shareUrl } = createRoom(
+        ctx.store,
+        ctx.baseUrl,
+        ctx.newRoomId === undefined
+          ? undefined
+          : { ...defaultCreateRoomDeps, newId: ctx.newRoomId },
+      );
       // ⚠⚠ **The host key and the host's own token are handed over here and never again.**
       // ⚠ **There is no passphrase** (`docs/adr/0017`) — ⚠ **who comes in is the Host's decision,
       //   ⚠ and the Host is the one asking.**
