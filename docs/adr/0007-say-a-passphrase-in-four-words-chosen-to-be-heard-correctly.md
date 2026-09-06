@@ -1,6 +1,16 @@
 # 0007. 合言葉は「正しく聞き取れること」を基準に選んだ語を 4 語つなげる
 
-- 状態: **決定**
+- 状態: ⚠ **終了**(2026-09-06)
+  — ⚠ **[`0017`](0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md) が入口から
+  合言葉そのものを外した。**
+
+> ⚠⚠ **入口に合言葉は無い。** ⚠ **この ADR が決めた語彙は、⚠ どこからも使われていない。**
+> ⚠ **`.claude/tools/docs-check.mjs` の `retired-mechanism-is-absent` が、
+> ⚠ [`0014`](0014-retire-the-field-test-mode-now-that-kagima-16-is-closed.md) の一覧を通じて
+> ⚠ `generateShortPassphrase` と `SHORT_ALPHABET` の不在を押さえている。**
+>
+> ⚠ **残しておく理由: ⚠ 「口で言えること」を基準に語を選ぶ、という判断の記録である。**
+> ⚠ **同じ問いがまた出たとき、⚠ ここに答えが在る。**
 - 日付: 2026-09-04
 
 ## 決定
