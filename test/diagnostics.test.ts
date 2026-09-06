@@ -15,6 +15,7 @@ import {
   type Snapshot,
   selectedPairIdOf,
   verdictOf,
+  outagesOf,
 } from "../src/diagnostics/report.ts";
 import { codeOf } from "./source-text.ts";
 
@@ -36,6 +37,8 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   // ⚠ Absent unless a case asks for it. ⚠ Every case that predates the shadow heartbeat keeps
   //   ⚠ reporting exactly what it reported before (`docs/adr/0020`).
   heartbeat: null,
+  // ⚠ When this snapshot was taken, ⚠ on the same clock as `transitions` (kagima#91).
+  atMs: 60_000,
   ...over,
 });
 
@@ -377,5 +380,106 @@ test("a socket that stayed open, and one that did not, read differently", () => 
   assert.match(
     formatReport(snapshot({ socketClosed: { code: 1006, at: 21_000 } })),
     /closed \(code 1006\) at 21000ms/,
+  );
+});
+
+// ── ⚠⚠ how much of the time there was no media (kagima#91) ──────────────────
+//
+// ⚠ **A panel said `verdict: frames, held` and `held for: 1121s` for a call that had been down
+//   ⚠ for most of ten minutes of it.** ⚠ **`heldMs` is a wall clock from the first frame and
+//   ⚠ never looked at whether media was flowing.**
+
+const down = (at: number, value: string) => ({ at, what: "connectionState", value });
+
+test("⚠ a call that never dropped says so, rather than saying nothing", () => {
+  const s = snapshot({ transitions: [down(100, "connected")], atMs: 60_000 });
+  assert.deepEqual(outagesOf(s), { count: 0, totalMs: 0, longestMs: 0, openAtEnd: false });
+  assert.match(formatReport(s), /of which no media: none — it never dropped/);
+});
+
+test("⚠⚠ `disconnected` then `failed` is one outage, not two", () => {
+  // ⚠ Measured 2026-09-06: ⚠ Chromium took 10.0 seconds to go from one to the other, ⚠ four
+  //   ⚠ times out of four. ⚠ Counting that as two drops would double every count kagima makes.
+  const s = snapshot({
+    transitions: [
+      down(1_000, "connected"),
+      down(11_000, "disconnected"),
+      down(21_000, "failed"),
+      down(31_000, "connected"),
+    ],
+    atMs: 40_000,
+  });
+  assert.deepEqual(outagesOf(s), {
+    count: 1,
+    totalMs: 20_000,
+    longestMs: 20_000,
+    openAtEnd: false,
+  });
+});
+
+test("⚠⚠ an outage that has not ended runs to the moment the panel was read", () => {
+  const s = snapshot({
+    transitions: [down(1_000, "connected"), down(11_000, "disconnected")],
+    atMs: 51_000,
+  });
+  const out = outagesOf(s);
+  assert.equal(out.openAtEnd, true, "it was still down and the report must be able to say so");
+  assert.equal(out.totalMs, 40_000, "it ran to atMs, not to the last transition");
+  assert.match(formatReport(s), /⚠ still down when this was read/);
+});
+
+test("⚠⚠ the 1163-second observation of 2026-09-06, read back", () => {
+  // ⚠ The real transitions, ⚠ connectionState only. ⚠ Four drops, ⚠ the last one never ended.
+  const s = snapshot({
+    transitions: [
+      down(45_203, "connected"),
+      down(78_761, "disconnected"),
+      down(88_762, "failed"),
+      down(127_337, "connected"),
+      down(356_010, "disconnected"),
+      down(366_012, "failed"),
+      down(421_491, "connected"),
+      down(545_092, "disconnected"),
+      down(555_091, "failed"),
+      down(1_057_623, "connected"),
+      down(1_144_278, "disconnected"),
+      down(1_154_277, "failed"),
+    ],
+    atMs: 1_163_044,
+    heldMs: 1_121_000,
+  });
+  const out = outagesOf(s);
+  assert.equal(out.count, 4);
+  assert.equal(out.longestMs, 512_531);
+  assert.equal(out.totalMs, 645_354);
+  assert.equal(out.openAtEnd, true);
+  // ⚠⚠ The panel said `held for: 1121s`. ⚠ More than half of it had no media.
+  assert.ok(out.totalMs > (s.heldMs ?? 0) / 2, "the half that made the old line misleading");
+  assert.match(formatReport(s), /of which no media: 645s across 4 \(longest 513s\)/);
+});
+
+test("⚠ what the page was doing appears on the same clock, through the same vocabulary", () => {
+  const report = formatReport(
+    snapshot({
+      transitions: [
+        { at: 5_000, what: "page", value: "hidden" },
+        { at: 98_000, what: "page", value: "visible" },
+        // ⚠ Anything the vocabulary does not know is still not echoed.
+        { at: 99_000, what: "page", value: "/home/someone/secret" },
+      ],
+    }),
+  );
+  assert.match(report, /5000ms {2}page -> hidden/);
+  assert.match(report, /98000ms {2}page -> visible/);
+  assert.match(report, /99000ms {2}page -> other/);
+  assert.ok(!report.includes("secret"));
+});
+
+test("⚠ `frames decoded` says which stream it counted", () => {
+  // ⚠⚠ Two snapshots of one page reported 2903 and then 550. ⚠ The number went DOWN, ⚠ because
+  //   ⚠ the stream had been re-made. ⚠ The line has to say that or it will be read as a total.
+  assert.match(
+    formatReport(snapshot({ framesDecoded: 550 })),
+    /frames decoded: {3}550 {2}\(on the stream in use now\)/,
   );
 });

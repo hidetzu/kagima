@@ -127,11 +127,24 @@ export const createDiagnostics = (
       //   ⚠ refreshes fast enough for the question being asked, and no second timer is started.**
       msToFirstFrame = firstFrameAt(msToFirstFrame, framesDecoded, Math.round(now() - startedAt));
 
+      // ⚠⚠ **The page's own events, ⚠ put on the call's clock** (kagima#91).
+      //
+      // ⚠ **`longest hidden` said how long and never when, ⚠ so it could not be lined up against
+      //   ⚠ a drop** — ⚠ **and lining those two up was the whole question on 2026-09-06.**
+      // ⚠ **`watchLifecycle` times from the page loading; ⚠ this list times from the call
+      //   ⚠ starting.** ⚠ **Anything before the call has no place on this clock, ⚠ so it is left
+      //   ⚠ out rather than printed as a negative.**
+      const page: Transition[] = lifecycle()
+        .events.map((e) => ({ at: Math.round(e.at - startedAt), what: "page", value: e.what }))
+        .filter((t) => t.at >= 0);
+      const all = [...transitions, ...page].sort((a, b) => a.at - b.at);
+
       return {
+        atMs: Math.round(now() - startedAt),
+        transitions: all,
         localCandidates,
         remoteCandidates,
         selected,
-        transitions,
         msToFirstFrame,
         heldMs: msToFirstFrame === null ? null : Math.round(now() - startedAt - msToFirstFrame),
         socketClosed,

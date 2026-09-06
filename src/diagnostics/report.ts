@@ -65,6 +65,63 @@ export type Snapshot = {
    * this, ⚠ so they keep reporting exactly what they did before.**
    */
   readonly heartbeat: HeartbeatFacts | null;
+  /**
+   * ⚠⚠ **When this snapshot was taken, ⚠ on the same clock as `transitions`** (kagima#91).
+   *
+   * ⚠ **Without it, ⚠ an outage that is still going has no end, ⚠ and `held for` cannot be said
+   * to span anything.** ⚠ **`heldMs` was already measured against this moment; ⚠ this makes it
+   * something the report can read rather than something it has to assume.**
+   */
+  readonly atMs: number;
+};
+
+/**
+ * ⚠⚠ **How much of the time there was no connection** (kagima#91).
+ *
+ * ⚠ **Measured on 2026-09-06: ⚠ a panel said `verdict: frames, held` and `held for: 1121s` for a
+ * call that had been down for about 635 of those seconds, ⚠ across four drops, ⚠ the longest 512.**
+ * ⚠ **`heldMs` is a wall clock from the first frame; ⚠ it never looked at whether media was
+ * flowing.** ⚠ **The number was right and it was read as something else.**
+ */
+export type Outages = {
+  readonly count: number;
+  readonly totalMs: number;
+  readonly longestMs: number;
+  /** ⚠ **Still down when the snapshot was taken.** ⚠ **Not the same as a drop that ended.** */
+  readonly openAtEnd: boolean;
+};
+
+/**
+ * ⚠ **Read off the transitions, ⚠ not kept separately** — ⚠ **the same reasoning as `arrivedAt`.**
+ *
+ * ⚠ **`disconnected`, `failed` and `closed` all mean "not carrying media".** ⚠ **They arrive in a
+ * run** (⚠ measured: `disconnected` then `failed` 10.0 seconds later), ⚠ **and that is one outage,
+ * ⚠ not two** — ⚠ **so a second one does not open while one is already open.**
+ * ⚠ **`connected` is the only thing that closes one.**
+ */
+export const outagesOf = (s: Snapshot): Outages => {
+  const DOWN = new Set(["disconnected", "failed", "closed"]);
+  let openedAt: number | null = null;
+  let count = 0;
+  let totalMs = 0;
+  let longestMs = 0;
+  const close = (at: number): void => {
+    if (openedAt === null) return;
+    const ms = at - openedAt;
+    count += 1;
+    totalMs += ms;
+    longestMs = Math.max(longestMs, ms);
+    openedAt = null;
+  };
+  for (const t of s.transitions) {
+    if (t.what !== "connectionState") continue;
+    if (t.value === "connected") close(t.at);
+    else if (DOWN.has(t.value) && openedAt === null) openedAt = t.at;
+  }
+  const openAtEnd = openedAt !== null;
+  // ⚠ Still down. ⚠ It runs to the moment this was read, ⚠ which is what `atMs` is for.
+  close(s.atMs);
+  return { count, totalMs, longestMs, openAtEnd };
 };
 
 /**
@@ -102,6 +159,10 @@ const KNOWN_PROTOCOLS = new Set(["udp", "tcp", "tls"]);
 /** ⚠ **The state machines worth recording.** */
 const KNOWN_WHAT = new Set([
   "iceConnectionState",
+  // ⚠⚠ **What the browser did to this page, ⚠ placed on the same clock as everything else**
+  //   ⚠ (kagima#91). ⚠ **`longest hidden` said how long and never when, ⚠ so it could not be
+  //   ⚠ lined up against a drop.**
+  "page",
   "iceGatheringState",
   "connectionState",
   "signalingState",
@@ -129,6 +190,11 @@ const KNOWN_VALUES = new Set([
   "complete",
   "have-local-pranswer",
   "have-remote-pranswer",
+  // ⚠ The page's own words (`src/client/lifecycle.ts`), ⚠ through the same closed vocabulary.
+  "hidden",
+  "visible",
+  "frozen",
+  "resumed",
 ]);
 
 const KNOWN_FAMILIES = new Set(["v4", "v6", "?"]);
@@ -314,7 +380,11 @@ export const formatReport = (s: Snapshot): string => {
   const lines: string[] = [];
   lines.push("kagima field-test observation");
   lines.push(`  verdict:          ${verdictOf(s)}`);
-  lines.push(`  frames decoded:   ${num(s.framesDecoded, "0")}`);
+  // ⚠⚠ **Named for what it counts** (kagima#91). ⚠ **Two snapshots of one page reported 2903
+  //   ⚠ and then 550: ⚠ the number went DOWN.** ⚠ **It is read off the inbound stream in use,
+  //   ⚠ and a stream that was re-made starts again at zero.** ⚠ **"frames decoded" was read as
+  //   ⚠ "frames this call has had", ⚠ which it never was.**
+  lines.push(`  frames decoded:   ${num(s.framesDecoded, "0")}  (on the stream in use now)`);
   // ⚠ **Named for what it is measured from.** ⚠ An unqualified "ms to 1st frame" was read as
   //   ⚠ "how long until you see something" ⚠ and was in fact "how long the host waited alone".
   lines.push(
@@ -325,6 +395,20 @@ export const formatReport = (s: Snapshot): string => {
   lines.push(
     `  held for:         ${s.heldMs === null ? "n/a" : `${num(s.heldMs / 1000, "n/a")}s`}` +
       (s.heldMs !== null && s.heldMs < HOLD_TARGET_MS ? "  ⚠ short of the target" : ""),
+  );
+  // ⚠⚠ **Next to `held for`, ⚠ because `held for` is what it corrects** (kagima#91).
+  //   ⚠ **`held for` is a wall clock from the first frame and never looked at whether media was
+  //   ⚠ flowing.** ⚠ **Printed always** — ⚠ **`no drops` is a fact worth reading, ⚠ and a line
+  //   ⚠ that appears only sometimes gets read as "this run was special".**
+  const out = outagesOf(s);
+  lines.push(
+    `  of which no media: ${
+      out.count === 0
+        ? "none — it never dropped"
+        : `${num(out.totalMs / 1000, "?")}s across ${out.count}` +
+          ` (longest ${num(out.longestMs / 1000, "?")}s)` +
+          (out.openAtEnd ? "  ⚠ still down when this was read" : "")
+    }`,
   );
   lines.push(`  local candidates: ${countByType(s.localCandidates)}`);
   lines.push(`  remote candidates:${countByType(s.remoteCandidates)}`);
