@@ -1,6 +1,12 @@
 # 0010. ルームは誰かが居るあいだ生き、それ以上は生きない
 
 - 状態: **決定**
+  — ⚠ **移植後も意味を持つ**(2026-09-06、[`0023`](0023-write-the-minimum-so-a-room-outlives-its-sockets.md))
+
+> ⚠ **Cloudflare では、⚠ 何も書かなければ この寿命は意味を持たなかった** — ⚠ **Durable Object
+> が socket の 15 秒後に持っていたものを捨てるからである(⚠ 実測 2026-09-06)。**
+> ⚠ **[`0023`](0023-write-the-minimum-so-a-room-outlives-its-sockets.md) が最低限を書くと決めた
+> ので、⚠ 「最後に誰かが居た時刻から `ROOM_IDLE_MS`」は そのまま 効く。**
 - 日付: 2026-09-04
 
 ## 決定

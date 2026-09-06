@@ -15,13 +15,16 @@ import { issueJoinToken, verifyJoinToken } from "../src/token/join-token.ts";
 
 type Answer = Record<string, unknown>;
 
+// ⚠ The room object lives in its own file; ⚠ wrangler needs it exported from the entry.
+export { RoomSpike } from "./room-do.ts";
+
 const json = (body: Answer): Response =>
   new Response(JSON.stringify(body, null, 2), {
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: { ROOM: DurableObjectNamespace }): Promise<Response> {
     const url = new URL(request.url);
 
     // ⚠ Q1. ⚠ Does kagima's Web Crypto token work in workerd, ⚠ unchanged?
@@ -120,6 +123,11 @@ export default {
         answer["threw"] = String(e);
       }
       return json(answer);
+    }
+
+    // ⚠⚠ The room object (kagima#47 の続き). ⚠ Everything under /room goes to one object.
+    if (url.pathname.startsWith("/room/")) {
+      return env.ROOM.get(env.ROOM.idFromName("the-one-room")).fetch(request);
     }
 
     return new Response("spike", { status: 404 });
