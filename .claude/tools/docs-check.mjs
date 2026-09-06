@@ -222,8 +222,7 @@ const CASES = [
         return { ok: true, said: `no ADR retires a mechanism (nothing to hold absent)` };
       }
       // ⚠ Only what ships. ⚠ The checks that prove it is gone must be free to name it.
-      const files = execFileSync("git", ["ls-files", "src", "public"], { cwd: ROOT, encoding: "utf8" })
-        .trim().split("\n").filter(Boolean);
+      const files = filesUnderGit("src", "public");
       const found = [];
       for (const file of files) {
         const body = read(file);
