@@ -61,7 +61,7 @@ const aRoom = (who: "host+guest" | "guest" | "empty" = "host+guest") => {
     knockRejections: createKnockRejectionCounter(),
     // ⚠ These cases route; ⚠ they never ask for a page. ⚠ Saying so is better than
     //   ⚠ handing over a reader that would quietly work.
-    asset: () => null,
+    asset: async () => null,
     // ⚠ Nothing in front of these cases, ⚠ so the caller's address comes from the socket.
     trustedSourceHeader: "",
   } as Context;

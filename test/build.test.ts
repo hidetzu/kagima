@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { build } from "../scripts/build.ts";
-import { isServedPath } from "../src/static.ts";
+import { isServedPath } from "../src/assets.ts";
 import { codeOf } from "./source-text.ts";
 
 const read = (path: string): string => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -46,7 +46,7 @@ test("⚠⚠ both gates build before they run, so neither can measure a stale di
 test("⚠ nothing the browser is served is read out of src/", () => {
   // ⚠ Reading `src/` at request time is the thing `docs/adr/0016` moved away from.
   //   ⚠ It cannot work in a Worker, ⚠ and one route quietly doing it would only be found there.
-  const code = codeOf(read("src/static.ts"));
+  const code = codeOf(read("src/assets.ts"));
   const files = [...code.matchAll(/file:\s*"([^"]+)"/g)].map((m) => m[1] ?? "");
 
   assert.ok(files.length > 0, "no served files found — ⚠ this check has gone stale");

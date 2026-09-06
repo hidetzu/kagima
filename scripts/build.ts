@@ -49,9 +49,25 @@ const SOURCES = [
 const rewriteImports = (code: string): string =>
   code.replace(/(from\s+")(\.[^"]*?)\.ts(")/g, "$1$2.js$3");
 
+/**
+ * ⚠⚠ **The pages, ⚠ copied rather than transformed** (`docs/adr/0016`).
+ *
+ * ⚠ **They are HTML; ⚠ there is nothing to strip.** ⚠ **They are copied because a Worker's
+ * Assets binding serves one directory, ⚠ and everything the browser loads has to be in it.**
+ * ⚠ **Node still reads `public/` directly** — ⚠ **the route map says so** (`src/assets.ts`).
+ */
+const PAGES = ["public/index.html", "public/room.html"];
+
 export const build = (): readonly string[] => {
   rmSync(OUT, { recursive: true, force: true });
   const written: string[] = [];
+
+  for (const page of PAGES) {
+    const target = join(OUT, page.replace(/^public\//, ""));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, readFileSync(join(ROOT, page), "utf8"));
+    written.push(relative(ROOT, target));
+  }
   for (const source of SOURCES) {
     const raw = readFileSync(join(ROOT, source), "utf8");
     const js = rewriteImports(stripTypeScriptTypes(raw, { mode: "strip" }));
