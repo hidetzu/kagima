@@ -39,6 +39,8 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   heartbeat: null,
   // ⚠ When this snapshot was taken, ⚠ on the same clock as `transitions` (kagima#91).
   atMs: 60_000,
+  // ⚠ Absent unless a case asks for it (kagima#96), ⚠ like the heartbeat above.
+  discards: null,
   ...over,
 });
 

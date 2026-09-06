@@ -24,6 +24,7 @@ import {
   HOLD_TARGET_MS,
   selectedPairIdOf,
 } from "../diagnostics/report.ts";
+import type { DiscardFacts } from "../diagnostics/discards.ts";
 import { watchLifecycle } from "./lifecycle.ts";
 import { heartbeatObservation } from "./transport.ts";
 
@@ -51,6 +52,10 @@ const factOf = (stat: StatLike | undefined): CandidateFact => ({
 export const createDiagnostics = (
   pc: RTCPeerConnection,
   now: () => number = () => performance.now(),
+  // ⚠⚠ **What the browser did to this page while nobody was looking** (kagima#96).
+  //   ⚠ **`null` when nothing is watching** — ⚠ **the host page does not watch, ⚠ and every check
+  //   ⚠ that predates this keeps reporting exactly what it reported before.**
+  readDiscards: (() => DiscardFacts) | null = null,
 ): Diagnostics => {
   const startedAt = now();
   // ⚠⚠ **Started here, ⚠ once per call** (`docs/adr/0020`). ⚠ **The page outlives its sockets,
@@ -160,6 +165,7 @@ export const createDiagnostics = (
           //   ⚠ "not observed", ⚠ and the report must not print it as "no".
           canSeeFreezing: "onfreeze" in document,
         },
+        discards: readDiscards === null ? null : readDiscards(),
       };
     },
 
