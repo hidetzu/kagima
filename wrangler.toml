@@ -18,6 +18,15 @@ compatibility_date = "2026-09-01"
 #
 # ⚠ **`wrangler dev --local` needs none of this.**
 
+# ⚠⚠ **What the Host hands over** (`docs/adr/0017`).
+#
+# ⚠ **The share URL is built from this.** ⚠ **A stale one points somewhere the Guest cannot
+#   ⚠ reach** — ⚠ **and that was measured once already** (`docs/FIELD-TEST.md`).
+# ⚠ **It is the address of a deployed service, ⚠ not a credential** — ⚠ **so it may be written
+#   ⚠ here, ⚠ where an account id may not.**
+[vars]
+PUBLIC_BASE_URL = "https://kagima.hidetzu.workers.dev"
+
 # ⚠⚠ **One room, one object** (`docs/adr/0022`).
 #
 # ⚠ **Everything a room knows lives here** — ⚠ **the room itself, ⚠ who is at the door, ⚠ who is
