@@ -259,8 +259,11 @@ Node 版と Worker 版を両方持たない   ⚠ CLAUDE.md § 3。⚠ 必ず片
 | [`0009`](0009-use-ws-for-the-websocket-server-rather-than-writing-rfc6455.md) | ⚠ **`ws` が不要になる。** ⚠ **唯一の実行時依存が消える** |
 | [`0010`](0010-a-room-lives-while-somebody-is-in-it-and-not-longer.md) | ⚠ **「プロセスが終われば消える」の主語が変わる。** ⚠ **再検討が要る** |
 
-⚠ **[`0005`](0005-keep-room-state-in-process-memory-only.md) は置き換わらない。**
-⚠ **「書かない」は移っても守れることを、⚠ 実測で確かめた。**
+⚠⚠ **[`0005`](0005-keep-room-state-in-process-memory-only.md) は 置き換わった**(2026-09-06、
+[`0023`](0023-write-the-minimum-so-a-room-outlives-its-sockets.md))。
+⚠ **ここに「置き換わらない」と書いたのは 間違いだった** — ⚠ **測る前に書いたからである。**
+⚠ **実測: ⚠ 最後の socket が閉じてから 15 秒で、⚠ Durable Object は持っていたものを捨てる。**
+⚠ **`roomId` / `hostKey` / `createdAt` / `lastSeenAt` だけを書く。**
 ⚠ **ただし、⚠ それを守る壁には名前のついた例外が 1 つ在る**(⚠ `src/static.ts` は配るために読む。
 ⚠ [`0005`](0005-keep-room-state-in-process-memory-only.md) の冒頭に書いた)。
 
