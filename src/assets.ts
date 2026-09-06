@@ -36,6 +36,7 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
     { file: "dist/diagnostics/report.js", type: "text/javascript; charset=utf-8" },
   ],
   ["/client/call.js", { file: "dist/client/call.js", type: "text/javascript; charset=utf-8" }],
+  ["/call/restart.js", { file: "dist/call/restart.js", type: "text/javascript; charset=utf-8" }],
   [
     "/client/remember.js",
     { file: "dist/client/remember.js", type: "text/javascript; charset=utf-8" },

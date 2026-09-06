@@ -298,6 +298,18 @@ test(titleOf("frames"), async () => {
   });
   console.log(`  observed: ICE candidate types produced by the host: ${candidates.join(", ")}`);
 
+  // ⚠⚠ **The direction of kagima#89 that is dangerous is the one this can hold: ⚠ a call that is
+  //   ⚠ working must not be re-negotiated.** ⚠ **A spurious ICE restart breaks a live connection.**
+  // ⚠ **What this does NOT show: ⚠ that a failed connection comes back.** ⚠ **There is no way to
+  //   ⚠ make ICE fail on demand here, ⚠ so that claim is not made** (`.claude/rules/evidence.md`).
+  const restarts = await guest.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall?: { state(): { iceRestarts: number } } })
+      .kagimaCall;
+    return call?.state().iceRestarts ?? -1;
+  });
+  console.log(`  observed: ICE restarts on a call that never failed: ${restarts}`);
+  assert.equal(restarts, 0, "a working call was re-negotiated");
+
   await host.context.close();
   await guest.context.close();
 });

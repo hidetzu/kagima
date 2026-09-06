@@ -187,7 +187,13 @@
       });
 
       // ⚠ The guest arrives second and knows the host is there, so the guest offers.
-      call = await createCall({ transport, isOfferer: true });
+      // ⚠ `canSignal`: ⚠ **a restart offer sent into a closed socket is an attempt spent for
+      //   ⚠ nothing** (kagima#89). ⚠ **This page holds one socket, ⚠ so its state is the answer.**
+      call = await createCall({
+        transport,
+        isOfferer: true,
+        canSignal: () => transport.socket.readyState === WebSocket.OPEN,
+      });
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;

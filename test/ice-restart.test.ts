@@ -1,0 +1,80 @@
+// ⚠⚠ **The claim: ⚠ a failed media path is re-negotiated, ⚠ a bounded number of times, ⚠ and
+//   ⚠ never into a socket that cannot carry the offer** (`src/call/restart.ts`, kagima#89).
+//
+// ⚠ **What this tier can hold, ⚠ and what it cannot.**
+// ⚠ **There is no ICE agent in a unit test**, ⚠ **so nothing here says a real connection comes
+//   ⚠ back.** ⚠ **What it says is that the policy asks for the right thing at the right moment.**
+// ⚠ **The wiring in `src/client/call.ts` — ⚠ `failed` only, ⚠ offerer only, ⚠ one sequence at a
+//   ⚠ time — ⚠ is not reachable from here** (`.claude/rules/evidence.md`: ⚠ **say which**).
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { driveRestart, RESTART_DELAYS_MS } from "../src/call/restart.ts";
+
+/** ⚠ A world whose every answer is scripted, ⚠ so nothing is inferred from a real clock. */
+const world = (script: { states: string[]; canSignal?: boolean[]; throwOnOffer?: boolean }) => {
+  const waited: number[] = [];
+  let offers = 0;
+  let turn = 0;
+  return {
+    waited,
+    offers: () => offers,
+    world: {
+      connectionState: () => script.states[turn] ?? script.states.at(-1) ?? "failed",
+      canSignal: () => script.canSignal?.[turn] ?? true,
+      offerAgain: async () => {
+        if (script.throwOnOffer === true) throw new Error("⚠ could not build an offer");
+        offers += 1;
+      },
+      wait: async (ms: number) => {
+        waited.push(ms);
+        // ⚠ The wait comes first in the loop, ⚠ so the turn just started is the one before it.
+        turn = waited.length - 1;
+      },
+    },
+  };
+};
+
+test("⚠ it re-offers while the connection is failed, and stops when it comes back", async () => {
+  const w = world({ states: ["failed", "connected"] });
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "recovered");
+  assert.equal(w.offers(), 1, "one restart offer, then it was back");
+});
+
+test("⚠ a closed connection is `gone`, not a failure to recover", async () => {
+  const w = world({ states: ["closed"] });
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "gone");
+  assert.equal(w.offers(), 0, "nothing is offered at a connection somebody hung up");
+});
+
+test("⚠⚠ the number of attempts is bounded by the delay list, and it stops", async () => {
+  const w = world({ states: ["failed"] });
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "exhausted");
+  assert.equal(w.offers(), 3, "one per delay, and not one more");
+  assert.deepEqual(w.waited, [10, 20, 30], "it waits before each attempt, in order");
+});
+
+test("⚠⚠ no attempt is spent while the offer could not leave the page", async () => {
+  const w = world({ states: ["failed"], canSignal: [false, false, true] });
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "exhausted");
+  assert.equal(w.offers(), 1, "only the turn on which the socket could carry it");
+});
+
+test("⚠ a socket that never comes back produces no offers at all", async () => {
+  const w = world({ states: ["failed"], canSignal: [false, false, false] });
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "exhausted");
+  assert.equal(w.offers(), 0);
+});
+
+test("⚠ an offer that cannot be built does not end the sequence", async () => {
+  const w = world({ states: ["failed"], throwOnOffer: true });
+  // ⚠ It must not reject: ⚠ the caller starts this without awaiting it.
+  assert.equal(await driveRestart(w.world, [10, 20, 30]), "exhausted");
+  assert.deepEqual(w.waited, [10, 20, 30], "every turn was still taken");
+});
+
+test("⚠ the shipped delays are bounded and start short", () => {
+  // ⚠ Chromium spent 10.0s between `disconnected` and `failed` on 2026-09-06, ⚠ so the wait
+  //   ⚠ before the first attempt is already paid for.
+  assert.ok(RESTART_DELAYS_MS.length > 0 && RESTART_DELAYS_MS.length <= 8);
+  assert.ok((RESTART_DELAYS_MS[0] ?? 0) <= 1_000, "the first wait is short");
+});
