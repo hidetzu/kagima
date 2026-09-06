@@ -29,6 +29,8 @@ docs/
   PRODUCT.md                 ⚠ プロダクトの正本。何を作り、何を作らないか
   SPEC.md                    今日なにを主張してよいか(⚠ 実装がないので空)
   DISCOVERY.md               ⚠ まだ決まっていない技術的不確実性と、候補の比較
+  PORTING.md                 ⚠ いまの仕組みの見取り図と、⚠ Cloudflare にそのまま載らないところ
+  DEPLOY.md                  ⚠ Cloudflare に出す手順。⚠ **アカウントも token も書かない**
   FIELD-TEST.md              ⚠ 実機・別ネットワークで何が起きるかを観測する手順(kagima#16)
   adr/                       なぜそう決めたか。⚠ 却下した案と、越えてはならない境界
 .claude/                     どう書くか、どう検証するか(English)

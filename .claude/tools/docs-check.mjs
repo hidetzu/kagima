@@ -256,6 +256,32 @@ const CASES = [
     },
   },
   {
+    name: "no-cloudflare-account-in-the-repo",
+    // ⚠ Grounds: `.claude/rules/git.md` — ⚠ never put the working environment into anything
+    //   ⚠ public, ⚠ and this repository is public.
+    // ⚠ **An account id is not a credential.** ⚠ **It is still somebody's account, ⚠ and a public
+    //   ⚠ repository keeps what it is given** — ⚠ **removing it later does not remove it from the
+    //   ⚠ history.**
+    // ⚠ **wrangler takes it from `CLOUDFLARE_ACCOUNT_ID`.** ⚠ **So there is nothing to commit,
+    //   ⚠ and this case is what keeps it that way.**
+    run() {
+      const files = filesUnderGit("*.toml", "*.json", "*.md", "*.yml", "*.yaml", "*.ts", "*.mjs");
+      const found = [];
+      for (const file of files) {
+        // ⚠ The shape wrangler would want, ⚠ and the shape a person would paste.
+        //   ⚠ 32 hex characters is what an account id is.
+        for (const line of read(file).split("\n")) {
+          if (/account[_-]?id\s*[:=]/i.test(line) && /[0-9a-f]{32}/i.test(line)) {
+            found.push(`${file}: an account id`);
+          }
+        }
+      }
+      return found.length
+        ? { ok: false, said: `an account belongs in the environment, not here: ${found.join(", ")}` }
+        : { ok: true, said: `no Cloudflare account is written down (${files.length} files read)` };
+    },
+  },
+  {
     name: "label-attribution",
     // ⚠ Grounds: who applied `ready-for-ai` used to be a subtraction, and a subtraction reads like
     //   ⚠ a measurement. ⚠ It is now read off the timeline, and THAT reading is the part that can
