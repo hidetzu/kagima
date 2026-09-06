@@ -59,6 +59,46 @@ export type RestartWorld = {
 export const RESTART_DELAYS_MS: readonly number[] = [500, 2_000, 4_000, 8_000, 8_000];
 
 /**
+ * ⚠⚠ **The same thing, ⚠ for the side that did not offer first** (`docs/adr/0027`, kagima#93).
+ *
+ * ⚠ **Why this exists: ⚠ `docs/adr/0026` gave the duty to the offerer alone, ⚠ to avoid glare.**
+ * ⚠⚠ **Measured on 2026-09-06: ⚠ the offerer was a phone, ⚠ the phone was in the background, ⚠ and
+ * the call sat in `failed` for 82.7 seconds while the Host's page was awake the whole time and
+ * answering every heartbeat.** ⚠ **Seeing `failed` and being able to act on it are different.**
+ *
+ * ⚠⚠ **The first wait is the whole mechanism.** ⚠ **It is longer than the offerer's first two
+ * attempts put together, ⚠ so a working offerer always goes first and this side never fires.**
+ * ⚠ **`test/ice-restart.test.ts` holds that as a property rather than as a pair of numbers.**
+ */
+export const ANSWERER_RESTART_DELAYS_MS: readonly number[] = [8_000, 4_000, 8_000, 8_000];
+
+/**
+ * ⚠ **Which list a side uses.** ⚠ **One place, ⚠ so the two cannot drift apart** (`CLAUDE.md` § 3).
+ */
+export const restartDelaysFor = (isOfferer: boolean): readonly number[] =>
+  isOfferer ? RESTART_DELAYS_MS : ANSWERER_RESTART_DELAYS_MS;
+
+/**
+ * ⚠⚠ **What to do with an offer that arrives while one of ours is already in flight.**
+ *
+ * ⚠ **Both sides may now restart, ⚠ so both may offer at once.** ⚠ **That is glare, ⚠ and
+ * `setRemoteDescription` on an offer while `have-local-offer` throws.**
+ *
+ * ⚠ **Three outcomes, ⚠ kept apart on purpose**
+ * (`.claude/rules/evidence.md` § Outcomes are not one outcome).
+ */
+export type Glare =
+  /** ⚠ Nothing of ours is in flight. ⚠ The ordinary path. */
+  | "take-it"
+  /** ⚠ Ours wins. ⚠ **The side that offered first always wins**, ⚠ so the rule needs no negotiating. */
+  | "ignore-it"
+  /** ⚠ Ours yields. ⚠ Undo our own offer, ⚠ then answer theirs. */
+  | "roll-back-first";
+
+export const onIncomingOffer = (isOfferer: boolean, signalingState: string): Glare =>
+  signalingState !== "have-local-offer" ? "take-it" : isOfferer ? "ignore-it" : "roll-back-first";
+
+/**
  * ⚠ **Three ways this ends, ⚠ and they are not one outcome**
  * (`.claude/rules/evidence.md` § Outcomes are not one outcome).
  */
