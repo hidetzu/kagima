@@ -41,7 +41,7 @@ const start = async (over: Partial<Context> = {}) => {
     knockRejections: createKnockRejectionCounter(),
     // ⚠ These cases route; ⚠ they never ask for a page. ⚠ Saying so is better than
     //   ⚠ handing over a reader that would quietly work.
-    asset: () => null,
+    asset: async () => null,
     trustedSourceHeader: "",
     ...over,
   };

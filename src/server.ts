@@ -48,13 +48,14 @@ export type Context = {
    * ⚠⚠ **The browser's own files, ⚠ handed in rather than reached for** (`docs/adr/0015`).
    *
    * ⚠ **On Node this reads `public/` and `dist/` off disk** (`src/static.ts`).
-   * ⚠ **A Worker has no filesystem; ⚠ it will bring an Assets binding instead.**
+   * ⚠ **A Worker has no filesystem; ⚠ it brings an Assets binding instead.**
+   * ⚠⚠ **`async` because the Worker's answer is** — ⚠ **an Assets binding is a `fetch`.**
    * ⚠ **Routing must not care which** — ⚠ **so it asks, ⚠ and something else answers.**
    *
    * ⚠ **`null` means "not one of ours", ⚠ not "missing"** — ⚠ **the two are different and the
    * caller carries on routing after the first.**
    */
-  readonly asset: (pathname: string) => Response | null;
+  readonly asset: (pathname: string) => Promise<Response | null>;
   readonly store: RoomStore;
   readonly baseUrl: string;
   readonly secret: string;
@@ -178,7 +179,7 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
 
   // ⚠ Only GET reaches the static map, and only by an exact name from a closed list.
   if (request.method === "GET") {
-    const asset = ctx.asset(url.pathname);
+    const asset = await ctx.asset(url.pathname);
     if (asset !== null) return asset;
   }
 

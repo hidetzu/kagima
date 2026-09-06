@@ -1,0 +1,40 @@
+# ⚠⚠ **kagima on Cloudflare** (`docs/adr/0015`).
+#
+# ⚠ **`wrangler dev --local` needs no account** — ⚠ **so nothing here costs anything until a
+#   ⚠ deploy, ⚠ and a deploy is an owner decision** (`docs/PRODUCT.md` § 6).
+#
+# ⚠ **Free tier, ⚠ by decision** (`docs/adr/0022`): ⚠ **28.21 room-hours/day is the boundary.**
+name = "kagima"
+main = "src/worker.ts"
+compatibility_date = "2026-09-01"
+
+# ⚠⚠ **The room is not here yet** (`docs/adr/0022`, `docs/adr/0023`).
+#
+# ⚠ **Its shape is decided — ⚠ one Durable Object per room, ⚠ writing four fields — ⚠ and it is
+#   ⚠ the next step.** ⚠ **The binding is declared when the class exists, ⚠ not before:**
+#   ⚠ **wrangler refuses to start otherwise, ⚠ which is the right way round.**
+#
+# [[durable_objects.bindings]]
+# name = "ROOM"
+# class_name = "Room"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["Room"]
+
+# ⚠⚠ **The browser's own files** (`docs/adr/0016`).
+#
+# ⚠ **`public/` is authored; ⚠ `dist/` is built.** ⚠ **The build puts both in `dist/`, ⚠ because
+#   ⚠ an Assets binding serves one directory.** ⚠ **Node still reads `public/` directly.**
+# ⚠ **`Context.asset` is the seam** — ⚠ **Node reads them off disk, ⚠ this reads them from here.**
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# ⚠⚠ **The Worker answers first, ⚠ always.**
+#
+# ⚠ **Without this, ⚠ the binding serves the directory before our code runs** — ⚠ **measured
+#   ⚠ 2026-09-06: ⚠ `/room.html` redirected to `/room` and was served, ⚠ and neither path is in
+#   ⚠ the map.**
+# ⚠ **`src/assets.ts` is a closed map on purpose** (`src/static.ts` carried that property before
+#   ⚠ the split). ⚠ **Moving platforms must not quietly trade it for a directory walk.**
+run_worker_first = true
