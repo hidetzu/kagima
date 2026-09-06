@@ -8,7 +8,13 @@
 //   ⚠ time — ⚠ is not reachable from here** (`.claude/rules/evidence.md`: ⚠ **say which**).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { driveRestart, RESTART_DELAYS_MS } from "../src/call/restart.ts";
+import {
+  ANSWERER_RESTART_DELAYS_MS,
+  driveRestart,
+  onIncomingOffer,
+  RESTART_DELAYS_MS,
+  restartDelaysFor,
+} from "../src/call/restart.ts";
 
 /** ⚠ A world whose every answer is scripted, ⚠ so nothing is inferred from a real clock. */
 const world = (script: { states: string[]; canSignal?: boolean[]; throwOnOffer?: boolean }) => {
@@ -77,4 +83,41 @@ test("⚠ the shipped delays are bounded and start short", () => {
   //   ⚠ before the first attempt is already paid for.
   assert.ok(RESTART_DELAYS_MS.length > 0 && RESTART_DELAYS_MS.length <= 8);
   assert.ok((RESTART_DELAYS_MS[0] ?? 0) <= 1_000, "the first wait is short");
+});
+
+// ⚠⚠ **The side that did not offer first also restarts** (`docs/adr/0027`, kagima#93).
+//
+// ⚠ **Measured on 2026-09-06: ⚠ the offerer was a phone in the background, ⚠ and the call sat in
+//   ⚠ `failed` for 82.7 seconds while the other page was awake and answering every heartbeat.**
+
+test("⚠⚠ the answerer waits out the offerer's first two attempts before it tries at all", () => {
+  // ⚠⚠ **This is the whole of how glare is avoided.** ⚠ **Not a comment — ⚠ the wall.**
+  const offererGetsTwoGoes = (RESTART_DELAYS_MS[0] ?? 0) + (RESTART_DELAYS_MS[1] ?? 0);
+  assert.ok(
+    (ANSWERER_RESTART_DELAYS_MS[0] ?? 0) > offererGetsTwoGoes,
+    `the answerer would step on the offerer: ${ANSWERER_RESTART_DELAYS_MS[0]} vs ${offererGetsTwoGoes}`,
+  );
+});
+
+test("⚠ each side is given its own list, from one place", () => {
+  assert.deepEqual(restartDelaysFor(true), RESTART_DELAYS_MS);
+  assert.deepEqual(restartDelaysFor(false), ANSWERER_RESTART_DELAYS_MS);
+});
+
+test("⚠ the answerer does nothing at all when the offerer got it back first", async () => {
+  // ⚠ It is `connected` by the time the answerer's first wait is over.
+  const w = world({ states: ["connected"] });
+  assert.equal(await driveRestart(w.world, ANSWERER_RESTART_DELAYS_MS), "recovered");
+  assert.equal(w.offers(), 0, "the answerer offered over a call that was already back");
+});
+
+test("⚠ an offer arriving with nothing of ours in flight is simply taken", () => {
+  assert.equal(onIncomingOffer(true, "stable"), "take-it");
+  assert.equal(onIncomingOffer(false, "stable"), "take-it");
+  assert.equal(onIncomingOffer(false, "have-remote-offer"), "take-it");
+});
+
+test("⚠⚠ when both offered at once, the side that offered first wins and the other yields", () => {
+  assert.equal(onIncomingOffer(true, "have-local-offer"), "ignore-it");
+  assert.equal(onIncomingOffer(false, "have-local-offer"), "roll-back-first");
 });

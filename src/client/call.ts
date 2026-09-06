@@ -15,7 +15,7 @@
 // ⚠ **So this exposes what a check needs to read frames**, ⚠ **and never reports success on the
 //   ⚠ strength of a state name.**
 
-import { driveRestart } from "../call/restart.ts";
+import { driveRestart, onIncomingOffer, restartDelaysFor } from "../call/restart.ts";
 
 /**
  * ⚠ **STUN only.** ⚠ **TURN is not here, and adding it is not this file's decision** —
@@ -153,6 +153,13 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
   options.transport.onMessage(async (message) => {
     switch (message.type) {
       case "offer": {
+        // ⚠⚠ **Both sides may restart now** (`docs/adr/0027`), ⚠ **so both may offer at once.**
+        //   ⚠ **The side that offered first wins, ⚠ and the other undoes its own offer** — ⚠ a
+        //   ⚠ fixed rule rather than a negotiated one (`src/call/restart.ts`).
+        const glare = onIncomingOffer(options.isOfferer, pc.signalingState as string);
+        // ⚠ Ours is in flight and ours wins. ⚠ Theirs will be rolled back on their side.
+        if (glare === "ignore-it") return;
+        if (glare === "roll-back-first") await pc.setLocalDescription({ type: "rollback" });
         await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
         await flushCandidates();
         const answer = await pc.createAnswer();
@@ -225,9 +232,13 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
   };
   pc.addEventListener("connectionstatechange", () => {
     if (pc.connectionState !== "failed") return;
-    if (!options.isOfferer || recovering || spent) return;
+    // ⚠⚠ **Not the offerer only** (`docs/adr/0027`, kagima#93). ⚠ **On 2026-09-06 the offerer was
+    //   ⚠ a backgrounded phone and the call sat in `failed` for 82.7 seconds while this side was
+    //   ⚠ awake.** ⚠ **The answerer simply waits longer, ⚠ so a working offerer still goes first.**
+    if (recovering || spent) return;
     recovering = true;
-    void driveRestart(world, options.restartDelaysMs).then((outcome) => {
+    const delays = options.restartDelaysMs ?? restartDelaysFor(options.isOfferer);
+    void driveRestart(world, delays).then((outcome) => {
       // ⚠ `gone` is not a failure to recover — ⚠ somebody hung up. ⚠ Neither re-arms anything.
       if (outcome === "exhausted") spent = true;
       recovering = false;

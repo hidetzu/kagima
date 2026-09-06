@@ -302,13 +302,20 @@ test(titleOf("frames"), async () => {
   //   ⚠ working must not be re-negotiated.** ⚠ **A spurious ICE restart breaks a live connection.**
   // ⚠ **What this does NOT show: ⚠ that a failed connection comes back.** ⚠ **There is no way to
   //   ⚠ make ICE fail on demand here, ⚠ so that claim is not made** (`.claude/rules/evidence.md`).
-  const restarts = await guest.page.evaluate(() => {
-    const call = (globalThis as unknown as { kagimaCall?: { state(): { iceRestarts: number } } })
-      .kagimaCall;
-    return call?.state().iceRestarts ?? -1;
-  });
-  console.log(`  observed: ICE restarts on a call that never failed: ${restarts}`);
-  assert.equal(restarts, 0, "a working call was re-negotiated");
+  // ⚠⚠ **Both sides, ⚠ since `docs/adr/0027` let the answerer restart too.** ⚠ **The answerer is
+  //   ⚠ the side that fires when the offerer is asleep, ⚠ so it is also the side that would fire
+  //   ⚠ over a call that is perfectly fine.**
+  const restartsOn = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+      const call = (globalThis as unknown as { kagimaCall?: { state(): { iceRestarts: number } } })
+        .kagimaCall;
+      return call?.state().iceRestarts ?? -1;
+    });
+  const restarts = { guest: await restartsOn(guest.page), host: await restartsOn(host.page) };
+  console.log(
+    `  observed: ICE restarts on a call that never failed — guest ${restarts.guest}, host ${restarts.host}`,
+  );
+  assert.deepEqual(restarts, { guest: 0, host: 0 }, "a working call was re-negotiated");
 
   await host.context.close();
   await guest.context.close();

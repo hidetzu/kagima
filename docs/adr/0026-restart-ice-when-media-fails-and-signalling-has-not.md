@@ -1,6 +1,7 @@
 # 0026. ⚠ メディアが落ちてシグナリングが生きているとき、⚠ 張り直す
 
-- 状態: **決定**
+- 状態: **決定**(⚠ **「offer 側だけが張り直す」は
+  [`0027`](0027-let-the-answerer-restart-too-after-waiting-longer.md) が置き換えた**)
 - 日付: 2026-09-06
 - 対象: ⚠ [`0017`](0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md) が定めた扉に、⚠ 触れないこと
 
@@ -54,8 +55,15 @@
 
 ### ⚠ offer を出す側だけが張り直す
 
+⚠⚠ **これは 2026-09-06 に
+[`0027`](0027-let-the-answerer-restart-too-after-waiting-longer.md) が置き換えた。**
+⚠ **以下は、⚠ そのとき何が間違っていたかを残すために置いてある。**
+
 ⚠ **`start()` が offer 側だけなのと同じ理由で、⚠ 両側が同時に offer を投げれば glare になる。**
 ⚠ **1 本の接続なので、⚠ offer 側も同じ `failed` を見る。** ⚠ **so 取り逃がしはしない。**
+
+⚠⚠ **見ることと 動けることは別だった。** ⚠ **実測では offer 側が背面のスマホで、⚠ 通話は 82.7 秒
+落ちたままだった** ([`0027`](0027-let-the-answerer-restart-too-after-waiting-longer.md))。
 
 ⚠⚠ **拾えないのは「offer 側のページごと消えた」場合で、⚠ それは
 [`hidetzu/kagima#90`](https://github.com/hidetzu/kagima/issues/90) である。**
