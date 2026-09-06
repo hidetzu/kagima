@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { type Browser, chromium, firefox, type Page } from "playwright";
-import { startServer } from "../src/server.ts";
+import { startServer } from "../src/node-server.ts";
 import { titleOf } from "./scenarios.ts";
 
 const PORT = 8960;

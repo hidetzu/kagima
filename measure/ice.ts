@@ -30,7 +30,7 @@
 // ⚠ **It changes nothing.** ⚠ **It starts a server, opens a page, and reads.**
 import { chromium } from "playwright";
 import { ICE_SERVERS } from "../src/client/call.ts";
-import { startServer } from "../src/server.ts";
+import { startServer } from "../src/node-server.ts";
 
 const PORT = 8970;
 const BASE = `http://127.0.0.1:${PORT}`;

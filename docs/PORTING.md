@@ -182,9 +182,9 @@ flowchart LR
 | # | 何が | ⚠ なぜ載らないか | ⚠ 代わりに何が要るか |
 |---|---|---|---|
 | 6 | ⚠⚠ **プロセスのメモリにある 4 つの Map**(§ 1-5) | ⚠ **Worker は 1 リクエストごとに別の isolate でありうる。** ⚠ **「同じプロセス」という前提が無い** | ⚠ **Durable Object。** ⚠ **どう割るかは [kagima#47](https://github.com/hidetzu/kagima/issues/47) で未決** |
-| 7 | ⚠ **`server.on("upgrade")` の 101 手渡し** | ⚠ `node:http` が無い | ⚠ `WebSocketPair` と `new Response(null, { status: 101, webSocket })`。⚠ **`spike/` で動いた** |
+| 7 | ⚠ **`server.on("upgrade")` の 101 手渡し** | ⚠ `node:http` が無い | ⚠ `WebSocketPair` と `new Response(null, { status: 101, webSocket })`。⚠ **`spike/` で動いた**。⚠ **いまは `src/node-server.ts` に集まっている** |
 | 8 | ⚠ **`ws` の `WebSocketServer`** | ⚠ 同上 | ⚠ **継ぎ目は `SignalingSocket` に在る。** ⚠ アダプタ 1 枚 |
-| 9 | ⚠ **`readFileSync` で `public/` と `dist/` を配る** | ⚠ ファイルシステムが無い | ⚠ Workers Assets、⚠ または埋め込み |
+| 9 | ⚠ **`readFileSync` で `public/` と `dist/` を配る** | ⚠ ファイルシステムが無い | ⚠ Workers Assets、⚠ または埋め込み。⚠ **継ぎ目は `Context.asset` に在る** — ⚠ **routing は もう ファイルを読まない** |
 | 10 | ⚠ **`SWEEP_INTERVAL_MS` の掃除タイマ** | ⚠ **プロセスが常駐しない。** ⚠ **掃除する「常駐者」が居ない** | ⚠ DO の alarm、⚠ もしくは「読むときに期限を見る」 |
 | 11 | ⚠ **`nextPeerId` の連番** | ⚠ **1 プロセス前提。** ⚠ 別 isolate では 1 から始まる | ⚠ DO の中なら成立する。⚠ **6 と同じ問題** |
 | 12 | ⚠ **`roomOpenedAt` の計測** | ⚠ 同上 | ⚠ 同上 |
@@ -237,7 +237,8 @@ join token の検証                        ⚠ 測った。無改変で動く
 ## 4. ⚠ この文書が言っていないこと
 
 - ⚠ **Durable Object の寿命と課金。** ⚠ **まだ DO を持っていない**([kagima#47](https://github.com/hidetzu/kagima/issues/47))。
-- ⚠ **`handle()` 全体が workerd で走るか。** ⚠ **`src/server.ts` がまだ `node:http` を値として import する。**
+- ⚠ **`handle()` 全体が workerd で走るか。** ⚠ **`src/server.ts` からは `node:http` も `process` も
+  外れた**(2026-09-06、移植 7/n)⚠ **が、⚠ workerd の中で走らせて確かめてはいない。**
 - ⚠ **§ 2-2 は読んで分かることであり、⚠ 走らせて確かめたものではない。**
   ⚠ **§ 2-1 だけが測定である。**
 - ⚠ **どの案が良いか。** ⚠ **ここは材料であって、⚠ 判断ではない。**

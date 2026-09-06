@@ -164,6 +164,9 @@ test("⚠⚠ the platform-free half is platform-free, ⚠ and so is everything i
     "src/signaling/session.ts",
     "src/signaling/socket.ts",
     "src/signaling/protocol.ts",
+    // ⚠⚠ **The routing itself** (`docs/adr/0015`, 移植 7/n). ⚠ **Node's listener moved out to
+    //   ⚠ `src/node-server.ts`, ⚠ so this file stopped reading the environment at all.**
+    "src/server.ts",
   ];
   const files = await reachableFrom(ENTRIES);
   // ⚠ The denominator, announced by the thing that measured it (`.claude/rules/evidence.md`).
@@ -189,10 +192,9 @@ test("⚠⚠ the platform-free half is platform-free, ⚠ and so is everything i
   // ⚠⚠ **And the dependency runs one way.** ⚠ **The core must never load the adapter** —
   //   ⚠ **if it did, ⚠ every file above would be reachable from Node's side and this whole
   //   ⚠ check would be describing a split that no longer exists.**
-  assert.ok(
-    !files.includes("src/signaling/attach.ts"),
-    "the platform-free half loads the Node adapter",
-  );
+  for (const adapter of ["src/signaling/attach.ts", "src/node-server.ts"]) {
+    assert.ok(!files.includes(adapter), `the platform-free half loads ${adapter}`);
+  }
 
   // ⚠ And the adapter is still the file that carries it — ⚠ otherwise this describes nothing.
   const adapter = codeOf(await readFile("src/signaling/attach.ts", "utf8"));

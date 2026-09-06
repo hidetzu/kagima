@@ -1,14 +1,15 @@
-// The one process (`docs/adr/0002`). ⚠ **HTTP now; the WebSocket signalling joins it in kagima#6.**
+// ⚠⚠ **The routing, ⚠ and nothing that knows which runtime it is on.**
 //
-// ⚠ **What this serves is who may join.** ⚠ **It never carries what they say** (`CLAUDE.md` § 3).
-// ⚠ **No media path reaches this file, and `docs/adr/0001` says none ever will.**
+// ⚠ **`handle(ctx, Request) -> Response` is the whole of it** (`docs/adr/0015`).
+// ⚠ **Node's listener lives in [`node-server.ts`](node-server.ts); ⚠ a Worker will bring its own.**
 //
-// ## Usage
+// ## ⚠ Why the context is handed in
 //
-//   npm run dev
+// ⚠ **Nothing here reads the environment.** ⚠ **On Node the settings come from `process.env`;
+//   ⚠ in a Worker they arrive as bindings on the request.** ⚠ **Reading either one from here
+//   ⚠ would tie the routing to a runtime, ⚠ which is the thing this file exists not to do.**
 //
 // ⚠ **Every room dies with this process.** ⚠ **That is the specification** (`docs/adr/0005`).
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   createKnockRejectionCounter,
   createKnocks,
@@ -20,10 +21,9 @@ import { randomToken } from "./random.ts";
 import { createRoom } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
 import { createRoomStore, type RoomStore } from "./room/store.ts";
-import { attachSignaling, CLOSE_ROOM_CLOSED } from "./signaling/attach.ts";
 import { createHub, type Hub } from "./signaling/hub.ts";
 import { parseClientMessage } from "./signaling/messages.ts";
-import { missingServedFiles, serveStatic } from "./static.ts";
+import { CLOSE_ROOM_CLOSED } from "./signaling/protocol.ts";
 import { constantTimeEqual, issueJoinToken } from "./token/join-token.ts";
 
 const DEFAULT_PORT = 8787;
@@ -43,15 +43,18 @@ const MAX_BODY_BYTES = 1024;
  */
 const DECOY_HOST_KEY = "decoy-host-key-that-no-room-holds";
 
-/**
- * ⚠ **How often expired rooms are collected.**
- *
- * ⚠ **Not the same as how long a room lives** (`ROOM_IDLE_MS`). ⚠ **A room is unreachable the
- * moment it expires; ⚠ this is only how long the memory and the sockets hang around after.**
- */
-const SWEEP_INTERVAL_MS = 60_000;
-
 export type Context = {
+  /**
+   * ⚠⚠ **The browser's own files, ⚠ handed in rather than reached for** (`docs/adr/0015`).
+   *
+   * ⚠ **On Node this reads `public/` and `dist/` off disk** (`src/static.ts`).
+   * ⚠ **A Worker has no filesystem; ⚠ it will bring an Assets binding instead.**
+   * ⚠ **Routing must not care which** — ⚠ **so it asks, ⚠ and something else answers.**
+   *
+   * ⚠ **`null` means "not one of ours", ⚠ not "missing"** — ⚠ **the two are different and the
+   * caller carries on routing after the first.**
+   */
+  readonly asset: (pathname: string) => Response | null;
   readonly store: RoomStore;
   readonly baseUrl: string;
   readonly secret: string;
@@ -175,7 +178,7 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
 
   // ⚠ Only GET reaches the static map, and only by an exact name from a closed list.
   if (request.method === "GET") {
-    const asset = serveStatic(url.pathname);
+    const asset = ctx.asset(url.pathname);
     if (asset !== null) return asset;
   }
 
@@ -346,140 +349,3 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     ],
   });
 };
-
-/**
- * ⚠ **The signing secret.**
- *
- * ⚠ **There is no default value, and there never will be** — ⚠ **a constant fallback in a public
- * repository is the same as no signature at all** (`.claude/rules/security.md` § 6).
- * ⚠ **When the environment does not set one, a random secret is made for this process and the
- * consequence is said out loud**: ⚠ **restarting invalidates every token that was issued.**
- */
-const joinTokenSecret = (): string => {
-  const fromEnv = process.env["JOIN_TOKEN_SECRET"];
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
-  logger.warn("JOIN_TOKEN_SECRET is not set — using a random one for this process only");
-  logger.warn("restarting will invalidate every join token it issued");
-  return randomToken(32);
-};
-
-export const startServer = (
-  port = Number(process.env["PORT"] ?? DEFAULT_PORT),
-  baseUrl = process.env["PUBLIC_BASE_URL"] ?? DEFAULT_BASE_URL,
-  /**
-   * ⚠ **For checks that would otherwise have to wait out a real heartbeat.**
-   *
-   * ⚠ **Not read from the environment** — ⚠ **a value that can be set from outside the process is
-   * a value somebody sets in production by accident** (`docs/adr/0011` paid for that lesson).
-   */
-  options: { readonly heartbeatMs?: number } = {},
-) => {
-  // ⚠⚠ **The build has to have run** (`docs/adr/0016`).
-  //
-  // ⚠ **Said here, at startup, ⚠ naming the command** — ⚠ **not as a stack trace on one request.**
-  // ⚠ **`existsSync` says the file is there; ⚠ it says nothing about it being current.**
-  //   ⚠ **Freshness is the gate runners' job, ⚠ and they build rather than check.**
-  const missing = missingServedFiles();
-  if (missing.length > 0) {
-    // ⚠ `warn`, ⚠ because `error` is not a level this logger has (`src/log.ts`), ⚠ and
-    //   ⚠ adding one for a startup line is wider than this change.
-    logger.warn("the browser's files have not been built — run `npm run build`", { missing });
-    throw new Error("the browser's files have not been built — run `npm run build`");
-  }
-
-  const trustedSourceHeader = process.env["TRUSTED_SOURCE_HEADER"] ?? "";
-  if (trustedSourceHeader === "") {
-    logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
-    logger.warn("behind a tunnel that makes every caller look like one source");
-  }
-  const store = createRoomStore();
-  const ctx: Context = {
-    store,
-    baseUrl,
-    secret: joinTokenSecret(),
-    hub: createHub(),
-    knockRejections: createKnockRejectionCounter(),
-    knocks: createKnocks({
-      newId: () => randomToken(16),
-      // ⚠ Asked, never reached into. ⚠ The door does not get to browse the rooms.
-      roomExists: (id) => store.get(id) !== undefined,
-    }),
-    trustedSourceHeader,
-  };
-  /**
-   * ⚠⚠ **The Node adapter, ⚠ and the only Node-shaped code left in the request path.**
-   *
-   * ⚠ **`handle` speaks `Request` and `Response`** (`docs/adr/0015`) — ⚠ **so a Worker can call
-   * the same function.** ⚠ **This turns Node's objects into those and back.**
-   */
-  const server = createServer((req, res) => {
-    void (async () => {
-      const url = new URL(req.url ?? "/", baseUrl);
-      const headers = new Headers();
-      for (const [k, v] of Object.entries(req.headers)) {
-        if (typeof v === "string") headers.set(k, v);
-        else if (Array.isArray(v)) headers.set(k, v.join(", "));
-      }
-      // ⚠ The socket's address, put where `handle` can read it. ⚠ A `Request` does not carry one,
-      //   ⚠ and inventing one later would be worse than having none (`sourceOf`).
-      if (trustedSourceHeader === "" && req.socket.remoteAddress) {
-        headers.set(NODE_SOURCE_HEADER, req.socket.remoteAddress);
-      }
-      const hasBody = req.method !== "GET" && req.method !== "HEAD";
-      const request = new Request(url, {
-        method: req.method ?? "GET",
-        headers,
-        ...(hasBody ? { body: req as unknown as ReadableStream, duplex: "half" } : {}),
-      } as RequestInit);
-      const answer = await handle(ctx, request);
-      res.writeHead(answer.status, Object.fromEntries(answer.headers));
-      res.end(await answer.text());
-    })().catch(() => {
-      // ⚠ A rejected promise here would take the process down and end every live room.
-      res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: "something went wrong here" }));
-    });
-  });
-  // ⚠ The same process, the same port (`docs/adr/0002`). ⚠ Only HTTP and WebSocket go through
-  //   ⚠ the tunnel, and media goes through neither (`docs/adr/0003`).
-  // ⚠ Kept, because an upgraded socket is no longer one of the HTTP server's connections —
-  //   ⚠ `handleUpgrade` detaches it, so `closeAllConnections()` does not reach it.
-  //   ⚠ Without a handle on this, "stop answering" cannot be asked for, and the one behaviour
-  //   ⚠ that depends on it (`docs/adr/0010`: the call survives us) cannot be checked.
-  const wss = attachSignaling(server, {
-    hub: ctx.hub,
-    secret: ctx.secret,
-    knocks: ctx.knocks,
-    touch: (roomId) => ctx.store.touch(roomId),
-    ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
-  });
-
-  // ⚠ Rooms nobody is in do not linger. ⚠ `store.get` already refuses an expired one, so this is
-  //   ⚠ about memory and about hanging up, not about correctness of the answer.
-  // ⚠ Anyone still holding a socket for a swept room is closed with the same code as a host
-  //   ⚠ closing it: ⚠ from where they sit, the room is over either way, and inventing a third
-  //   ⚠ thing to say would be telling them something we do not know.
-  const sweeper = setInterval(() => {
-    for (const roomId of ctx.store.sweep()) {
-      ctx.hub.closeRoom(roomId, CLOSE_ROOM_CLOSED, "this room was left open and has expired");
-      logger.info("a room expired", { roomId });
-    }
-  }, SWEEP_INTERVAL_MS);
-  // ⚠ Never hold the process open for the sweeper.
-  sweeper.unref?.();
-  server.listen(port, () => {
-    logger.info("kagima is listening", { baseUrl, port });
-    logger.info("rooms live in this process only — stopping it ends every room");
-  });
-
-  return {
-    server,
-    close() {
-      for (const client of wss.clients) client.terminate();
-      server.closeAllConnections();
-      server.close();
-    },
-  };
-};
-
-if (process.argv[1] && import.meta.filename === process.argv[1]) startServer();
