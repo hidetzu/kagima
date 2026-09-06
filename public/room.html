@@ -72,6 +72,7 @@
 <script type="module">
   import { classifyMediaError, createCall } from "/client/call.js";
   import { createDiagnostics } from "/client/diagnostics.js";
+  import { forgetHidden, watchDiscards } from "/client/discarded.js";
   import { knock, readKnock, roomIdFromPath, WORDING } from "/client/guest.js";
   import { connectSignaling } from "/client/transport.js";
   import { guestStatus, outranks } from "/status/status.js";
@@ -161,6 +162,9 @@
         closedCode ??= e.code;
         noteSocketClosed(e.code);
         if (e.code === 4005) {
+          // ⚠ The room is over. ⚠ What was written down about this page goes with it
+          //   (`src/diagnostics/discards.ts`: ⚠ one room's worth, ⚠ never a pile across rooms).
+          forgetHidden();
           call?.hangUp();
           ending = outranks(ending, "closed");
           render();
@@ -213,7 +217,11 @@
 
 
       // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.
-      const diagnostics = createDiagnostics(call.pc);
+      // ⚠⚠ **Started once this page is in the room** (kagima#96). ⚠ **A page still at the door
+      //   ⚠ has nothing to survive.** ⚠ **Reading first is what counts the page this one was
+      //   ⚠ built in place of** (`src/diagnostics/discards.ts`).
+      const discards = watchDiscards(roomId);
+      const diagnostics = createDiagnostics(call.pc, undefined, discards.facts);
       // ⚠ Handed to the listener that was attached before `getUserMedia`. ⚠ Attaching a second
       //   ⚠ listener here would miss exactly what the first one was moved up to catch.
       noteSocketClosed = (code) => diagnostics.noteSocketClosed(code);

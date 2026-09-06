@@ -38,6 +38,14 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
   ["/client/call.js", { file: "dist/client/call.js", type: "text/javascript; charset=utf-8" }],
   ["/call/restart.js", { file: "dist/call/restart.js", type: "text/javascript; charset=utf-8" }],
   [
+    "/client/discarded.js",
+    { file: "dist/client/discarded.js", type: "text/javascript; charset=utf-8" },
+  ],
+  [
+    "/diagnostics/discards.js",
+    { file: "dist/diagnostics/discards.js", type: "text/javascript; charset=utf-8" },
+  ],
+  [
     "/client/remember.js",
     { file: "dist/client/remember.js", type: "text/javascript; charset=utf-8" },
   ],

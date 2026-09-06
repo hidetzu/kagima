@@ -15,6 +15,8 @@
 //   ⚠ forbids that for everything outside `src/client`, and this file lives outside it so the
 //   ⚠ pure part can be checked in the fast tier.**
 
+import type { DiscardFacts } from "./discards.ts";
+
 /** ⚠ **A candidate, reduced to the two things that are safe and the two that matter.** */
 export type CandidateFact = {
   /** ⚠ `host` / `srflx` / `prflx` / `relay`. ⚠ **Never the line it came from.** */
@@ -65,6 +67,11 @@ export type Snapshot = {
    * this, ⚠ so they keep reporting exactly what they did before.**
    */
   readonly heartbeat: HeartbeatFacts | null;
+  /**
+   * ⚠⚠ **How long this page has lasted while nobody was looking** (`discards.ts`, kagima#96).
+   * ⚠ **`null` when nothing is watching**, ⚠ so every check that predates it is unchanged.
+   */
+  readonly discards: DiscardFacts | null;
   /**
    * ⚠⚠ **When this snapshot was taken, ⚠ on the same clock as `transitions`** (kagima#91).
    *
@@ -482,6 +489,27 @@ export const formatReport = (s: Snapshot): string => {
           : "not reported by this browser"
       }`,
     );
+  }
+
+  // ⚠⚠ **What the browser did to this page while nobody was looking** (kagima#96).
+  //
+  // ⚠ **Every number here is a LOWER BOUND** — ⚠ **how often a hidden page may write is the
+  //   ⚠ browser's decision** — ⚠ **and the line says so rather than leaving the reader to know**
+  //   (`.claude/rules/evidence.md`).
+  if (s.discards !== null) {
+    const d = s.discards;
+    lines.push(
+      `  thrown away while hidden: ${
+        d.survivedMs.length === 0
+          ? "none observed"
+          : `${d.survivedMs.length} — lasted at least ` +
+            `${d.survivedMs.map((ms) => `${num(ms / 1000, "?")}s`).join(", ")}` +
+            "  (⚠ a reload of a hidden page reads the same)"
+      }`,
+    );
+    if (d.hiddenForMs !== null) {
+      lines.push(`  hidden right now: at least ${num(d.hiddenForMs / 1000, "?")}s`);
+    }
   }
 
   lines.push("");
