@@ -22,6 +22,10 @@ import { type Browser, chromium, type Page } from "playwright";
 const PORT = 8971;
 const BASE = `http://127.0.0.1:${PORT}`;
 
+/** ⚠ **The temporary gate** (`docs/adr/0024`). ⚠ **Only the Host's page and making a room.** */
+const GATE = "kagima:a-worker-gate";
+const AS_HOST = `Basic ${Buffer.from(GATE, "utf8").toString("base64")}`;
+
 const started: Array<{ kill: () => void }> = [];
 const browsers: Browser[] = [];
 
@@ -45,6 +49,10 @@ const theWorker = async (): Promise<void> => {
       `PUBLIC_BASE_URL:${BASE}`,
       "--var",
       "JOIN_TOKEN_SECRET:a-worker-gate-secret",
+      // ⚠⚠ **The door before the door, ⚠ on** (`docs/adr/0024`). ⚠ **A run with it off would
+      //   ⚠ prove nothing about it, ⚠ and the Guest half is the claim.**
+      "--var",
+      `ROOM_GATE:${GATE}`,
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -55,10 +63,15 @@ const theWorker = async (): Promise<void> => {
   child.stderr.on("data", (d: Buffer) => said.push(d.toString()));
 
   // ⚠ Waited for, ⚠ not slept through. ⚠ A fixed sleep is how a check becomes flaky.
+  //
+  // ⚠⚠ **Answering is up.** ⚠ **This waited for `ok` until 2026-09-06, ⚠ and the gate made `/`
+  //   ⚠ answer 401** (`docs/adr/0024`) — ⚠ **so a Worker that was running looked like one that
+  //   ⚠ never started, ⚠ for 50 seconds, ⚠ and then said so.**
+  // ⚠ **"Is it up" and "did I get in" are different questions.**
   for (let i = 0; i < 200; i++) {
     try {
-      const answer = await fetch(`${BASE}/`);
-      if (answer.ok) return;
+      await fetch(`${BASE}/`);
+      return;
     } catch {
       // ⚠ Not up yet. ⚠ Saying why would be guessing.
     }
@@ -89,7 +102,22 @@ test("⚠⚠ two browsers talking through a Worker and a Durable Object", async 
   });
   browsers.push(browser);
 
-  const hostContext = await browser.newContext({ permissions: ["camera", "microphone"] });
+  // ⚠⚠ **The gate is real** (`docs/adr/0024`). ⚠ **Asserted before anything is opened, ⚠ so a
+  //   ⚠ run that forgot to turn it on cannot look like a run that passed it.**
+  for (const [method, path] of [
+    ["GET", "/"],
+    ["POST", "/api/rooms"],
+  ] as const) {
+    const answer = await fetch(`${BASE}${path}`, { method });
+    assert.equal(answer.status, 401, `${method} ${path} is not behind the gate`);
+  }
+  console.log("  observed: making a room is behind the gate");
+
+  const hostContext = await browser.newContext({
+    permissions: ["camera", "microphone"],
+    // ⚠ The Host has it. ⚠ A browser would be asked; ⚠ here it is handed over.
+    httpCredentials: { username: "kagima", password: "a-worker-gate" },
+  });
   const host = await hostContext.newPage();
   host.on("pageerror", (e) => assert.fail(`the host page threw: ${e.message}`));
   await host.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -104,6 +132,11 @@ test("⚠⚠ two browsers talking through a Worker and a Durable Object", async 
   );
   console.log(`  observed: the Worker handed over ${shareUrl.replace(/\/r\/.*/, "/r/…")}`);
 
+  // ⚠⚠ **The Guest has nothing** (`docs/adr/0024`, `docs/adr/0017`).
+  //
+  // ⚠ **No credentials on this context at all.** ⚠ **If the gate ever moved in front of the room
+  //   ⚠ page or the knock, ⚠ this browser would stop at a 401 and the case would fail** —
+  //   ⚠ **which is the point.**
   const guestContext = await browser.newContext({ permissions: ["camera", "microphone"] });
   const guest = await guestContext.newPage();
   guest.on("pageerror", (e) => assert.fail(`the guest page threw: ${e.message}`));
