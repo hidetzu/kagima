@@ -34,6 +34,8 @@
 | 入口 | ⚠ **存在しないルームと、⚠ Host が応じていないルームは、⚠ 外から区別できない** | — | ⚠ **ケース `guest-refusals`**(`npm run e2e`)。⚠ **2 つの待機画面を文字列として比較する** |
 | 入口 | ⚠ **入れなかった人のカメラは、⚠ 一度も求められない** | W3C Media Capture(`getUserMedia`) | ⚠ **ケース `third-person`**(`npm run e2e`)。⚠ **待っている側に `kagimaCall` が存在しないことを見る** |
 | ブラウザ間 | ⚠ **2 人が、⚠ 我々が書いていない 2 つのエンジンのあいだで、映像と音声を双方向にやりとりできる** | W3C WebRTC(`RTCPeerConnection`)、Media Capture(`getUserMedia`) | ⚠ **ケース `chromium-to-firefox`**(`npm run external`)。⚠ **`framesDecoded` を両側で読む。⚠ `connectionState` では判定しない** |
+| 接続の死活 | ⚠ **サーバが送ったハートビートに、⚠ 所定回数 有効な pong が返らなければ、⚠ その socket を `CLOSE_SILENT` で切る** | — | ⚠ **ケース `heartbeat`(`npm run check`)。⚠ 実測 2026-09-06: ⚠ 背面のタブが 453 秒のあいだ 26/26 答えた**([`adr/0020`](adr/0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md)) |
+| ⚠ **Host の復帰** | ⚠ **ページが破棄されても、⚠ Host は同じルームに戻れる** | — | ⚠ **ケース `host-comes-back-to-a-thrown-away-page`**(`npm run e2e`)。⚠ **実測 2026-09-06: ⚠ 実機で 2 回とも戻った**([`adr/0021`](adr/0021-keep-one-room-key-on-the-device-and-nothing-else.md)) |
 
 ## 2. 意図的に実装していないもの
 

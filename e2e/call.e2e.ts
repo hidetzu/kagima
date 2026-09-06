@@ -919,16 +919,17 @@ test(titleOf("the-host-comes-back"), async () => {
   await stranger.page.context().close();
 });
 
-test(titleOf("shadow-heartbeat"), async () => {
-  // ⚠⚠ **The heartbeat that a page has to answer** (`docs/adr/0020`, kagima#62).
+test(titleOf("heartbeat"), async () => {
+  // ⚠⚠ **The heartbeat a page has to answer** (`docs/adr/0020`, kagima#62).
   //
-  // ⚠ **`test/shadow-heartbeat.test.ts` drives it with a fake socket, ⚠ which can only show that
-  //   ⚠ the server sends and counts.** ⚠ **Whether a real page actually answers is a different
-  //   ⚠ claim, ⚠ and it is the one the port depends on** — ⚠ **a Worker has no protocol ping,
-  //   ⚠ so this is what will be left.**
+  // ⚠ **`test/heartbeat.test.ts` drives it with a fake socket, ⚠ which can only show that the
+  //   ⚠ server sends and counts.** ⚠ **Whether a real page answers is a different claim, ⚠ and
+  //   ⚠ it is the one everything now rests on** — ⚠ **a Worker has no protocol ping, ⚠ so this
+  //   ⚠ is all there is.**
   //
-  // ⚠ **The heartbeat is deliberately fast here.** ⚠ **The value in production is chosen, ⚠ not
-  //   ⚠ measured** (`docs/adr/0020`), ⚠ **and waiting it out would make this a check nobody runs.**
+  // ⚠ **The heartbeat is deliberately fast here.** ⚠ **The value in production is the one the
+  //   ⚠ measurement left standing** (`docs/adr/0020`), ⚠ **and waiting it out would make this a
+  //   ⚠ check nobody runs.**
   const { browser: b } = await ready();
   const port = nextPort++;
   const base = `http://127.0.0.1:${port}`;
@@ -941,33 +942,39 @@ test(titleOf("shadow-heartbeat"), async () => {
   await decideAtTheDoor(host.page, true);
   await waitForFrames(host.page, "the host");
 
-  // ⚠ Waited for, ⚠ not slept through. ⚠ False until the page has answered, ⚠ so it cannot pass
-  //   ⚠ on something that was already true.
-  await host.page.waitForFunction(
-    () => {
-      const shown = document.getElementById("diagnostics-text")?.textContent ?? "";
-      return /heartbeats answered: *[1-9]/.test(shown);
-    },
-    undefined,
-    { timeout: 20_000 },
+  // ⚠⚠ **Long enough that a page which stopped answering would be gone.**
+  //
+  // ⚠ **This, ⚠ not the counter, ⚠ is the claim.** ⚠ **A mutation that stopped the page
+  //   ⚠ answering left the counter climbing — ⚠ it counted pings received, ⚠ not pongs sent —
+  //   ⚠ and this case passed.** ⚠ **Surviving many heartbeat periods cannot be faked that way:
+  //   ⚠ the server closes a socket that does not answer.**
+  const periods = 12;
+  await new Promise((r) => setTimeout(r, 150 * periods));
+
+  // ⚠⚠ **Read from the other side.**
+  //
+  // ⚠ **The call's own state cannot show this**: ⚠ **media goes browser to browser and survives
+  //   ⚠ signalling going away, ⚠ on purpose** (`docs/adr/0010`). ⚠ **A first version asserted on
+  //   ⚠ `connectionState` and a mutation that stopped the page answering walked straight past.**
+  // ⚠ **But when the server hangs up on a silent socket, ⚠ the hub tells whoever is left** —
+  //   ⚠ **and that is the Guest's screen.**
+  const guestSees = await text(guest.page, "status");
+  console.log(`  observed: after ${periods} heartbeat periods the guest is told "${guestSees}"`);
+  assert.doesNotMatch(
+    guestSees,
+    /相手の接続が切れました/,
+    `the host was hung up on while its page was answering: ${guestSees}`,
   );
 
+  // ⚠ And the instrument agrees. ⚠ Read after the claim above, ⚠ never instead of it.
   const report = await host.page.evaluate(
     () => document.getElementById("diagnostics-text")?.textContent ?? "",
   );
-  const answered = /heartbeats answered: *(\d+)/.exec(report)?.[1];
+  const answered = Number(/heartbeats answered: *(\d+)/.exec(report)?.[1] ?? "0");
   console.log(`  observed: the page answered ${answered} heartbeats`);
-  console.log(`  observed: ${/frozen: *(.*)/.exec(report)?.[1] ?? "no line about freezing"}`);
+  assert.ok(answered > 0, `the page answered nothing:\n${report}`);
 
-  // ⚠⚠ And nobody was hung up on for it. ⚠ The shadow decides nothing (`docs/adr/0020`).
-  const stillThere = await host.page.evaluate(
-    () =>
-      (globalThis as unknown as { kagimaCall?: { pc: RTCPeerConnection } }).kagimaCall?.pc
-        .connectionState ?? "gone",
-  );
-  assert.notEqual(stillThere, "closed", "the shadow heartbeat closed a call");
-
-  // ⚠ The address wall still holds with the new lines in the report (`docs/adr/0012`).
+  // ⚠ The address wall still holds with these lines in the report (`docs/adr/0012`).
   for (const pattern of [/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/, /[0-9a-f-]{20,}\.local\b/i]) {
     assert.doesNotMatch(report, pattern, `an address reached the report:\n${report}`);
   }

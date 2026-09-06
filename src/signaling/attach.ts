@@ -46,9 +46,7 @@ export { HEARTBEAT_MS, MISSED_PONGS_ALLOWED } from "./session.ts";
 const asSignalingSocket = (ws: WebSocket): SignalingSocket => ({
   send: (line) => ws.send(line),
   close: (code, reason) => ws.close(code, reason),
-  ping: () => ws.ping(),
   on: (handlers) => {
-    ws.on("pong", handlers.onPong);
     ws.on("close", handlers.onClose);
     ws.on("message", (data, isBinary) => {
       // ⚠ Binary is answered without the content ever being decoded (`./socket.ts`).

@@ -87,10 +87,13 @@ export const connectSignaling = (
       //   ⚠ **Today it decides nothing; ⚠ the server is only watching.**
       if (message.type === "ping") {
         const n = (parsed as { n?: unknown }).n;
-        if (typeof n === "number") {
-          socket.send(JSON.stringify({ type: "pong", n }));
-          heartbeat.answered(n);
-        }
+        if (typeof n !== "number") return;
+        // ⚠⚠ **Counted only after it went out.** ⚠ **A count taken before the send would say
+        //   ⚠ "answered" about a ping we merely received** — ⚠ **and a mutation that removed the
+        //   ⚠ send left the number climbing, ⚠ which is how the instrument would have lied about
+        //   ⚠ the very thing it was built to measure.**
+        socket.send(JSON.stringify({ type: "pong", n }));
+        heartbeat.answered(n);
         return;
       }
       for (const h of handlers) h(parsed as SignalMessage);

@@ -3,17 +3,28 @@
 - 状態: **決定**
   — ⚠ **`ws` に求めているものが 1 つ減る途中である**(2026-09-06、[`0020`](0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md))
 
-> ⚠ **protocol ping は、⚠ `ws` に求めていたもののうち「自分で書きたくないもの」の 1 つだった。**
+> ⚠⚠ **`ws` に任せているものが 1 つ減った**(2026-09-06)。
+>
+> ⚠ **protocol ping は、⚠ 「自分で書きたくないもの」の 1 つだった。**
 > ⚠ **Worker のサーバ側 WebSocket には `ping` が無い**(⚠ 実測 2026-09-06、
 > [`0015`](0015-put-the-service-on-cloudflare-after-three-things-are-settled.md))。
+> ⚠ **so ハートビートはメッセージになり、⚠ [`0020`](0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md)
+> が実機で測ったうえで本採用した。**
 >
-> ⚠ **[`0020`](0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md) が、
-> ⚠ メッセージ版のハートビートを 影で 動かして測っている。**
-> ⚠ **それが本採用になった PR で、⚠ この ADR も同時に書き換える** — ⚠ **後回しにしない
-> (Owner、2026-09-06)。**
+> ⚠ **いま `ws` に任せているもの:**
+>
+> ```text
+> ⚠ ハンドシェイク(⚠ subprotocol の折衝も含む)
+> ⚠ フレーミングと close コード
+> ⚠ maxPayload
+> ⚠⚠ ping / pong は もう 任せていない
+> ```
 >
 > ⚠ **RFC 6455 を自分で書かない、という決定そのものは変わらない。**
-> ⚠ **変わるのは「何を任せているか」の一覧である。**
+> ⚠ **変わったのは「何を任せているか」の一覧である。**
+>
+> ⚠ **[`0015`](0015-put-the-service-on-cloudflare-after-three-things-are-settled.md) は
+> 「移植で `ws` が不要になる」と書いている。** ⚠ **その前倒しが 1 つ起きた。**
 - 日付: 2026-09-04
 
 ## 決定
