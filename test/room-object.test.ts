@@ -9,19 +9,29 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { generateRoomId } from "../src/room/room-id.ts";
+import { ROOM_IDLE_MS } from "../src/room/store.ts";
 import { ROOM_HEADER, RoomObject } from "../src/room-object.ts";
 import { codeOf } from "./source-text.ts";
 
 /** ⚠ A storage that records. ⚠ Nothing here is Cloudflare's; ⚠ the shape is what is used. */
 const fakeStorage = () => {
   const held = new Map<string, unknown>();
+  // ⚠ ⚠ The alarm is state too. ⚠ Recorded, ⚠ because "when does this room let go" is a claim.
+  let alarmAt: number | null = null;
   return {
     held,
+    alarmAt: () => alarmAt,
     as: {
       get: async (k: string) => held.get(k),
       put: async (k: string, v: unknown) => void held.set(k, v),
       delete: async (k: string) => held.delete(k),
       list: async () => new Map(held),
+      setAlarm: async (at: number) => {
+        alarmAt = at;
+      },
+      deleteAlarm: async () => {
+        alarmAt = null;
+      },
     },
   };
 };
@@ -140,4 +150,63 @@ test("⚠⚠ the object never grows its own copy of a rule", async () => {
     assert.doesNotMatch(code, pattern, `the object decides something about ${what}`);
   }
   assert.match(code, /handle\(ctx, request\)/, "the object does not go through handle");
+});
+
+test("⚠⚠ a room knows when it is over, ⚠ and the clock moves with it", async () => {
+  // ⚠ **Node has a sweeper** (`src/node-server.ts`). ⚠ **A Durable Object has no process to run
+  //   ⚠ one in** — ⚠ **so the room is what remembers** (`docs/adr/0025`).
+  const { storage, ask } = anObject();
+  const made = await ask("/api/rooms", { method: "POST" });
+  const { roomId, hostKey } = (await made.json()) as { roomId: string; hostKey: string };
+
+  const written = storage.held.get("room") as { lastSeenAt: number };
+  const first = storage.alarmAt();
+  console.log(`  observed: the room armed itself for ${(first ?? 0) - written.lastSeenAt}ms later`);
+  assert.equal(first, written.lastSeenAt + ROOM_IDLE_MS, "the alarm is not the room's own life");
+
+  // ⚠ Used again. ⚠ A room being used pushes its own end away (`docs/adr/0010`).
+  await new Promise((r) => setTimeout(r, 5));
+  await ask(
+    `/api/rooms/${roomId}/host-session`,
+    {
+      method: "POST",
+      body: JSON.stringify({ hostKey }),
+    },
+    roomId,
+  );
+
+  // ⚠ `host-session` does not touch the room, ⚠ so this asserts the alarm did NOT move —
+  //   ⚠ which is the honest claim. ⚠ What moves it is `touch`, ⚠ and that is the heartbeat's.
+  assert.equal(storage.alarmAt(), first, "the alarm moved without the room being used");
+});
+
+test("⚠⚠ when the alarm fires and the room is over, ⚠ nothing is kept", async () => {
+  const { storage, object, ask } = anObject();
+  await ask("/api/rooms", { method: "POST" });
+  assert.equal(storage.held.size, 1);
+
+  // ⚠ Old enough to be over. ⚠ Time is moved rather than waited out.
+  const held = storage.held.get("room") as { lastSeenAt: number };
+  storage.held.set("room", { ...held, lastSeenAt: Date.now() - ROOM_IDLE_MS - 1 });
+
+  await object.alarm();
+
+  console.log(`  observed: after the alarm the object holds ${storage.held.size} things`);
+  assert.equal(storage.held.size, 0, "an expired room was kept");
+  assert.equal(storage.alarmAt(), null, "the alarm was left armed for a room that is gone");
+});
+
+test("⚠⚠ an alarm that fires early re-arms rather than deleting", async () => {
+  // ⚠ **A heartbeat can move `lastSeenAt` after the alarm was set.** ⚠ **Then the alarm is early,
+  //   ⚠ not right** — ⚠ **and deleting a live room would be us ending a call nobody ended.**
+  const { storage, object, ask } = anObject();
+  await ask("/api/rooms", { method: "POST" });
+
+  const held = storage.held.get("room") as { lastSeenAt: number };
+  storage.held.set("room", { ...held, lastSeenAt: Date.now() });
+
+  await object.alarm();
+
+  assert.equal(storage.held.size, 1, "a live room was deleted by an early alarm");
+  assert.ok((storage.alarmAt() ?? 0) > Date.now(), "the alarm was not re-armed");
 });
