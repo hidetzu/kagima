@@ -47,11 +47,36 @@ export type Transition = {
   readonly value: string;
 };
 
+/**
+ * ⚠⚠ **What the connection holds at the moment the snapshot was taken** (kagima#91).
+ *
+ * ⚠ **The candidate lines are about the whole call, ⚠ so this is the only thing left that can
+ * say "and it is gone now".** ⚠ **Printing one of the two and not the other is what produced
+ * the misreading in the first place** — ⚠ **the same lesson as `frames decoded`.**
+ */
+export type InUseNow = {
+  readonly localCandidates: number;
+  readonly remoteCandidates: number;
+  readonly pairSelected: boolean;
+};
+
 export type Snapshot = {
-  /** ⚠ Counted by type, so the shape is visible without any of the lines. */
+  /**
+   * ⚠ Counted by type, so the shape is visible without any of the lines.
+   *
+   * ⚠⚠ **Everything this call gathered, ⚠ not what the connection holds at this instant**
+   * (kagima#91). ⚠ **`getStats()` answers about the connection as it is now, ⚠ and a connection
+   * that dropped holds nothing.** ⚠ **Measured on 2026-09-06: ⚠ a call that had carried video
+   * for 176 seconds reported `local candidates: none` — ⚠ the same words a call that never
+   * gathered anything reports.** ⚠ **`could not be obtained ≠ not there`**
+   * (`.claude/rules/evidence.md`), ⚠ **and "how did these two ends reach each other" is exactly
+   * the question a dropped call is being read for.**
+   */
   readonly localCandidates: readonly CandidateFact[];
   readonly remoteCandidates: readonly CandidateFact[];
+  /** ⚠ **The last pair that was selected.** ⚠ `null` when none ever was. */
   readonly selected: PairFact | null;
+  readonly inUseNow: InUseNow;
   readonly transitions: readonly Transition[];
   readonly msToFirstFrame: number | null;
   /** ⚠ How long it was held after the first frame. ⚠ `null` when no frame ever arrived. */
@@ -256,6 +281,16 @@ const countByType = (candidates: readonly CandidateFact[]): string => {
 };
 
 /**
+ * ⚠ **The candidates this call gathered, ⚠ named as that** (kagima#91).
+ *
+ * ⚠ **`none` is left bare.** ⚠ **A qualifier on it would be answering a question that was not
+ * asked** — ⚠ **and `could not be obtained ≠ not there` is exactly what this line exists to
+ * stop being confused** (`.claude/rules/evidence.md`).
+ */
+const gatheredDuring = (candidates: readonly CandidateFact[]): string =>
+  candidates.length === 0 ? "none" : `${countByType(candidates)}  (gathered during this call)`;
+
+/**
  * ⚠ **When the other side arrived**, ⚠ **read from the transitions rather than kept separately.**
  *
  * ⚠ **Grounds: the clock starts when the page does, ⚠ and the host's page starts long before
@@ -326,6 +361,72 @@ export const selectedPairIdOf = (stats: Iterable<StatLike>): string | null => {
   const nominated = pairs.filter((p) => p.state === "succeeded" && p.nominated === true);
   return nominated.length === 1 ? ((nominated[0] as StatLike).id ?? null) : null;
 };
+
+/**
+ * ⚠⚠ **What this call has gathered so far, ⚠ carried from one snapshot to the next** (kagima#91).
+ *
+ * ⚠ **`getStats()` answers about the connection as it is now.** ⚠ **A connection that dropped
+ * holds no candidates and no pair, ⚠ so a panel read after a drop said `local candidates: none`
+ * for a call that had carried video for 176 seconds** (measured 2026-09-06).
+ * ⚠ **"How did these two ends reach each other" is the one thing a dropped call is read for, ⚠ and
+ * it was the one thing that disappeared.**
+ *
+ * ⚠ **Keyed by the candidate's stats id**, ⚠ **so the same candidate seen on 250 consecutive
+ * snapshots is one candidate, ⚠ and one gathered again after an ICE restart is another.**
+ * ⚠ **It grows with what the call gathers and with nothing else.**
+ */
+export type Gathered = {
+  readonly local: ReadonlyMap<string, CandidateFact>;
+  readonly remote: ReadonlyMap<string, CandidateFact>;
+  /** ⚠ **The last pair that was selected.** ⚠ **Kept after it stops being selected.** */
+  readonly lastSelected: PairFact | null;
+};
+
+/** ⚠ **What one reading of the connection saw.** ⚠ Ids so the same candidate is not counted twice. */
+export type Seen = {
+  readonly local: ReadonlyMap<string, CandidateFact>;
+  readonly remote: ReadonlyMap<string, CandidateFact>;
+  readonly selected: PairFact | null;
+};
+
+/** ⚠ **A call that has not been read yet.** ⚠ Not "a call that gathered nothing" — ⚠ nothing ran. */
+export const nothingGathered = (): Gathered => ({
+  local: new Map(),
+  remote: new Map(),
+  lastSelected: null,
+});
+
+/**
+ * ⚠⚠ **What the connection held in one reading, ⚠ read off that reading and not off the pile.**
+ *
+ * ⚠ **Grounds: ⚠ folding is order-independent for a union, ⚠ and is not for "right now".**
+ * ⚠ **The panel reads every 250ms; ⚠ two readings can be in flight, ⚠ and the older one can
+ * finish last.** ⚠ **Taken from the accumulator, ⚠ "right now" would then be a reading that has
+ * already been superseded** — ⚠ **and it would be printed as the current state**
+ * (`.claude/skills/change-review/SKILL.md` § 4).
+ * ⚠ **Taken from the reading being reported, ⚠ there is nothing to overtake.**
+ */
+export const inUseOf = (seen: Seen): InUseNow => ({
+  localCandidates: seen.local.size,
+  remoteCandidates: seen.remote.size,
+  pairSelected: seen.selected !== null,
+});
+
+/**
+ * ⚠ **Fold one reading into what the call has gathered.**
+ *
+ * ⚠ **Nothing is ever removed** — ⚠ **that is the whole point.** ⚠ **What the connection holds
+ * right now leaves through `inUseOf`, ⚠ so both facts are sayable and neither stands in for
+ * the other** (⚠ **the mistake `frames decoded` made**).
+ *
+ * ⚠ **Order does not matter here.** ⚠ **A union folded in any order is the same union**, ⚠ **and
+ * a pair that was selected stays true whichever reading names it.**
+ */
+export const gatherFrom = (previous: Gathered, seen: Seen): Gathered => ({
+  local: new Map([...previous.local, ...seen.local]),
+  remote: new Map([...previous.remote, ...seen.remote]),
+  lastSelected: seen.selected ?? previous.lastSelected,
+});
 
 /**
  * ⚠ **When the clock for "first frame" may start: ⚠ on a decoded frame, ⚠ and on nothing else.**
@@ -434,15 +535,21 @@ export const formatReport = (s: Snapshot): string => {
           (out.openAtEnd ? "  ⚠ still down when this was read" : "")
     }`,
   );
-  lines.push(`  local candidates: ${countByType(s.localCandidates)}`);
-  lines.push(`  remote candidates:${countByType(s.remoteCandidates)}`);
+  // ⚠⚠ **Everything this call gathered, ⚠ said as that** (kagima#91).
+  //   ⚠ **These three lines used to be read off the connection as it stood, ⚠ so a call that had
+  //   ⚠ carried video for 176 seconds and then dropped reported `none` — ⚠ the same word a call
+  //   ⚠ that never gathered anything reports** (measured 2026-09-06).
+  // ⚠ **`none` still means none.** ⚠ **The qualifier only goes on a line that has something to
+  //   ⚠ qualify** — ⚠ **"none (gathered during this call)" would be saying two things at once.**
+  lines.push(`  local candidates: ${gatheredDuring(s.localCandidates)}`);
+  lines.push(`  remote candidates:${gatheredDuring(s.remoteCandidates)}`);
   lines.push(
     `  selected pair:    ${
       s.selected === null
         ? "none"
         : `${only(s.selected.local.type, KNOWN_TYPES)}/${only(s.selected.remote.type, KNOWN_TYPES)}` +
           ` over ${only(s.selected.local.protocol, KNOWN_PROTOCOLS)}` +
-          ` ${only(s.selected.local.family, KNOWN_FAMILIES)}`
+          ` ${only(s.selected.local.family, KNOWN_FAMILIES)}  (last selected)`
       // ⚠⚠ The family, ⚠ and nothing read into it.
       //
       // ⚠ **This used to add "globally routable: there was no NAT to traverse" for a v6
@@ -451,6 +558,23 @@ export const formatReport = (s: Snapshot): string => {
       //   ⚠ two machines on one LAN that has IPv6.**
       // ⚠ **The instrument reports candidate type, protocol, family and the selected pair.**
       // ⚠ **What that means about a network is for whoever knows how the test was run.**
+    }`,
+  );
+  // ⚠⚠ **The other half, ⚠ and it is printed always** (kagima#91).
+  //
+  // ⚠ **The three lines above are about the whole call now.** ⚠ **Without this one, ⚠ "and it is
+  //   ⚠ gone now" cannot be said at all, ⚠ and the report would have traded one misreading for
+  //   ⚠ the opposite one.**
+  // ⚠ **Always, ⚠ not only after a drop** — ⚠ **the same reasoning as `of which no media`:
+  //   ⚠ a line that appears only sometimes gets read as "this run was special".**
+  const inUse = s.inUseNow;
+  lines.push(
+    `  in use right now: ${
+      inUse.pairSelected
+        ? "the same pair, still held"
+        : inUse.localCandidates > 0 || inUse.remoteCandidates > 0
+          ? "candidates, but no pair selected"
+          : "nothing — the connection holds no candidates and no pair"
     }`,
   );
   lines.push(

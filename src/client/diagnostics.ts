@@ -21,7 +21,11 @@ import {
   familyOf,
   firstFrameAt,
   formatReport,
+  gatherFrom,
+  type Gathered,
   HOLD_TARGET_MS,
+  inUseOf,
+  nothingGathered,
   selectedPairIdOf,
 } from "../diagnostics/report.ts";
 import type { DiscardFacts } from "../diagnostics/discards.ts";
@@ -30,7 +34,11 @@ import { heartbeatObservation } from "./transport.ts";
 
 export type Diagnostics = {
   noteSocketClosed(code: number): void;
-  /** ⚠ Reads the connection as it is now. ⚠ Never stores anything between calls but the notes. */
+  /**
+   * ⚠ Reads the connection as it is now, ⚠ **and folds that reading into what the call has
+   * gathered** (kagima#91). ⚠ **What is carried between calls is the notes, the candidates and
+   * the last selected pair** — ⚠ **nothing that a later reading could contradict.**
+   */
   snapshot(): Promise<Snapshot>;
   report(): Promise<string>;
 };
@@ -62,6 +70,12 @@ export const createDiagnostics = (
   //   ⚠ and the question being measured is about the page.**
   const lifecycle = watchLifecycle();
   const transitions: Transition[] = [];
+  // ⚠⚠ **What this call has gathered, ⚠ carried across snapshots** (kagima#91).
+  //   ⚠ **`getStats()` answers about the connection as it stands, ⚠ so a call that dropped
+  //   ⚠ reported `local candidates: none` for a call that had carried video for 176 seconds.**
+  // ⚠ **The folding is in `report.ts` so the fast tier can hold it** — ⚠ **the collector reads
+  //   ⚠ the connection, ⚠ and nothing here decides what a reading means.**
+  let gathered: Gathered = nothingGathered();
   let msToFirstFrame: number | null = null;
   let socketClosed: { code: number; at: number } | null = null;
 
@@ -106,20 +120,26 @@ export const createDiagnostics = (
       const pairId = selectedPairIdOf(stats);
       const pair = pairId === null ? undefined : byId.get(pairId);
 
-      const localCandidates: CandidateFact[] = [];
-      const remoteCandidates: CandidateFact[] = [];
-      for (const stat of byId.values()) {
-        if (stat.type === "local-candidate") localCandidates.push(factOf(stat));
-        if (stat.type === "remote-candidate") remoteCandidates.push(factOf(stat));
+      // ⚠ Keyed by the stats id, ⚠ so the same candidate read 250ms apart is one candidate.
+      const seenLocal = new Map<string, CandidateFact>();
+      const seenRemote = new Map<string, CandidateFact>();
+      for (const [id, stat] of byId) {
+        if (stat.type === "local-candidate") seenLocal.set(id, factOf(stat));
+        if (stat.type === "remote-candidate") seenRemote.set(id, factOf(stat));
       }
 
-      const selected: PairFact | null =
+      const selectedNow: PairFact | null =
         pair === undefined
           ? null
           : {
               local: factOf(byId.get(pair.localCandidateId ?? "")),
               remote: factOf(byId.get(pair.remoteCandidateId ?? "")),
             };
+      // ⚠ **This reading**, ⚠ kept apart from the pile it is folded into: ⚠ **"what the call
+      //   ⚠ gathered" is a union and does not care about order; ⚠ "what it holds right now" is
+      //   ⚠ this reading and nothing else** (`inUseOf`).
+      const reading = { local: seenLocal, remote: seenRemote, selected: selectedNow };
+      gathered = gatherFrom(gathered, reading);
 
       // ⚠⚠ **The moment a frame was actually decoded, ⚠ observed here and nowhere else.**
       //
@@ -147,9 +167,10 @@ export const createDiagnostics = (
       return {
         atMs: Math.round(now() - startedAt),
         transitions: all,
-        localCandidates,
-        remoteCandidates,
-        selected,
+        localCandidates: [...gathered.local.values()],
+        remoteCandidates: [...gathered.remote.values()],
+        selected: gathered.lastSelected,
+        inUseNow: inUseOf(reading),
         msToFirstFrame,
         heldMs: msToFirstFrame === null ? null : Math.round(now() - startedAt - msToFirstFrame),
         socketClosed,
