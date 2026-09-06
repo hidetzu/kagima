@@ -181,7 +181,7 @@ flowchart LR
 
 | # | 何が | ⚠ なぜ載らないか | ⚠ 代わりに何が要るか |
 |---|---|---|---|
-| 6 | ⚠⚠ **プロセスのメモリにある 4 つの Map**(§ 1-5) | ⚠ **Worker は 1 リクエストごとに別の isolate でありうる。** ⚠ **「同じプロセス」という前提が無い** | ⚠ **Durable Object。** ⚠ **どう割るかは [kagima#47](https://github.com/hidetzu/kagima/issues/47) で未決** |
+| 6 | ⚠⚠ **プロセスのメモリにある 4 つの Map**(§ 1-5) | ⚠ **Worker は 1 リクエストごとに別の isolate でありうる。** ⚠ **「同じプロセス」という前提が無い** | ⚠ **Durable Object。** ⚠ **決まった: ⚠ 1 ルーム = 1 DO に集約する**([`adr/0022`](adr/0022-start-on-cloudflares-free-tier-with-one-durable-object-per-room.md)) |
 | 7 | ⚠ **`server.on("upgrade")` の 101 手渡し** | ⚠ `node:http` が無い | ⚠ `WebSocketPair` と `new Response(null, { status: 101, webSocket })`。⚠ **`spike/` で動いた**。⚠ **いまは `src/node-server.ts` に集まっている** |
 | 8 | ⚠ **`ws` の `WebSocketServer`** | ⚠ 同上 | ⚠ **継ぎ目は `SignalingSocket` に在る。** ⚠ アダプタ 1 枚 |
 | 9 | ⚠ **`readFileSync` で `public/` と `dist/` を配る** | ⚠ ファイルシステムが無い | ⚠ Workers Assets、⚠ または埋め込み。⚠ **継ぎ目は `Context.asset` に在る** — ⚠ **routing は もう ファイルを読まない** |
