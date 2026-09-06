@@ -52,8 +52,8 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a Host whose page the browser threw away getting back into its own room",
   },
   {
-    name: "shadow-heartbeat",
-    sees: "a real page answering the message-shaped heartbeat, and the report saying so",
+    name: "heartbeat",
+    sees: "a real page answering the heartbeat for long enough that a silent one would be gone",
   },
   {
     name: "diagnostics",

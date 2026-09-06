@@ -37,7 +37,6 @@ const fakeSocket = () => {
   const socket: SignalingSocket = {
     send: (line) => void sent.push(line),
     close: () => {},
-    ping: () => {},
     on: (h) => {
       handlers = h;
     },

@@ -3,7 +3,7 @@
 // ⚠ **`test/signaling.test.ts` opens real sockets against a real listener, ⚠ and that is the
 //   ⚠ tier that shows the wiring works.** ⚠ **This is the other claim: ⚠ the rules, ⚠ which are
 //   ⚠ the same on Node and in a Worker** (`docs/adr/0015`).
-// ⚠ **A fake socket can be asked things a real one cannot** — ⚠ **"was a ping sent", ⚠ "what code
+// ⚠ **A fake socket can be asked things a real one cannot** — ⚠ **"what was sent", ⚠ "what code
 //   ⚠ did it close with", ⚠ "was the binary frame's content ever looked at".**
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -19,14 +19,10 @@ const fakeSocket = () => {
   let handlers: SocketHandlers | undefined;
   const sent: string[] = [];
   const closes: Array<{ code: number; reason: string }> = [];
-  let pings = 0;
 
   const socket: SignalingSocket = {
     send: (line) => void sent.push(line),
     close: (code, reason) => void closes.push({ code, reason }),
-    ping: () => {
-      pings += 1;
-    },
     on: (h) => {
       handlers = h;
     },
@@ -35,10 +31,11 @@ const fakeSocket = () => {
     socket,
     sent,
     closes,
-    pings: () => pings,
     text: (data: string) => handlers?.onText(data),
     binary: () => handlers?.onBinary(),
-    pong: () => handlers?.onPong(),
+    /** ⚠ **Answers the ping that was sent** (`docs/adr/0020`). ⚠ An older echo is not an answer. */
+    pong: (line: string) =>
+      handlers?.onText(JSON.stringify({ type: "pong", n: (JSON.parse(line) as { n: number }).n })),
     end: () => handlers?.onClose(),
   };
 };
@@ -115,10 +112,10 @@ test("⚠⚠ the heartbeat gives up on a silent socket, and says silent rather t
     // ⚠ Answered every time: ⚠ it stays open however many beats pass.
     for (let i = 0; i < MISSED_PONGS_ALLOWED + 3; i++) {
       beat();
-      a.pong();
+      a.pong(a.sent[a.sent.length - 1] as string);
     }
     assert.deepEqual(a.closes, [], "a socket that answered was hung up on");
-    assert.ok(a.pings() > MISSED_PONGS_ALLOWED, "no pings were sent");
+    assert.ok(a.sent.length > MISSED_PONGS_ALLOWED, "no pings were sent");
     assert.ok(touched.length > 0, "the room's idle clock was never pushed back");
 
     // ⚠ Then stops answering.

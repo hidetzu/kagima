@@ -196,6 +196,15 @@ const connect = (base: string, roomId: string, token: string): Promise<WebSocket
     const ws = new WebSocket(`${base}/api/rooms/${roomId}/signal`, [
       `${TOKEN_PROTOCOL_PREFIX}${token}`,
     ]);
+    // ⚠⚠ **Answers the heartbeat, ⚠ because the heartbeat is a message now** (`docs/adr/0020`).
+    //
+    // ⚠ **This used to be free: ⚠ `ws` answered a protocol ping by itself and no test knew.**
+    // ⚠ **Now a client that does not answer is hung up on** — ⚠ **which is exactly the change,
+    //   ⚠ and this line is what a real page does** (`src/client/transport.ts`).
+    ws.addEventListener("message", (event) => {
+      const m = JSON.parse(String(event.data)) as { type?: string; n?: number };
+      if (m.type === "ping") ws.send(JSON.stringify({ type: "pong", n: m.n }));
+    });
     ws.addEventListener("open", () => resolve(ws), { once: true });
     ws.addEventListener("error", () => reject(new Error("refused")), { once: true });
   });

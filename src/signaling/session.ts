@@ -143,21 +143,17 @@ export const createSessions = (options: SessionOptions) => {
     const openedAt = now();
     if (!roomOpenedAt.has(roomId)) roomOpenedAt.set(roomId, openedAt);
 
+    // ⚠⚠ **The heartbeat is a message now** (`docs/adr/0020`, kagima#62).
+    //
+    // ⚠ **A Worker's server-side WebSocket has no `ping`** (⚠ measured 2026-09-06,
+    //   ⚠ `docs/adr/0015`). ⚠ **So the frame the browser used to answer by itself is gone, ⚠ and
+    //   ⚠ what answers now is the page** (`src/client/transport.ts`).
+    //
+    // ⚠ **That changes what is measured** — ⚠ **from "the socket is alive" to "the page is
+    //   ⚠ running"** — ⚠ **and it closes more sockets than the old one, ⚠ not fewer.**
+    // ⚠ **So it ran in shadow first, ⚠ and the values below are the ones the measurement left
+    //   ⚠ standing** (`docs/adr/0020` carries the numbers).
     let missed = 0;
-
-    // ⚠⚠ **The shadow heartbeat** (`docs/adr/0020`, kagima#62).
-    //
-    // ⚠ **It runs beside the real one and decides nothing.** ⚠ **`missed` above is what closes a
-    //   ⚠ socket; ⚠ these three only record what the message-shaped heartbeat WOULD have done.**
-    // ⚠ **So the value it needs can be measured on real devices, ⚠ under real use, ⚠ without
-    //   ⚠ anybody being hung up on for a number nobody has measured yet.**
-    //
-    // ⚠⚠ **This is time-limited and it has a retirement plan** — ⚠ **`docs/adr/0020`, ⚠ the same
-    //   ⚠ shape `docs/adr/0011` used and `docs/adr/0014` retired.**
-    // ⚠ **Two heartbeats is exactly what `CLAUDE.md` § 3 forbids** — ⚠ **which is why the end is
-    //   ⚠ written down before the beginning.**
-    let shadowMissed = 0;
-    let shadowSaid = false;
     let pingNumber = 0;
 
     const beat = setInterval(() => {
@@ -171,20 +167,6 @@ export const createSessions = (options: SessionOptions) => {
       missed += 1;
       // ⚠ Still here. ⚠ The room's idle clock is pushed back by the same beat that proves it.
       options.touch?.(roomId);
-      socket.ping();
-
-      // ⚠⚠ Shadow only. ⚠ Said once, ⚠ and nothing is closed.
-      if (shadowMissed >= MISSED_PONGS_ALLOWED && !shadowSaid) {
-        shadowSaid = true;
-        // ⚠ What it WOULD have done, ⚠ named as such. ⚠ Never "the socket was silent" —
-        //   ⚠ the socket is right here, ⚠ answering the protocol ping.
-        logger.info("the shadow heartbeat would have closed this socket", {
-          roomId,
-          afterMs: Math.round(now() - openedAt),
-          unanswered: shadowMissed,
-        });
-      }
-      shadowMissed += 1;
       pingNumber += 1;
       socket.send(pingLine(pingNumber));
     }, heartbeatMs);
@@ -192,10 +174,6 @@ export const createSessions = (options: SessionOptions) => {
     beat.unref?.();
 
     socket.on({
-      onPong: () => {
-        missed = 0;
-      },
-
       // ⚠ Signalling is text. ⚠ The frame's content is never looked at — ⚠ so nothing a stranger
       //   ⚠ sent as bytes is ever decoded, ⚠ let alone parsed.
       onBinary: () => socket.close(CLOSE_BAD_MESSAGE, "signalling is text"),
@@ -214,16 +192,16 @@ export const createSessions = (options: SessionOptions) => {
         // ⚠ **An id we do not know is ignored in silence: ⚠ answering would say which ids are real.**
         // ⚠ **Nothing is said back on success either** — ⚠ **the Host learns the outcome by the
         //   ⚠ knock leaving its list, ⚠ which is what it already watches.**
-        // ⚠⚠ **The shadow heartbeat's answer** (`docs/adr/0020`).
+        // ⚠⚠ **The heartbeat's answer** (`docs/adr/0020`).
         //
         // ⚠ **Handled here and never relayed** — ⚠ **the other participant has no use for it,
         //   ⚠ and relaying it would hand them a liveness signal about somebody else.**
         // ⚠ **Nothing is said back.** ⚠ **An answer to an answer is a loop.**
-        // ⚠ **Only the number we are waiting on counts.** ⚠ **An echo of an older ping says the
+        // ⚠⚠ **Only the number we are waiting on counts.** ⚠ **An echo of an older ping says the
         //   ⚠ page is behind, ⚠ not that it is here now** — ⚠ **and one we never sent says
-        //   ⚠ nothing at all.**
+        //   ⚠ nothing at all.** ⚠ **Without that, ⚠ a page could answer pings it never received.**
         if (parsed.message.type === "pong") {
-          if (parsed.message.n === pingNumber) shadowMissed = 0;
+          if (parsed.message.n === pingNumber) missed = 0;
           return;
         }
 
