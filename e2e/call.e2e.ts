@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { createConnection, createServer as createTcpServer, type Socket } from "node:net";
 import { after, test } from "node:test";
 import { type Browser, chromium, type Page } from "playwright";
-import { startServer } from "../src/server.ts";
+import { startServer } from "../src/node-server.ts";
 import { titleOf } from "./scenarios.ts";
 
 // ⚠ **One server per case, on its own port.**
@@ -753,7 +753,8 @@ test(titleOf("field-test-mode-is-gone"), async () => {
   const { base: plainBase } = await ready();
   const port = nextPort++;
   const flaggedBase = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ["src/server.ts"], {
+  // ⚠ The process entry point. ⚠ Node's listener moved out of the routing (移植 7/n).
+  const child = spawn(process.execPath, ["src/node-server.ts"], {
     env: {
       ...process.env,
       // ⚠ The retired flag, set on purpose.

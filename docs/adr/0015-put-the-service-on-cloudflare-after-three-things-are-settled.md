@@ -193,7 +193,25 @@ readyState  send  serializeAttachment  url
 3/n  ルーティング   handle(ctx, Request) -> Response      ⚠ Node は アダプタ に痩せた
 4/n  静的配信       ビルド成果物を配る                     ⚠ node:module が要らなくなった
 5/n  signalling     authorize / session / socket に割った  ⚠ ws を触るのは attach.ts だけ
+6/n  計測           wrangler を入れ、⚠ workerd の中で聞いた  ⚠ 移植ブロッカーが 1 行 出た
+7/n  リスナー       node-server.ts に出した                ⚠⚠ routing から node: も process も消えた
 ```
+
+### ⚠ 7/n で残った 2 枚
+
+```text
+src/node-server.ts       ⚠ node:http、⚠ process.env、⚠ 掃除のタイマ
+src/signaling/attach.ts  ⚠ ws
+src/static.ts            ⚠ node:fs(⚠ 継ぎ目は Context.asset。⚠ routing はもう読まない)
+```
+
+⚠ **`Context` が、⚠ 環境から来るものと、⚠ ブラウザのファイルを 運ぶようになった。**
+⚠ **Node は `process.env` と `serveStatic` を入れる。** ⚠ **Worker は binding と Assets を入れる。**
+⚠ **routing はどちらか知らない。**
+
+⚠ **壁は `test/signaling-session.test.ts`** の
+「⚠⚠ the platform-free half is platform-free, ⚠ and so is everything it loads」。
+⚠ **入口 5 つから 14 ファイルに届き、⚠ `node:` も `ws` も `Buffer` も `process` も無い。**
 
 ### ⚠ 5/n で割った線
 
