@@ -82,8 +82,23 @@ URL can make one.**
 
 ## 4. The join token
 
-- MUST: ⚠ **The Host's decision is exchanged for a short-lived token, once**, and
-  ⚠ **nothing after that point re-reads the decision** (`../../docs/adr/0017`).
+- MUST: ⚠ **The Host's decision is exchanged for a short-lived token** (`../../docs/adr/0017`),
+  ⚠ **and nothing after that point re-reads the decision itself.**
+- ⚠⚠ **This clause said `once` until 2026-09-07.** ⚠ **It was changed by owner decision**
+  (`../../docs/adr/0029`), ⚠ **because a Guest whose page the browser threw away could not come
+  back without the Host pressing the button again** (kagima#90, ⚠ measured: ⚠ a page discarded
+  after ~6 minutes in the background, ⚠ rebuilt from the document).
+  ⚠ **What moved is only how many times one decision may be spent.** ⚠ **Who decides, ⚠ when they
+  decide, ⚠ and the shortness of the token did not move.**
+- MUST: ⚠ **A decision may be spent again only through a mark that is bound to that one room**,
+  ⚠ **whose lifetime is stated**, ⚠ **and which is exchanged for a fresh short-lived token rather
+  than used in place of one.**
+- MUST: ⚠ **The exchange confirms the room still exists.** ⚠ **A room that is over is what revokes
+  the mark** — ⚠ **there is nothing else that can.**
+- MUST NOT: ⚠ **Never keep the mark on a server.** ⚠ **A mark held by us is a record that somebody
+  was let in** (`../../docs/PRODUCT.md` § 5, `../../docs/adr/0023`).
+- MUST: ⚠ **A mark and a join token must not verify as each other.** ⚠ **Separate them inside the
+  signature, ⚠ never by which field a reader happens to look at.**
 - MUST: ⚠ **Bind the token to the room it was issued for.** ⚠ **A token that works on another
   room turns one leaked link into all of them.**
 - MUST: ⚠ **State the lifetime, and state what happens when it expires mid-call.**

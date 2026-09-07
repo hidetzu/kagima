@@ -46,6 +46,20 @@ const ORDER: readonly Exclude<Ending, null>[] = [
   "dropped",
 ];
 
+/**
+ * ⚠⚠ **The one ending that un-ends** (`docs/adr/0029`, kagima#90).
+ *
+ * ⚠ **`peer-left` already says of itself that it is recoverable** — ⚠ **and until 2026-09-07
+ * nothing here could recover from it.** ⚠ **A Guest whose page the browser threw away came back,
+ * ⚠ said who it was, ⚠ and the Host's screen went on showing "the other side left"**
+ * (⚠ measured: the name arrived and was never displayed).
+ *
+ * ⚠ **Only this one.** ⚠ **`closed` is the room being over; ⚠ `unreachable` and `dropped` are
+ * about media and are not this event's to clear; ⚠ `detached` is about OUR OWN socket, ⚠ and
+ * somebody else arriving says nothing about it.**
+ */
+export const cameBack = (ending: Ending): Ending => (ending === "peer-left" ? null : ending);
+
 /** ⚠ **Which of two endings stands.** ⚠ Never "whichever arrived last". */
 export const outranks = (a: Ending, b: Ending): Ending => {
   if (a === null) return b;

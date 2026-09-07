@@ -24,7 +24,12 @@ import { createRoomStore, type RoomStore } from "./room/store.ts";
 import { createHub, type Hub } from "./signaling/hub.ts";
 import { parseClientMessage } from "./signaling/messages.ts";
 import { CLOSE_ROOM_CLOSED } from "./signaling/protocol.ts";
-import { constantTimeEqual, issueJoinToken } from "./token/join-token.ts";
+import {
+  constantTimeEqual,
+  issueJoinToken,
+  issueRejoinMark,
+  verifyRejoinMark,
+} from "./token/join-token.ts";
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_BASE_URL = `http://localhost:${DEFAULT_PORT}`;
@@ -156,6 +161,17 @@ const CLOSE_REFUSED = {
 const HOST_SESSION_REFUSED = {
   status: 401,
   body: { error: "that room could not be opened as its host" },
+} as const;
+
+/**
+ * ⚠ **One answer for every way a rejoin can fail** (`docs/adr/0029`).
+ *
+ * ⚠ **Expired, ⚠ forged, ⚠ for another room, ⚠ and "that room is over" are one refusal.**
+ * ⚠ **Telling them apart would say whether a room exists** (`.claude/rules/security.md` § 3).
+ */
+const GUEST_SESSION_REFUSED = {
+  status: 401,
+  body: { error: "that room could not be rejoined" },
 } as const;
 
 /**
@@ -316,6 +332,59 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     });
   }
 
+  // ⚠⚠ **A Guest comes back to a room it was already let into** (`docs/adr/0029`, kagima#90).
+  //
+  // ⚠ **The same shape as `/host-session` above, ⚠ and deliberately so** — ⚠ **a mark kept on the
+  //   ⚠ device is exchanged for a short-lived token, ⚠ and nothing else ever uses the mark.**
+  // ⚠ **Measured 2026-09-06: ⚠ a phone's page was thrown away after about six minutes in the
+  //   ⚠ background and rebuilt from the document.** ⚠ **Without this the person knocks again and
+  //   ⚠ the Host presses the button again, ⚠ every time.**
+  //
+  // ⚠⚠ **What this endpoint must never become: ⚠ a way in for somebody the Host did not admit.**
+  //   ⚠ **The mark is signed, ⚠ bound to this room, ⚠ and carries its own expiry**
+  //   (`src/token/join-token.ts`).
+  const guestSession = /^\/api\/rooms\/([^/]+)\/guest-session$/.exec(url.pathname);
+  if (guestSession) {
+    if (request.method !== "POST") {
+      return json(405, { error: "a guest session is taken with POST" }, { allow: "POST" });
+    }
+    const raw = await readBody(request);
+    if (raw === null) {
+      return json(413, { error: "that request body is too large to be a mark" });
+    }
+    let rejoin: unknown;
+    try {
+      rejoin = (JSON.parse(raw) as { rejoin?: unknown }).rejoin;
+    } catch {
+      return json(400, { error: "the body is not JSON" });
+    }
+    if (typeof rejoin !== "string") {
+      return json(400, { error: "the body needs a rejoin, as a string" });
+    }
+
+    const roomId = decodeURIComponent(guestSession[1] as string);
+    // ⚠⚠ **The signature is checked before the room is looked up**, ⚠ **so a mark for a room that
+    //   ⚠ does not exist and a mark that was never signed by us cost the same HMAC**
+    //   (`.claude/rules/security.md` § 3).
+    const checked = await verifyRejoinMark(rejoin, roomId, ctx.secret, Date.now());
+    const room = isRoomId(roomId) ? ctx.store.get(roomId) : undefined;
+    // ⚠⚠ **The room is what revokes a mark** (`docs/adr/0029`). ⚠ **There is nothing else that can.**
+    if (!checked.ok || room === undefined) {
+      // ⚠ One answer. ⚠ Expired, ⚠ forged, ⚠ for another room, ⚠ and "that room is over" are one
+      //   ⚠ refusal — ⚠ telling them apart would say whether the room exists.
+      return json(GUEST_SESSION_REFUSED.status, GUEST_SESSION_REFUSED.body);
+    }
+
+    // ⚠⚠ **The same `sessionId`** (`src/signaling/hub.ts`). ⚠ **A new one would make this person a
+    //   ⚠ third participant, ⚠ and their own half-open socket could refuse them as `room-full`.**
+    return json(200, {
+      token: await issueJoinToken(room.id, ctx.secret, Date.now(), checked.sessionId),
+      // ⚠ Refreshed on every way in (`docs/adr/0029`). ⚠ The mark lives while it is being used
+      //   ⚠ and dies when it is not.
+      rejoin: await issueRejoinMark(room.id, ctx.secret, Date.now(), checked.sessionId),
+    });
+  }
+
   const roomPath = /^\/api\/rooms\/([^/]+)$/.exec(url.pathname);
   if (roomPath && request.method === "DELETE") {
     const raw = await readBody(request);
@@ -360,6 +429,7 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     endpoints: [
       "POST /api/rooms",
       "POST /api/rooms/{roomId}/host-session",
+      "POST /api/rooms/{roomId}/guest-session",
       "POST /api/rooms/{roomId}/knock",
       "DELETE /api/rooms/{roomId}",
       "GET /r/{roomId}",

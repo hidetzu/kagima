@@ -52,6 +52,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a Host whose page the browser threw away getting back into its own room",
   },
   {
+    name: "guest-comes-back-to-a-thrown-away-page",
+    sees: "a Guest whose page the browser threw away getting back in without the Host deciding again",
+  },
+  {
     name: "heartbeat",
     sees: "a real page answering the heartbeat for long enough that a silent one would be gone",
   },

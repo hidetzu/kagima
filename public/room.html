@@ -73,67 +73,25 @@
   import { classifyMediaError, createCall } from "/client/call.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { forgetHidden, watchDiscards } from "/client/discarded.js";
-  import { knock, roomIdFromPath, waitForDecision, WORDING } from "/client/guest.js";
+  import { knock, rejoin, roomIdFromPath, waitForDecision, WORDING } from "/client/guest.js";
+  import { forgetRejoin, recallRejoin, rememberRejoin } from "/client/remember.js";
   import { connectSignaling } from "/client/transport.js";
   import { guestStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const roomId = roomIdFromPath(location.pathname);
 
-  $("enter").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    $("enter-button").disabled = true;
-    $("error").textContent = "";
-
-    const nickname = $("nickname").value.trim();
-
-    // ⚠⚠ **Knock. ⚠ Nothing is guessed, ⚠ and nothing secret is sent** (`docs/adr/0017`).
-    const knocked = await knock(roomId, nickname);
-    if (!knocked.ok) {
-      $("error").textContent = WORDING[knocked.why];
-      $("enter-button").disabled = false;
-      return;
-    }
-
-    $("before").hidden = true;
-    $("waiting").hidden = false;
-
-    // ⚠⚠ **The camera has NOT been asked for, ⚠ and will not be until the Host says yes**
-    //   (`docs/PRODUCT.md` § 3 と § 5)。
-    // ⚠ **Somebody who is not let in never hands over a camera.**
-    // ⚠⚠ **Waited for, ⚠ not asked for** (`docs/adr/0028`, kagima#78, kagima#99).
-    //
-    // ⚠ **This used to read `/api/rooms/{roomId}/knock/{knockId}` every two seconds.**
-    // ⚠ **The knock id was in that path, ⚠ so it was in logs kagima does not run** (kagima#99),
-    //   ⚠ **and the reads were 1,800/hour per waiting person** (kagima#78).
-    // ⚠ **Silence still means waiting** — ⚠ **an unknown room, a Host who has not looked and a
-    //   ⚠ door with too many people at it all open a socket that says nothing.**
-    let stopWaiting = () => {};
-    const giveUp = () => {
-      stopWaiting();
-      $("waiting").hidden = true;
-      $("before").hidden = false;
-      $("enter-button").disabled = false;
-    };
-    $("give-up").addEventListener("click", giveUp);
-
-    const token = await new Promise((resolve) => {
-      $("give-up").addEventListener("click", () => resolve(null), { once: true });
-      stopWaiting = waitForDecision(roomId, knocked.knockId, (ending) => {
-        if (ending.state === "admitted") return resolve(ending.token);
-        // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
-        giveUp();
-        $("error").textContent = WORDING.refused;
-        resolve(null);
-      });
-    });
-    if (token === null) return;
-    stopWaiting();
-    const result = { ok: true, token };
-
-
+  /**
+   * ⚠⚠ **Everything from "we are in" onwards** (`docs/adr/0029`).
+   *
+   * ⚠ **It is a function because there are two ways to hold a token now: ⚠ knocking, ⚠ and coming
+   * back with a mark this device already had** (kagima#90).
+   * ⚠ **Both arrive here with the same thing in hand, ⚠ and nothing below can tell which way it
+   * came** — ⚠ **which is what keeps the Host's screen unchanged** (Owner 決定 2026-09-07).
+   */
+  const enterWith = async (token, nickname) => {
     try {
-      const transport = await connectSignaling(roomId, result.token);
+      const transport = await connectSignaling(roomId, token);
 
       // ⚠⚠ **Listen BEFORE anything slow. ⚠ The host page already says this; ⚠ this page did not.**
       //
@@ -166,6 +124,9 @@
           // ⚠ The room is over. ⚠ What was written down about this page goes with it
           //   (`src/diagnostics/discards.ts`: ⚠ one room's worth, ⚠ never a pile across rooms).
           forgetHidden();
+          // ⚠⚠ **And the way back, ⚠ because there is nothing to come back to**
+          //   (`docs/adr/0029`, `docs/adr/0021`: ⚠ **holding a dead mark is how one becomes a pile**).
+          forgetRejoin();
           call?.hangUp();
           ending = outranks(ending, "closed");
           render();
@@ -310,5 +271,92 @@
             : "カメラとマイクにつながりませんでした。別のブラウザを試すか、読み込み直してください。";
       $("enter-button").disabled = false;
     }
+  };
+
+  $("enter").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("enter-button").disabled = true;
+    $("error").textContent = "";
+
+    const nickname = $("nickname").value.trim();
+
+    // ⚠⚠ **Knock. ⚠ Nothing is guessed, ⚠ and nothing secret is sent** (`docs/adr/0017`).
+    const knocked = await knock(roomId, nickname);
+    if (!knocked.ok) {
+      $("error").textContent = WORDING[knocked.why];
+      $("enter-button").disabled = false;
+      return;
+    }
+
+    $("before").hidden = true;
+    $("waiting").hidden = false;
+
+    // ⚠⚠ **The camera has NOT been asked for, ⚠ and will not be until the Host says yes**
+    //   (`docs/PRODUCT.md` § 3 と § 5)。
+    // ⚠ **Somebody who is not let in never hands over a camera.**
+    // ⚠⚠ **Waited for, ⚠ not asked for** (`docs/adr/0028`, kagima#78, kagima#99).
+    //
+    // ⚠ **This used to read `/api/rooms/{roomId}/knock/{knockId}` every two seconds.**
+    // ⚠ **The knock id was in that path, ⚠ so it was in logs kagima does not run** (kagima#99),
+    //   ⚠ **and the reads were 1,800/hour per waiting person** (kagima#78).
+    // ⚠ **Silence still means waiting** — ⚠ **an unknown room, a Host who has not looked and a
+    //   ⚠ door with too many people at it all open a socket that says nothing.**
+    let stopWaiting = () => {};
+    const giveUp = () => {
+      stopWaiting();
+      $("waiting").hidden = true;
+      $("before").hidden = false;
+      $("enter-button").disabled = false;
+    };
+    $("give-up").addEventListener("click", giveUp);
+
+    const token = await new Promise((resolve) => {
+      $("give-up").addEventListener("click", () => resolve(null), { once: true });
+      stopWaiting = waitForDecision(roomId, knocked.knockId, (ending) => {
+        if (ending.state === "admitted") {
+          // ⚠⚠ **Kept now, ⚠ before the camera is even asked for** (`docs/adr/0029`).
+          //   ⚠ **The browser can throw this page away at any point after here, ⚠ and the whole
+          //   ⚠ point is that the Host does not have to decide twice.**
+          rememberRejoin({ roomId, rejoin: ending.rejoin, nickname });
+          return resolve(ending.token);
+        }
+        // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
+        giveUp();
+        $("error").textContent = WORDING.refused;
+        resolve(null);
+      });
+    });
+    if (token === null) return;
+    stopWaiting();
+    await enterWith(token, nickname);
   });
+
+  /**
+   * ⚠⚠ **Come back without knocking, ⚠ if this device holds a mark for THIS room**
+   * (`docs/adr/0029`, kagima#90).
+   *
+   * ⚠ **Measured 2026-09-06: ⚠ a phone's page was thrown away after about six minutes in the
+   * background and rebuilt from the document.** ⚠ **The Host had already said yes, ⚠ and had to
+   * say it again.**
+   *
+   * ⚠ **A mark for another room is not used here, ⚠ and not dropped either** — ⚠ **that other
+   * room may still be running.**
+   * ⚠ **Anything but a token back means: ⚠ knock, ⚠ exactly as this page did before the mark
+   * existed.** ⚠ **Nothing is said about why** — ⚠ **refused, expired and "that room is over"
+   * are one answer** (`.claude/rules/security.md` § 3).
+   */
+  const held = roomId === null ? null : recallRejoin();
+  if (held !== null && held.roomId === roomId) {
+    const back = await rejoin(roomId, held.rejoin);
+    if (back === null) {
+      // ⚠ It opens nothing. ⚠ Holding a dead mark is how one becomes a pile (`docs/adr/0021`).
+      forgetRejoin();
+    } else {
+      // ⚠ Refreshed on every way in (`docs/adr/0029`).
+      rememberRejoin({ roomId, rejoin: back.rejoin, nickname: held.nickname });
+      $("before").hidden = true;
+      $("waiting").hidden = false;
+      await enterWith(back.token, held.nickname);
+    }
+  }
 </script>

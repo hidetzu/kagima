@@ -112,9 +112,14 @@ test("⚠⚠ the Host deciding is the only thing that ever reaches the socket", 
   const socket = aSocket();
   openWait(knocks, "a-real-room", mine.id, socket.as);
 
-  knocks.decide("a-real-room", mine.id, true, "a-real-looking-token");
+  knocks.decide("a-real-room", mine.id, true, {
+    token: "a-real-looking-token",
+    rejoin: "a-real-looking-mark",
+  });
 
-  assert.deepEqual(socket.said, ['{"state":"admitted","token":"a-real-looking-token"}']);
+  assert.deepEqual(socket.said, [
+    '{"state":"admitted","token":"a-real-looking-token","rejoin":"a-real-looking-mark"}',
+  ]);
   assert.deepEqual(socket.closed, [CLOSE_KNOCK_DECIDED]);
 });
 
@@ -151,12 +156,17 @@ test("⚠⚠ a decision made before the socket arrived is not lost", () => {
   //   ⚠ **Waiting for an event that has been and gone is waiting for ever.**
   const knocks = doorFor(["a-real-room"]);
   const mine = knocks.knock("a-real-room", "みどり", 1);
-  knocks.decide("a-real-room", mine.id, true, "a-real-looking-token");
+  knocks.decide("a-real-room", mine.id, true, {
+    token: "a-real-looking-token",
+    rejoin: "a-real-looking-mark",
+  });
 
   const late = aSocket();
   openWait(knocks, "a-real-room", mine.id, late.as);
 
-  assert.deepEqual(late.said, ['{"state":"admitted","token":"a-real-looking-token"}']);
+  assert.deepEqual(late.said, [
+    '{"state":"admitted","token":"a-real-looking-token","rejoin":"a-real-looking-mark"}',
+  ]);
   assert.deepEqual(late.closed, [CLOSE_KNOCK_DECIDED]);
 });
 
@@ -167,7 +177,10 @@ test("⚠ a socket that stopped watching is not told anything afterwards", () =>
   const { stop } = openWait(knocks, "a-real-room", mine.id, gone.as);
 
   stop();
-  knocks.decide("a-real-room", mine.id, true, "a-real-looking-token");
+  knocks.decide("a-real-room", mine.id, true, {
+    token: "a-real-looking-token",
+    rejoin: "a-real-looking-mark",
+  });
 
   sawNothing(gone, "a socket that had gone away");
 });

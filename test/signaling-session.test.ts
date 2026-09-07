@@ -201,3 +201,41 @@ test("⚠⚠ the platform-free half is platform-free, ⚠ and so is everything i
     "the adapter no longer wraps ws — this check has gone stale",
   );
 });
+
+test("⚠⚠ the close of a socket a reconnect replaced is not announced as somebody leaving", () => {
+  // ⚠⚠ **Measured 2026-09-07** (kagima#90, `docs/adr/0029`): ⚠ **a Guest whose page was thrown
+  //   ⚠ away came back and said who it was, ⚠ and then the OLD socket closed and the Host was
+  //   ⚠ told "the other side left"** — ⚠ **clearing the name it had just been given.**
+  //
+  // ⚠ **The person did not leave.** ⚠ **`src/signaling/hub.ts` already refuses to relay from a
+  //   ⚠ replaced socket** (`stale`); ⚠ **its close was the half nobody had asked about.**
+  // ⚠ **The way to check it is to reorder** (`.claude/skills/change-review/SKILL.md` § 4):
+  //   ⚠ **join, ⚠ replace, ⚠ and only THEN close the one that was replaced.**
+  const sessions = createSessions({ hub: createHub(), secret: "s" });
+  const host = fakeSocket();
+  const guestOld = fakeSocket();
+  const guestNew = fakeSocket();
+
+  sessions.open(host.socket, ROOM, "s-host", "host");
+  sessions.open(guestOld.socket, ROOM, "s-guest");
+  sessions.open(guestNew.socket, ROOM, "s-guest");
+
+  const before = host.sent.length;
+  guestOld.end();
+
+  const said = host.sent.slice(before);
+  assert.deepEqual(
+    said.filter((line) => line.includes("peer-left")),
+    [],
+    `the Host was told somebody left when they had just come back: ${said.join(" ")}`,
+  );
+
+  // ⚠ And the real thing still works: ⚠ the connection that is actually there, leaving, is told.
+  const nowAt = host.sent.length;
+  guestNew.end();
+  assert.deepEqual(
+    host.sent.slice(nowAt).filter((line) => line.includes("peer-left")),
+    [JSON.stringify({ type: "peer-left" })],
+    "somebody actually leaving was not announced",
+  );
+});

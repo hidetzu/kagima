@@ -108,7 +108,7 @@ test("⚠⚠ a Guest cannot open the door, and is not told that it tried", async
 
   const read = knocks.read(room.id, knockId);
   assert.equal(read.state, "waiting", "a Guest admitted somebody");
-  assert.equal(read.token, undefined, "a token was minted for a Guest's decision");
+  assert.equal(read.granted, undefined, "a token was minted for a Guest's decision");
 
   // ⚠⚠ Silence, ⚠ not a refusal. ⚠ Answering would say that this knockId is a real one
   //   (`.claude/rules/security.md` § 3).
@@ -126,12 +126,12 @@ test("⚠ the Host can open the door, and what it mints actually opens it", asyn
 
   const read = knocks.read(room.id, knockId);
   assert.equal(read.state, "admitted");
-  assert.ok(read.token !== undefined, "the Host admitted somebody and no token was minted");
+  assert.ok(read.granted !== undefined, "the Host admitted somebody and no token was minted");
 
   // ⚠ And the door really opens — ⚠ otherwise this case would pass on a token that does nothing.
   const verdict = await authorizeUpgrade(
     `/api/rooms/${room.id}/signal`,
-    `kagima.token.${read.token}`,
+    `kagima.token.${read.granted?.token}`,
     SECRET,
     Date.now(),
   );

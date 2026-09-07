@@ -30,6 +30,9 @@ test("⚠⚠ everything a Guest touches is outside the gate", () => {
     //   (`docs/adr/0028`, kagima#99). ⚠ A Guest waits on this, ⚠ so it is outside the gate.
     ["GET", "/api/rooms/abcdefghij123456/wait"],
     ["GET", "/api/rooms/abcdefghij123456/signal"],
+    // ⚠ Coming back to a room already joined (`docs/adr/0029`). ⚠ A Guest does this, ⚠ so it is
+    //   ⚠ outside the gate — ⚠ behind it, ⚠ a thrown-away page could never come back.
+    ["POST", "/api/rooms/abcdefghij123456/guest-session"],
     ["GET", "/client/guest.js"],
     ["GET", "/status/status.js"],
     ["GET", "/signaling/protocol.js"],

@@ -17,6 +17,7 @@ import { createKnockRejectionCounter, createKnocks } from "../src/knock/knocks.t
 import { createRoomStore } from "../src/room/store.ts";
 import { type Context, handle } from "../src/server.ts";
 import { createHub } from "../src/signaling/hub.ts";
+import { issueRejoinMark, newSessionId, verifyRejoinMark } from "../src/token/join-token.ts";
 
 // ⚠ **Sockets are dropped as well as the listener** — ⚠ **an open keep-alive connection keeps
 //   ⚠ `server.close()` pending and the run never finishes.**
@@ -159,4 +160,94 @@ test("⚠⚠ nothing exists on the server only so that a check can call it", asy
     /stopAnswering/,
     "the server carries a method that exists only for a check",
   );
+});
+
+// ── ⚠⚠ coming back to a room this device was let into (`docs/adr/0029`) ─────
+
+const SECRET = "a-secret-for-this-test";
+
+const rejoinWith = (fetch: Fetcher, roomId: string, mark: string) =>
+  fetch(`/api/rooms/${roomId}/guest-session`, {
+    method: "POST",
+    body: JSON.stringify({ rejoin: mark }),
+  });
+
+test("⚠⚠ a mark that is good for a live room is exchanged for a short-lived token", async () => {
+  const { fetch } = await start();
+  const room = await makeRoom(fetch);
+  const sessionId = newSessionId();
+  const mark = await issueRejoinMark(room.roomId, SECRET, Date.now(), sessionId);
+
+  const answer = await rejoinWith(fetch, room.roomId, mark);
+  assert.equal(answer.status, 200);
+  const body = (await answer.json()) as { token?: string; rejoin?: string };
+  assert.equal(typeof body.token, "string");
+  // ⚠⚠ Refreshed on every way in (`docs/adr/0029`). ⚠ A mark that never moved would expire under
+  //   ⚠ somebody who has been using the room the whole time.
+  //
+  // ⚠⚠ **"Refreshed" is the expiry moving, ⚠ not the bytes differing.** ⚠ **Minted in the same
+  //   ⚠ millisecond with the same session id, ⚠ the payload IS the same and so is the signature** —
+  //   ⚠ **the first version of this case asserted the bytes and failed for that reason, ⚠ which
+  //   ⚠ was the check being wrong and not the code.**
+  assert.equal(typeof body.rejoin, "string");
+  const expiryOf = (m: string) =>
+    Number(
+      Buffer.from(m.slice(0, m.indexOf(".")), "base64url")
+        .toString("utf8")
+        .split(":")[2],
+    );
+  assert.ok(
+    expiryOf(body.rejoin as string) >= expiryOf(mark),
+    "the mark handed back expires before the one that was sent",
+  );
+  assert.equal(
+    (await verifyRejoinMark(body.rejoin as string, room.roomId, SECRET, Date.now())).ok,
+    true,
+  );
+});
+
+test("⚠⚠ every way a rejoin can fail is one answer", async () => {
+  // ⚠⚠ **`.claude/rules/security.md` § 3.** ⚠ **Telling these apart would say whether a room
+  //   ⚠ exists, ⚠ and whether somebody was ever let into it.**
+  const { fetch } = await start();
+  const room = await makeRoom(fetch);
+  const sessionId = newSessionId();
+
+  const forged = await issueRejoinMark(room.roomId, "somebody-elses-secret", Date.now(), sessionId);
+  const elsewhere = await issueRejoinMark("zyxwvutsrq654321", SECRET, Date.now(), sessionId);
+  // ⚠ A real mark, ⚠ for a room that was never minted. ⚠ This is the one that would otherwise
+  //   ⚠ answer "does this room exist?" for free.
+  const ghostRoom = "aaaaaaaaaabbbbbb";
+  const ghost = await issueRejoinMark(ghostRoom, SECRET, Date.now(), sessionId);
+  const expired = await issueRejoinMark(room.roomId, SECRET, 0, sessionId);
+
+  const answers = [
+    await observable(await rejoinWith(fetch, room.roomId, forged)),
+    await observable(await rejoinWith(fetch, room.roomId, elsewhere)),
+    await observable(await rejoinWith(fetch, ghostRoom, ghost)),
+    await observable(await rejoinWith(fetch, room.roomId, expired)),
+    await observable(await rejoinWith(fetch, room.roomId, "not-a-mark-at-all")),
+  ];
+  for (const answer of answers) {
+    assert.deepEqual(answer, answers[0], "one of the refusals answered differently");
+  }
+  assert.equal(answers[0]?.status, 401);
+});
+
+test("⚠⚠ a room that is over refuses a mark that is still perfectly good", async () => {
+  // ⚠⚠ **The room is what revokes a mark** (`docs/adr/0029`). ⚠ **There is nothing else that can.**
+  const { fetch, ctx } = await start();
+  const room = await makeRoom(fetch);
+  const mark = await issueRejoinMark(room.roomId, SECRET, Date.now(), newSessionId());
+  assert.equal((await rejoinWith(fetch, room.roomId, mark)).status, 200);
+
+  ctx.store.close(room.roomId);
+
+  const after = await observable(await rejoinWith(fetch, room.roomId, mark));
+  assert.equal(after.status, 401, "a closed room let somebody back in");
+  // ⚠ And it is the same refusal a forged mark gets — ⚠ never a third thing that says "it ended".
+  const forged = await observable(
+    await rejoinWith(fetch, room.roomId, await issueRejoinMark(room.roomId, "x", Date.now(), "s")),
+  );
+  assert.deepEqual(after, forged, "a closed room answered unlike a forged mark");
 });

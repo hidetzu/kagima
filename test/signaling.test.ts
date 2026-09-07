@@ -152,6 +152,33 @@ test("⚠⚠ a message from a replaced connection is dropped, not relayed", asyn
   assert.deepEqual(host.sent, [], "⚠ a stale message reached the host");
 });
 
+test("⚠⚠ the close of a replaced socket is not somebody leaving", async () => {
+  // ⚠⚠ **Measured 2026-09-07** (kagima#90, `docs/adr/0029`): ⚠ **a Guest whose page was thrown
+  //   ⚠ away came back, ⚠ said who it was, ⚠ and then the OLD socket's close told the Host "the
+  //   ⚠ other side left"** — ⚠ **clearing from the Host's screen the name it had just been given.**
+  //
+  // ⚠ **The person did not leave.** ⚠ **They came back, ⚠ and the half they came back from closed
+  //   ⚠ afterwards.** ⚠ **`.claude/skills/change-review/SKILL.md` § 4: ⚠ arrival order is not
+  //   ⚠ send order, ⚠ and the way to check it is to reorder.**
+  const hub = createHub();
+  const host = fakePeer(1, "host");
+  const guestOld = fakePeer(2, "guest");
+  hub.join("room-a", host.peer);
+  hub.join("room-a", guestOld.peer);
+  assert.equal(hub.holds("room-a", guestOld.peer.id), true);
+
+  hub.join("room-a", fakePeer(3, "guest").peer); // ⚠ the reconnect
+
+  // ⚠⚠ This is the question `src/signaling/session.ts` asks before saying "peer-left".
+  assert.equal(
+    hub.holds("room-a", guestOld.peer.id),
+    false,
+    "a socket a reconnect replaced is still counted as this room's peer",
+  );
+  // ⚠ And the room still has two: ⚠ the host and the connection that came back.
+  assert.equal(hub.peerCount("room-a"), 2);
+});
+
 test("leaving removes only that peer, and the room survives", async () => {
   const hub = createHub();
   hub.join("room-a", fakePeer(1, "sa").peer);
