@@ -206,6 +206,14 @@ curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
    ⚠ **片方だけでは「両端で」が言えない**(§ 5)。⚠ **一度これで片側しか記録されなかった。**
    ⚠ **貼り終えるまで、⚠ どちらの端末も閉じないこと。**
 
+   ⚠⚠ **スマホでは、⚠ 貼るために別のアプリへ移る時点でページが背面に行く** — ⚠ **そして
+   ⚠ ブラウザがそこでページを捨てることがある**(⚠ 実測 2026-09-08、⚠ 実際に起きた)。
+   ⚠ **so 先にコピーし、⚠ それから貼ること。**
+   ⚠ **捨てられても Guest は自分で戻る**([`adr/0029`](adr/0029-let-a-guest-come-back-with-a-mark-that-works-on-one-room.md))
+   ⚠ **が、⚠ 戻ったページの `held for` と `frames decoded` は 数え直しになる** — ⚠ **so
+   ⚠ 貼るのは 2 台とも コピーし終えてからにする。**
+   ⚠⚠ **捨てられたこと自体も観測である。** ⚠ **パネルの `thrown away while hidden` に出る。**
+
    ⚠ **サーバは観測を集めない**([`adr/0014`](adr/0014-retire-the-field-test-mode-now-that-kagima-16-is-closed.md))。
    ⚠ **集約する仕組みは一度あったが、⚠ 合言葉を短くする経路と一体だったので、
    ⚠ [kagima#16](https://github.com/hidetzu/kagima/issues/16) が閉じたときに一緒に消した。**
