@@ -204,6 +204,7 @@
       //   ⚠ real device found it: ⚠ fake cameras grant instantly and hide it**).
       // ⚠ **The code is remembered too, ⚠ so the diagnostics can be told once it exists.**
       let noteSocketClosed = () => {};
+      let noteSocketOpen = () => {};
       let closedCode = null;
 
       // ⚠ The endings are not the same thing (kagima#11).
@@ -216,6 +217,20 @@
       //   ⚠ "つながりが切れました" on screen for something that is about to be fine** — ⚠ **and
       //   ⚠ that sentence is about the call, ⚠ which never stopped** (`CLAUDE.md` § 4-1).
       // ⚠ **Owner decision, 2026-09-06: ⚠ show nothing while retrying.**
+      // ⚠⚠ **Every drop is recorded, ⚠ including the ones that come back** (kagima#98).
+      //   ⚠ **This page has reconnected since kagima#70, ⚠ and until now the only close it wrote
+      //   ⚠ down was the one it never came back from** — ⚠ **so the panel said `open throughout`
+      //   ⚠ for a call whose signalling had dropped and returned** (⚠ the same shape of lie
+      //   ⚠ kagima#91 was about, `.claude/rules/evidence.md`).
+      transport.onDrop((code) => {
+        closedCode ??= code;
+        noteSocketClosed(code);
+      });
+
+      // ⚠⚠ **And coming back, ⚠ on the same clock** (kagima#98). ⚠ **Without it the panel could
+      //   ⚠ say a socket closed and never that one returned.**
+      transport.onOpen(() => noteSocketOpen());
+
       transport.onGaveUp((code) => {
         closedCode ??= code;
         noteSocketClosed(code);
@@ -250,6 +265,7 @@
       // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.
       const diagnostics = createDiagnostics(call.pc);
       noteSocketClosed = (code) => diagnostics.noteSocketClosed(code);
+      noteSocketOpen = () => diagnostics.noteSocketOpen();
       // ⚠ Replayed if it happened while the camera prompt was up. ⚠ The time it carries is when
       //   ⚠ this started looking, ⚠ not when it happened.
       if (closedCode !== null) diagnostics.noteSocketClosed(closedCode);

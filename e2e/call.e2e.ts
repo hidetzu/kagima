@@ -1029,6 +1029,76 @@ test(titleOf("heartbeat"), async () => {
   await guest.context.close();
 });
 
+test(titleOf("the-guest-comes-back"), async () => {
+  // ⚠⚠ **Measured 2026-09-06** (kagima#98): ⚠ **`wrangler deploy` replaced the Durable Object and
+  //   ⚠ every open WebSocket closed.** ⚠ **The room survives** (`docs/adr/0023`, `0025`)
+  //   ⚠ **and the call survives** (`docs/adr/0010`) — ⚠ **what died was signalling.**
+  //
+  // ⚠ **The Host's page already came back** (kagima#70). ⚠ **This one did not**, ⚠ **so a deploy,
+  //   ⚠ and every tunnel blip, ⚠ left the Guest without signalling for the rest of the call** —
+  //   ⚠ **which also meant no ICE restart could ever be negotiated** (`docs/adr/0026`, `0027`).
+  //
+  // ⚠⚠ **Frames are NOT the proof.** ⚠ **Media goes browser to browser and never needed us**
+  //   (`docs/adr/0003`), ⚠ **so they keep flowing with the socket dead.**
+  // ⚠⚠ **Neither is the Host's screen still showing the name**: ⚠ **both sockets die at once, ⚠ so
+  //   ⚠ the Host never receives the `peer-left` that would have cleared it.** ⚠ **A first version
+  //   ⚠ of this case waited for exactly that and passed while nothing had reconnected.**
+  const { browser: b } = await ready();
+  const { base, cutEverythingOpen } = await behindAProxy();
+
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
+
+  cutEverythingOpen();
+  console.log("  observed: every open socket was cut");
+
+  // ⚠⚠ **The drop is written down, ⚠ even though it is about to be fixed** (kagima#98).
+  //   ⚠ **Until now this page only recorded the close it never came back from, ⚠ so a panel would
+  //   ⚠ have said `open throughout` for a call whose signalling dropped and returned** — ⚠ **the
+  //   ⚠ same shape of lie kagima#91 was about.**
+  await guest.page.waitForFunction(
+    () =>
+      (document.getElementById("diagnostics-text")?.textContent ?? "").includes("socket -> closed"),
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  // ⚠⚠ **And nothing is said about it on screen** (⚠ Owner 決定 2026-09-06, `public/index.html`).
+  //   ⚠ **A blip must not put "つながりが切れました" over a call that never stopped.**
+  const saidWhileFixing = await text(guest.page, "status");
+  assert.doesNotMatch(
+    saidWhileFixing,
+    /切れました/,
+    `the Guest was told the connection had gone while it was being fixed: ${saidWhileFixing}`,
+  );
+
+  // ⚠⚠ **THE PROOF.** ⚠ **`socket -> open` is only ever recorded for a socket that came back** —
+  //   ⚠ **the first one is what starts the clock and is not noted** (`src/client/diagnostics.ts`).
+  //   ⚠ **It is false until this page reconnects, ⚠ so it cannot pass on something already true.**
+  await guest.page.waitForFunction(
+    () =>
+      (document.getElementById("diagnostics-text")?.textContent ?? "").includes("socket -> open"),
+    undefined,
+    { timeout: 40_000 },
+  );
+  console.log("  observed: the Guest's signalling came back on its own");
+
+  // ⚠⚠ **And it is a way in, ⚠ not just a socket**: ⚠ **ending the room travels over signalling
+  //   ⚠ and nothing else.** ⚠ **A page holding a dead socket never learns the room is over.**
+  await host.page.click("#close");
+  await guest.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("終わりました"),
+    undefined,
+    { timeout: 40_000 },
+  );
+  console.log(`  observed: the Guest was told "${await text(guest.page, "status")}"`);
+
+  await host.context.close();
+  await guest.context.close();
+});
+
 test(titleOf("guest-comes-back-to-a-thrown-away-page"), async () => {
   // ⚠⚠ **Measured on a real phone on 2026-09-06** (kagima#90):
   //   ⚠ **about six minutes in the background and the browser threw the Guest's page away** —

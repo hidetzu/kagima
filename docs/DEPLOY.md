@@ -66,10 +66,54 @@ npx wrangler deploy
 ⚠ Paid 化は 実測が上限へ近づいてから
 ```
 
+## ⚠⚠ 出すと、⚠ 通話中の socket が全部切れる
+
+⚠ **実測 2026-09-06**([kagima#98](https://github.com/hidetzu/kagima/issues/98)):
+⚠ **`npx wrangler deploy` の直後、⚠ Worker のログにこう出た。**
+
+```text
+✘ [ERROR] Error: This script has been upgraded.
+          Please send a new request to connect to the new version.
+```
+
+⚠ **Durable Object が入れ替わり、⚠ 開いていた WebSocket が全部切れた。**
+
+⚠ **落ちるのは socket であって、⚠ ルームでも通話でもない:**
+
+```text
+⚠ ルーム    ⚠ 残る。⚠ storage に書いてある(adr/0023、0025)
+⚠ 通話      ⚠ 続く。⚠ メディアはブラウザ間で、⚠ 我々を通らない(adr/0010)
+⚠⚠ socket  ⚠⚠ 切れる
+```
+
+### ⚠ いまは 両側が張り直す
+
+⚠ **Host は [kagima#70](https://github.com/hidetzu/kagima/issues/70) から、
+⚠ Guest は [kagima#98](https://github.com/hidetzu/kagima/issues/98) から。**
+⚠ **直っているあいだ、⚠ 画面には何も出ない**(⚠ Owner 決定 2026-09-06)。
+⚠ **パネルには `socket -> closed` と `socket -> open` が両方 残る** — ⚠ **黙って直すことと、
+⚠ 何も起きなかったことにするのは別である。**
+
+⚠ **張り直しには上限がある**(`src/client/reconnect.ts` の `RETRY_DELAYS_MS`)。
+⚠ **入れ替えがそれより長くかかれば、⚠ 両側とも諦める。**
+
+### ⚠⚠ 落ちる前に知らせることは できない
+
+⚠ **Cloudflare の公開文書は、⚠ deploy が既存の Durable Object と その WebSocket に何をするかを
+書いていない**(⚠ 参照日 2026-09-08)。⚠ **予告する仕組みも書かれていない。**
+⚠ **黙っている、ということである**(`../.claude/rules/evidence.md` § Silence is not permission)。
+
+⚠ **我々が持っているのは、⚠ 起きたあとに出たエラー 1 行だけである。**
+⚠ **so 「出す前に知らせる」は、⚠ いまのところ 実装できない。**
+
+### ⚠ 出す前に訊く
+
+⚠ **2026-09-06、⚠ AI が検証中に断りなく deploy し、⚠ 実測を 1 回ぶん壊した**
+([kagima#96](https://github.com/hidetzu/kagima/issues/96) の観測が失われた)。
+⚠ **deploy は毎回 Owner に訊く。** ⚠ **自動 deploy を入れるなら、⚠ この節が先に決まっている必要がある。**
+
 ## ⚠ 出す前に決まっていないこと
 
-- ⚠ **[kagima#78](https://github.com/hidetzu/kagima/issues/78)** — ⚠ **ノック待ちの polling が
-  Free の requests を枯らしうる。** ⚠ **枯れると扉が応じなくなる。**
 - ⚠ **Node 版をどうするか。** ⚠ **2 つの実装をいつまで並べるかは決めていない**
   (`CLAUDE.md` § 3)。
 

@@ -55,6 +55,16 @@ export type Reconnecting = Transport & {
   /** ⚠ **Called after every socket that opens, ⚠ including the first.** */
   onOpen(handler: () => void): void;
   /**
+   * ⚠⚠ **Called for every socket that closes, ⚠ including ones that come back** (kagima#98).
+   *
+   * ⚠ **`onGaveUp` is about the end; ⚠ this is about each drop.** ⚠ **Without it the only record
+   * of a socket closing is the one that never came back, ⚠ and an instrument reading that would
+   * report `open throughout` for a call whose signalling dropped and returned**
+   * (`.claude/rules/evidence.md`: ⚠ **not observed ≠ did not happen**, ⚠ the same defect
+   * kagima#91 was about).
+   */
+  onDrop(handler: (code: number) => void): void;
+  /**
    * ⚠ **Called once, ⚠ when there is no coming back.**
    *
    * ⚠ **Either a close code that is an answer, ⚠ or the retries ran out.**
@@ -92,6 +102,7 @@ export const connectReconnecting = async (options: ReconnectingOptions): Promise
   const messageHandlers: Array<(m: SignalMessage) => void> = [];
   const openHandlers: Array<() => void> = [];
   const gaveUpHandlers: Array<(code: number) => void> = [];
+  const dropHandlers: Array<(code: number) => void> = [];
 
   let socket: SocketTransport | null = null;
   let stopped = false;
@@ -112,6 +123,9 @@ export const connectReconnecting = async (options: ReconnectingOptions): Promise
     fresh.socket.addEventListener("close", (event) => {
       socket = null;
       if (stopped) return;
+      // ⚠ Every drop, ⚠ before anything is decided about it. ⚠ What happens next is a separate
+      //   ⚠ question, ⚠ and an instrument must not have to infer this one from that one.
+      for (const h of dropHandlers) h(event.code);
       // ⚠ An answer, not an accident. ⚠ Asking again cannot change it.
       if (FINAL_CLOSE_CODES.includes(event.code)) return giveUp(event.code);
       void retry(event.code);
@@ -143,6 +157,7 @@ export const connectReconnecting = async (options: ReconnectingOptions): Promise
     onMessage: (h) => void messageHandlers.push(h),
     onOpen: (h) => void openHandlers.push(h),
     onGaveUp: (h) => void gaveUpHandlers.push(h),
+    onDrop: (h) => void dropHandlers.push(h),
     currentSocket: () => socket?.socket ?? null,
     close: () => {
       stopped = true;
