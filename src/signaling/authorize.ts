@@ -51,13 +51,22 @@ export const roomIdFromPath = (url: string): string | null => {
  * ⚠ **A browser may offer several subprotocols, comma separated.** ⚠ **Ours is the one with the
  * prefix; ⚠ anything else is ignored rather than refused, ⚠ because offering more is allowed.**
  */
-export const tokenFromProtocols = (raw: string | undefined | null): string | null => {
+export const valueFromProtocols = (
+  raw: string | undefined | null,
+  prefix: string,
+): string | null => {
   if (raw === undefined || raw === null) return null;
   for (const p of raw.split(",").map((s) => s.trim())) {
-    if (p.startsWith(TOKEN_PROTOCOL_PREFIX)) return p.slice(TOKEN_PROTOCOL_PREFIX.length);
+    if (p.startsWith(prefix)) return p.slice(prefix.length);
   }
   return null;
 };
+
+// ⚠ **The knock id rides the same field for the same reason** (`docs/adr/0028`), ⚠ **so it reads
+//   ⚠ it with the same function.** ⚠ **Two readers of one header is two things that can drift**
+//   (`CLAUDE.md` § 3).
+export const tokenFromProtocols = (raw: string | undefined | null): string | null =>
+  valueFromProtocols(raw, TOKEN_PROTOCOL_PREFIX);
 
 /**
  * ⚠ **Asynchronous, ⚠ because Web Crypto is** (`docs/adr/0015`).

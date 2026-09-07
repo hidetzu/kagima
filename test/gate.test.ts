@@ -26,7 +26,9 @@ test("⚠⚠ everything a Guest touches is outside the gate", () => {
   const GUEST = [
     ["GET", "/r/abcdefghij123456"],
     ["POST", "/api/rooms/abcdefghij123456/knock"],
-    ["GET", "/api/rooms/abcdefghij123456/knock/xyz"],
+    // ⚠ The waiting socket, ⚠ which replaced a `GET` that carried the knock id in its path
+    //   (`docs/adr/0028`, kagima#99). ⚠ A Guest waits on this, ⚠ so it is outside the gate.
+    ["GET", "/api/rooms/abcdefghij123456/wait"],
     ["GET", "/api/rooms/abcdefghij123456/signal"],
     ["GET", "/client/guest.js"],
     ["GET", "/status/status.js"],

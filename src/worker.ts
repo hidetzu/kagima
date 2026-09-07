@@ -101,7 +101,8 @@ export default {
     // ⚠⚠ **Before anything else** (`docs/adr/0024`).
     //
     // ⚠ **Two paths only** — ⚠ **the Host's page and making a room.** ⚠ **A Guest never meets
-    //   ⚠ this: ⚠ `/r/{id}`, ⚠ the knock, ⚠ reading a knock and the socket are all outside it**
+    //   ⚠ this: ⚠ `/r/{id}`, ⚠ the knock, ⚠ the waiting socket and the signalling socket are all
+    //   ⚠ outside it**
     //   (`docs/adr/0017` took the passphrase off the door, ⚠ and this does not put it back).
     if (isGated(request.method, url.pathname)) {
       const refused = await mayPass(request, env.ROOM_GATE);

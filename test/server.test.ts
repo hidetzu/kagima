@@ -101,16 +101,28 @@ test("⚠⚠ knocking at a room that is not there looks like knocking at one tha
   assert.deepEqual(shape(malformed), shape(real), "a malformed room id answers differently");
 });
 
-test("⚠⚠ reading a knock nobody minted says the same as one that is waiting", async () => {
+test("⚠⚠ there is no endpoint that takes a knock id, ⚠ and asking for one leaks nothing", async () => {
+  // ⚠⚠ **`GET /api/rooms/{roomId}/knock/{knockId}` was here until `docs/adr/0028`.**
+  //
+  // ⚠ **It is gone because the id was in the path** — ⚠ **measured 2026-09-06, ⚠ Cloudflare's own
+  //   ⚠ log carried that line, ⚠ and kagima never wrote it** (kagima#99).
+  // ⚠ **The Host's decision is pushed over the waiting socket now** (`test/wait.test.ts`).
+  //
+  // ⚠⚠ **This case is about what is left behind.** ⚠ **A leftover route, ⚠ or a 405 that says
+  //   ⚠ "that is a GET", ⚠ would still answer "this shape used to mean something here".**
+  // ⚠ **So a real knock id, ⚠ an invented one, ⚠ and a path that was never an endpoint at all
+  //   ⚠ must be one answer.**
   const { fetch } = await start();
   const room = await makeRoom(fetch);
   const knocked = (await (await knock(fetch, room.roomId)).json()) as { knockId: string };
 
-  const waiting = await observable(
-    await fetch(`/api/rooms/${room.roomId}/knock/${knocked.knockId}`),
-  );
+  const real = await observable(await fetch(`/api/rooms/${room.roomId}/knock/${knocked.knockId}`));
   const invented = await observable(await fetch(`/api/rooms/${room.roomId}/knock/made-up`));
-  assert.deepEqual(invented, waiting, "an invented knock id answers differently");
+  const nonsense = await observable(await fetch(`/api/rooms/${room.roomId}/not-an-endpoint`));
+
+  assert.equal(real.status, 404, "the endpoint that carried a knock id is still answering");
+  assert.deepEqual(real, nonsense, "a real knock id answers unlike any other unknown path");
+  assert.deepEqual(invented, nonsense, "an invented knock id answers unlike any other path");
 });
 
 test("⚠ a room-creation response is never cached", async () => {

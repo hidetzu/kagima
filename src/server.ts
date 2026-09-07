@@ -265,17 +265,15 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     return json(200, { knockId: id });
   }
 
-  const knockState = /^\/api\/rooms\/([^/]+)\/knock\/([^/]+)$/.exec(url.pathname);
-  if (knockState) {
-    if (request.method !== "GET") {
-      return json(405, { error: "reading a knock is a GET" }, { allow: "GET" });
-    }
-    const roomId = decodeURIComponent(knockState[1] as string);
-    const knockId = decodeURIComponent(knockState[2] as string);
-    // ⚠ Unknown ids read as waiting, ⚠ exactly like a Host who has not answered.
-    const read = ctx.knocks.read(roomId, knockId);
-    return json(200, read.token === undefined ? { state: read.state } : read);
-  }
+  // ⚠⚠ **There is no endpoint here that takes a knock id** (`docs/adr/0028`, kagima#99).
+  //
+  // ⚠ **`GET /api/rooms/{roomId}/knock/{knockId}` used to live here, ⚠ and it was read every two
+  //   ⚠ seconds.** ⚠ **Measured 2026-09-06: ⚠ Cloudflare's own log carried that path with the id
+  //   ⚠ in it** — ⚠ **kagima never wrote the line; ⚠ the id was in the URL, ⚠ so the URL is what
+  //   ⚠ was recorded.**
+  // ⚠ **The Host's decision is pushed over the waiting socket now** (`src/knock/wait.ts`),
+  //   ⚠ **and the id travels in `sec-websocket-protocol` where the join token already travels.**
+  // ⚠ **`test/knock-id-never-in-a-path.test.ts` is what keeps it gone.**
 
   // ⚠⚠ **The Host exchanges its key for a short-lived role, once** (`docs/adr/0018`).
   //
