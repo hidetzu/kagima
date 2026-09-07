@@ -52,6 +52,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a Host whose page the browser threw away getting back into its own room",
   },
   {
+    name: "the-guest-comes-back",
+    sees: "a Guest whose socket dropped coming back on its own, so a deploy is a blip and not an ending",
+  },
+  {
     name: "guest-comes-back-to-a-thrown-away-page",
     sees: "a Guest whose page the browser threw away getting back in without the Host deciding again",
   },

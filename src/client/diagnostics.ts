@@ -35,6 +35,16 @@ import { heartbeatObservation } from "./transport.ts";
 export type Diagnostics = {
   noteSocketClosed(code: number): void;
   /**
+   * ⚠⚠ **The signalling socket came back** (kagima#98).
+   *
+   * ⚠ **Both pages reconnect now** (kagima#70, kagima#98), ⚠ **and until this the panel could
+   * only ever say that a socket closed.** ⚠ **A call whose signalling dropped and returned read
+   * exactly like one that never came back** — ⚠ **the same shape of lie kagima#91 was about.**
+   * ⚠ **`socket closed` still reports the FIRST drop; ⚠ this puts the coming back on the same
+   * clock, ⚠ where it can be lined up against everything else.**
+   */
+  noteSocketOpen(): void;
+  /**
    * ⚠ Reads the connection as it is now, ⚠ **and folds that reading into what the call has
    * gathered** (kagima#91). ⚠ **What is carried between calls is the notes, the candidates and
    * the last selected pair** — ⚠ **nothing that a later reading could contradict.**
@@ -96,9 +106,15 @@ export const createDiagnostics = (
 
   return {
     noteSocketClosed(code) {
+      // ⚠ The transition is recorded every time; ⚠ only the summary line keeps the first.
+      //   ⚠ `signalling socket:` answers "did it ever drop", ⚠ and the transitions answer "when".
+      note("socket", "closed");
       if (socketClosed !== null) return;
       socketClosed = { code, at: Math.round(now() - startedAt) };
-      note("socket", "closed");
+    },
+
+    noteSocketOpen() {
+      note("socket", "open");
     },
 
     async snapshot() {

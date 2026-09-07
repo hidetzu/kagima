@@ -36,7 +36,8 @@
 | ブラウザ間 | ⚠ **2 人が、⚠ 我々が書いていない 2 つのエンジンのあいだで、映像と音声を双方向にやりとりできる** | W3C WebRTC(`RTCPeerConnection`)、Media Capture(`getUserMedia`) | ⚠ **ケース `chromium-to-firefox`**(`npm run external`)。⚠ **`framesDecoded` を両側で読む。⚠ `connectionState` では判定しない** |
 | 接続の死活 | ⚠ **サーバが送ったハートビートに、⚠ 所定回数 有効な pong が返らなければ、⚠ その socket を `CLOSE_SILENT` で切る** | — | ⚠ **ケース `heartbeat`(`npm run check`)。⚠ 実測 2026-09-06: ⚠ 背面のタブが 453 秒のあいだ 26/26 答えた**([`adr/0020`](adr/0020-measure-the-message-heartbeat-in-shadow-before-trusting-it.md)) |
 | ⚠ **Host の復帰** | ⚠ **ページが破棄されても、⚠ Host は同じルームに戻れる** | — | ⚠ **ケース `host-comes-back-to-a-thrown-away-page`**(`npm run e2e`)。⚠ **実測 2026-09-06: ⚠ 実機で 2 回とも戻った**([`adr/0021`](adr/0021-keep-one-room-key-on-the-device-and-nothing-else.md)) |
-| ⚠ **Guest の復帰** | ⚠ **ページが破棄されても、⚠ 一度入れてもらった Guest は、⚠ Host がもう一度決めることなく同じルームに戻れる** | — | ⚠ **ケース `guest-comes-back-to-a-thrown-away-page`**(`npm run e2e`)。⚠ **扉が二度目に開かないこと、⚠ Host の画面が名前を出し続けることを見る**([`adr/0029`](adr/0029-let-a-guest-come-back-with-a-mark-that-works-on-one-room.md))。⚠ **実機では未確認** |
+| ⚠ **Guest の復帰(socket)** | ⚠ **signalling の socket が落ちても、⚠ Guest のページは自分で張り直す。⚠ 直っているあいだ、⚠ 画面には何も出ない** | — | ⚠ **ケース `the-guest-comes-back`**(`npm run e2e`)。⚠ **パネルに `socket -> open` が出ること、⚠ そのあとルームを閉じると Guest に届くことを見る**([`adr/0029`](adr/0029-let-a-guest-come-back-with-a-mark-that-works-on-one-room.md)、[kagima#98](https://github.com/hidetzu/kagima/issues/98)) |
+| ⚠ **Guest の復帰(ページ)** | ⚠ **ページが破棄されても、⚠ 一度入れてもらった Guest は、⚠ Host がもう一度決めることなく同じルームに戻れる** | — | ⚠ **ケース `guest-comes-back-to-a-thrown-away-page`**(`npm run e2e`)。⚠ **扉が二度目に開かないこと、⚠ Host の画面が名前を出し続けることを見る**([`adr/0029`](adr/0029-let-a-guest-come-back-with-a-mark-that-works-on-one-room.md))。⚠ **実機では未確認** |
 
 ## 2. 意図的に実装していないもの
 
