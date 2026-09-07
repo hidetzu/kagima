@@ -49,12 +49,25 @@ export type KnockState =
   /** ⚠ **Refused, closed, or the room ended while waiting.** ⚠ One word for all of them. */
   | "over";
 
+/**
+ * ⚠ **What the Host's decision grants** (`docs/adr/0029`).
+ *
+ * ⚠ **Two things, ⚠ minted together and carrying one `sessionId`:** ⚠ **a short-lived token that
+ * opens the socket now, ⚠ and a mark that opens the same room again if the browser throws the
+ * Guest's page away.** ⚠ **The mark is never a way in by itself**
+ * (`.claude/rules/security.md` § 4).
+ */
+export type Granted = {
+  readonly token: string;
+  readonly rejoin: string;
+};
+
 export type Knock = {
   readonly nickname: string;
   readonly at: number;
   state: KnockState;
   /** ⚠ **Set only when admitted.** ⚠ The Host's decision is what it is exchanged for. */
-  token?: string;
+  granted?: Granted;
 };
 
 /** ⚠ **Why a knock was not taken.** ⚠ For counting only** — ⚠ never reaches a caller. */
@@ -127,7 +140,7 @@ export type Knocks = {
    * ⚠ **It stays because it is how the state machine is asked what it holds** — ⚠ **`watch` is
    * the same state pushed rather than pulled, ⚠ off the same record, ⚠ so the two cannot drift.**
    */
-  read(roomId: string, id: string): { state: KnockState; token?: string };
+  read(roomId: string, id: string): { state: KnockState; granted?: Granted };
   /**
    * ⚠⚠ **Be told when this knock ends, ⚠ instead of asking every two seconds**
    * (`docs/adr/0028`, kagima#78, kagima#99).
@@ -161,7 +174,7 @@ export type Knocks = {
     at: number,
   ): { refused: KnockRejection | null };
   /** ⚠ **The Host's decision.** ⚠ Ignores ids it does not know, ⚠ silently. */
-  decide(roomId: string, id: string, admit: boolean, token: string | null): void;
+  decide(roomId: string, id: string, admit: boolean, granted: Granted | null): void;
   /** ⚠ **Everyone still at the door, oldest first.** ⚠ For the Host's own screen. */
   waiting(roomId: string): ReadonlyArray<{ id: string; nickname: string; at: number }>;
   /** ⚠ **The room ended.** ⚠ Everyone waiting is told the same one word. */
@@ -185,8 +198,8 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
   const watchers = new Map<string, Set<{ id: string; notify: KnockWatcher }>>();
 
   const endingOf = (k: Knock): KnockEnding | null =>
-    k.state === "admitted" && k.token !== undefined
-      ? { state: "admitted", token: k.token }
+    k.state === "admitted" && k.granted !== undefined
+      ? { state: "admitted", token: k.granted.token, rejoin: k.granted.rejoin }
       : k.state === "over"
         ? { state: "over" }
         : null;
@@ -227,9 +240,9 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       const found = rooms.get(roomId)?.get(id);
       // ⚠ Unknown answers exactly like known-and-waiting.
       if (found === undefined) return { state: "waiting" };
-      return found.token === undefined
+      return found.granted === undefined
         ? { state: found.state }
-        : { state: found.state, token: found.token };
+        : { state: found.state, granted: found.granted };
     },
 
     watch(roomId, id, notify) {
@@ -271,14 +284,14 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       return { refused: null };
     },
 
-    decide(roomId, id, admit, token) {
+    decide(roomId, id, admit, granted) {
       const found = rooms.get(roomId)?.get(id);
       // ⚠ Already decided stays decided. ⚠ A second admit must not mint a second token.
       if (found === undefined || found.state !== "waiting") return;
-      if (admit && token !== null) {
+      if (admit && granted !== null) {
         found.state = "admitted";
-        found.token = token;
-        fire(roomId, id, { state: "admitted", token });
+        found.granted = granted;
+        fire(roomId, id, { state: "admitted", token: granted.token, rejoin: granted.rejoin });
         return;
       }
       found.state = "over";

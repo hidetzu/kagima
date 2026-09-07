@@ -169,6 +169,9 @@ const openHost = async (b: Browser, base: string) => {
   };
 };
 
+/** ⚠ **A signed payload, read back.** ⚠ **base64url, ⚠ which `Buffer` understands and `atob` does not.** */
+const atobNode = (payload: string): string => Buffer.from(payload, "base64url").toString("utf8");
+
 /**
  * ⚠ **The guest, as a person gets it: ⚠ open the link, ⚠ type a name, ⚠ knock** (`docs/adr/0017`).
  *
@@ -389,10 +392,34 @@ test(titleOf("guest-keeps-nothing"), async () => {
   });
   // ⚠ A token has a dot and two long halves. ⚠ Looking for the shape, ⚠ not for a name.
   const TOKENISH = /[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/;
-  for (const [where, value] of Object.entries(leaked)) {
-    assert.doesNotMatch(value, TOKENISH, `a token was left in ${where}: ${value}`);
+  // ⚠⚠ **The URL and the cookies still hold nothing at all.** ⚠ **Nothing about this moved.**
+  assert.doesNotMatch(
+    leaked.inLocation,
+    TOKENISH,
+    `a token was left in the URL: ${leaked.inLocation}`,
+  );
+  assert.doesNotMatch(leaked.cookies, TOKENISH, `a token was left in a cookie: ${leaked.cookies}`);
+
+  // ⚠⚠ **Storage is the one that changed** (`docs/adr/0029`, kagima#90).
+  //
+  // ⚠ **A Guest now keeps a mark so a thrown-away page can come back.** ⚠ **The mark is signed
+  //   ⚠ and looks exactly like a token from outside** — ⚠ **so "nothing token-shaped in storage"
+  //   ⚠ would have to be deleted, ⚠ and deleting a wall is how the thing it guarded comes back.**
+  // ⚠⚠ **So it is narrowed rather than removed: ⚠ every token-shaped thing on this device must
+  //   ⚠ decode to a REJOIN MARK, ⚠ never to a join token.** ⚠ **The purpose is the first field of
+  //   ⚠ the signed payload** (`src/token/join-token.ts`).
+  const shaped = [...leaked.inStorage.matchAll(new RegExp(TOKENISH, "g"))].map((m) => m[0]);
+  for (const found of shaped) {
+    const payload = atobNode(found.slice(0, found.indexOf(".")));
+    assert.match(
+      payload,
+      /^rejoin:/,
+      `something on the device is not a rejoin mark: ${payload.slice(0, 40)}`,
+    );
   }
-  console.log("  observed: no token in the URL, in storage, or in a cookie");
+  console.log(
+    `  observed: no token in the URL or a cookie; ⚠ ${shaped.length} signed thing(s) in storage, all rejoin marks`,
+  );
 
   await host.context.close();
   await guest.context.close();
@@ -997,6 +1024,91 @@ test(titleOf("heartbeat"), async () => {
   for (const pattern of [/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/, /[0-9a-f-]{20,}\.local\b/i]) {
     assert.doesNotMatch(report, pattern, `an address reached the report:\n${report}`);
   }
+
+  await host.context.close();
+  await guest.context.close();
+});
+
+test(titleOf("guest-comes-back-to-a-thrown-away-page"), async () => {
+  // ⚠⚠ **Measured on a real phone on 2026-09-06** (kagima#90):
+  //   ⚠ **about six minutes in the background and the browser threw the Guest's page away** —
+  //   ⚠ **nine of its parts and `favicon.ico` were fetched again the moment it came forward.**
+  // ⚠ **`docs/adr/0026` and `docs/adr/0027` cannot help there: ⚠ they restart ICE, ⚠ and there
+  //   ⚠ was no page on the other end to restart with.**
+  //
+  // ⚠ **`page.reload()` is that, ⚠ exactly: ⚠ every variable gone, ⚠ the socket gone, ⚠ the
+  //   ⚠ document built again from nothing.** ⚠ **What survives is what was written down.**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
+
+  // ⚠ The door is shut behind them. ⚠ It is what must NOT open again.
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === true,
+    undefined,
+    {
+      timeout: 20_000,
+    },
+  );
+
+  await guest.page.reload({ waitUntil: "domcontentloaded" });
+  console.log("  observed: the Guest's page was thrown away and built again");
+
+  // ⚠⚠ **Nobody presses anything.** ⚠ **This is the whole case** (`docs/adr/0029`).
+  const backFrames = await waitForFrames(guest.page, "the guest, after coming back");
+  console.log(`  observed: the Guest decoded ${backFrames} frames without knocking again`);
+
+  // ⚠⚠ **And the Host was never asked a second time.**
+  //   ⚠ **A knock would have opened the door element; ⚠ it is still shut.**
+  const doorOpened = await host.page.evaluate(
+    () => document.getElementById("door")?.hidden === false,
+  );
+  assert.equal(doorOpened, false, "the Host was asked to decide a second time");
+
+  // ⚠⚠ **What is on the device** (`docs/adr/0021`, `docs/adr/0029`): ⚠ **one mark, ⚠ for this
+  //   ⚠ room, ⚠ and nobody's name.**
+  const kept = await guest.page.evaluate(() => JSON.stringify(localStorage));
+  console.log(`  observed: the device holds ${kept}`);
+  // ⚠⚠ **This person's OWN name is here, ⚠ on purpose** (⚠ Owner 決定 2026-09-07, `docs/adr/0029`).
+  //
+  // ⚠ **A thrown-away page has to say who it is again.** ⚠ **The alternatives were worse: ⚠ the
+  //   ⚠ server keeping a record of who was let in, ⚠ or the Host keeping a Guest's name past the
+  //   ⚠ moment they left** (`src/client/remember.ts` says both).
+  // ⚠ **What must NOT be here is anybody else's name** — ⚠ **the Host's page keeps none, ⚠ and
+  //   ⚠ `host-comes-back-to-a-thrown-away-page` is the case that holds that shut.**
+  assert.match(kept, /アン/, `the Guest cannot say who it is on the way back: ${kept}`);
+  const keys = await guest.page.evaluate(() => Object.keys(localStorage).sort());
+  // ⚠⚠ **The pile is what `docs/adr/0021` promised not to keep.** ⚠ **So: ⚠ exactly one signed
+  //   ⚠ thing on this device, ⚠ under the Guest's own key.**
+  // ⚠ **`kagima.hidden` is here too** — ⚠ **it is how long this page lasted while nobody was
+  //   ⚠ looking** (`src/diagnostics/discards.ts`, kagima#96), ⚠ **and it is not a mark.**
+  assert.ok(keys.includes("kagima.guest"), `the Guest kept no mark: ${keys.join(", ")}`);
+  // ⚠⚠ A Guest is not a Host. ⚠ A host key on this device would be somebody else's door.
+  assert.ok(!keys.includes("kagima.room"), `a host key is on a Guest's device: ${keys.join(", ")}`);
+  const signed = await guest.page.evaluate(() =>
+    Object.keys(localStorage)
+      .map((k) => localStorage.getItem(k) ?? "")
+      .join(" ")
+      .match(/[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g),
+  );
+  assert.equal(signed?.length, 1, `the device holds ${signed?.length ?? 0} signed things, not one`);
+
+  // ⚠⚠ **And the Host is still told who this is** — ⚠ **the screen did not change**
+  //   (⚠ Owner 決定 2026-09-07). ⚠ **`peer-left` clears the name on the Host's side, ⚠ so this is
+  //   ⚠ false until the Guest has said who it is again.**
+  await host.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("アン"),
+    undefined,
+    { timeout: 20_000 },
+  );
+  console.log(`  observed: the host was told "${await text(host.page, "status")}"`);
+
+  // ⚠ Closing the room takes the mark AND the name with it. ⚠ A dead mark is how one becomes a pile.
+  await host.page.click("#close");
+  await guest.page.waitForFunction(() => localStorage.length === 0, undefined, { timeout: 20_000 });
+  console.log("  observed: the room ending left nothing on the Guest's device");
 
   await host.context.close();
   await guest.context.close();

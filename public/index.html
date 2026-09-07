@@ -80,7 +80,7 @@
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
   import { connectReconnecting } from "/client/reconnect.js";
   import { forget, recall, remember } from "/client/remember.js";
-  import { hostStatus, outranks } from "/status/status.js";
+  import { cameBack, hostStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const status = $("status");
@@ -179,6 +179,11 @@
         }
         if (message.type === "hello") {
           guestName = message.nickname;
+          // ⚠⚠ **Somebody arriving is what "peer-left" recovers from** (`docs/adr/0029`).
+          //   ⚠ **Without this the screen kept saying the other side had left, ⚠ over a call that
+          //   ⚠ was running again** — ⚠ **and the name that had just arrived was never shown,
+          //   ⚠ because an ending outranks it** (`src/status/status.ts`).
+          ending = cameBack(ending);
           render();
           return;
         }

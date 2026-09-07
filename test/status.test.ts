@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { type Ending, guestStatus, hostStatus, outranks } from "../src/status/status.ts";
+import { cameBack, type Ending, guestStatus, hostStatus, outranks } from "../src/status/status.ts";
 
 const ENDINGS: readonly Exclude<Ending, null>[] = [
   "closed",
@@ -188,4 +188,28 @@ test("⚠ neither page decides the sentence for itself any more", async () => {
     assert.doesNotMatch(code, /ending === "closed"/, `${page} still decides its own wording`);
     assert.match(code, /(host|guest)Status\(/, `${page} does not use the one decision`);
   }
+});
+
+test("⚠⚠ somebody arriving un-ends `peer-left`, ⚠ and nothing else", () => {
+  // ⚠⚠ **Measured 2026-09-07** (kagima#90, `docs/adr/0029`): ⚠ **a Guest whose page was thrown
+  //   ⚠ away came back and said who it was, ⚠ and the Host's screen went on saying the other side
+  //   ⚠ had left** — ⚠ **an ending outranks the name, ⚠ so the name arrived and was never shown.**
+  //
+  // ⚠ **`peer-left` says of itself that it is recoverable.** ⚠ **Until this, nothing recovered.**
+  assert.equal(cameBack("peer-left"), null);
+
+  // ⚠⚠ **And only that one.** ⚠ **The room being over is not softened by somebody arriving, ⚠ and
+  //   ⚠ `detached` is about OUR OWN socket** — ⚠ **somebody else arriving says nothing about it.**
+  for (const stays of ["closed", "detached", "unreachable", "dropped"] as const) {
+    assert.equal(cameBack(stays), stays, `${stays} was cleared by somebody arriving`);
+  }
+  assert.equal(cameBack(null), null);
+});
+
+test("⚠ a Host who was told the other side left, and then who came back, reads the name", () => {
+  // ⚠ The two halves together, ⚠ because either alone passes with the bug in place.
+  const left = hostStatus({ ending: "peer-left", connected: false, guestName: null });
+  const back = hostStatus({ ending: cameBack("peer-left"), connected: false, guestName: "アン" });
+  assert.notEqual(back, left, "the screen said the same thing before and after they came back");
+  assert.match(back, /アン/);
 });

@@ -24,6 +24,37 @@ import { base64url, base64urlDecode, randomBytes } from "../random.ts";
  */
 export const TOKEN_TTL_MS = 2 * 60 * 1000;
 
+/**
+ * ⚠⚠ **How long a rejoin mark is good for** (`docs/adr/0029`, kagima#90).
+ *
+ * ⚠⚠ **A chosen value, ⚠ not a measured one** (`.claude/rules/evidence.md`).
+ * ⚠ **"How long is a Guest away" has not been measured.** ⚠ **kagima#90 has how long the media
+ * was down (⚠ longest 512.5 s) — ⚠ that is not the same question.**
+ *
+ * ⚠ **`ROOM_IDLE_MS` (20 minutes) was rejected: ⚠ a Host who stays keeps the room alive, ⚠ so a
+ * Guest away for 25 minutes would find only their own mark expired** — ⚠ **the feature would
+ * stop working in a case that actually happens.**
+ *
+ * ⚠ **What happens when it expires: ⚠ the Guest knocks again, ⚠ exactly as before this existed.**
+ * ⚠ **Nothing is said to them about the mark** — ⚠ **there is nothing there to explain.**
+ */
+export const REJOIN_TTL_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * ⚠⚠ **What a signature is for** (`docs/adr/0029`).
+ *
+ * ⚠ **A mark and a join token are signed with the same secret, ⚠ so nothing but this keeps one
+ * from verifying as the other.** ⚠ **It is inside the payload, ⚠ so it is inside the signature.**
+ *
+ * ⚠⚠ **The two payloads have the SAME shape on purpose** — ⚠ **same field count, ⚠ same order.**
+ * ⚠ **The first version gave the mark one field fewer, ⚠ and a mutation proved what that meant:
+ * ⚠ taking the purpose check out of `verifyJoinToken` changed nothing, ⚠ because the field count
+ * was quietly doing the work.** ⚠ **A separation that holds by accident is not a separation** —
+ * ⚠ **it holds until somebody adds a field** (`.claude/rules/security.md` § 4).
+ */
+const JOIN = "join";
+const REJOIN = "rejoin";
+
 /** ⚠ **Bytes of randomness per token.** ⚠ Makes two tokens for one room in one millisecond differ. */
 const NONCE_BYTES = 16;
 
@@ -126,7 +157,40 @@ export const issueJoinToken = async (
   nonce: string = base64url(randomBytes(NONCE_BYTES)),
   role: Role = "guest",
 ): Promise<string> => {
-  const payload = base64url(utf8.encode(`${roomId}:${now + TOKEN_TTL_MS}:${nonce}:${role}`));
+  const payload = base64url(
+    utf8.encode(`${JOIN}:${roomId}:${now + TOKEN_TTL_MS}:${nonce}:${role}`),
+  );
+  return `${payload}.${await sign(payload, secret)}`;
+};
+
+/**
+ * ⚠⚠ **A new session id** (`src/signaling/hub.ts`).
+ *
+ * ⚠ **Exposed because a mark and the token it is exchanged for must carry the same one.**
+ * ⚠ **The hub uses it to tell "the same participant reconnecting" from "a third person", ⚠ and a
+ * returning Guest with a new one can be refused as `room-full` by their own half-open socket.**
+ * ⚠ **It is not a secret** — ⚠ **it is random per session and means nothing outside one room.**
+ */
+export const newSessionId = (): string => base64url(randomBytes(NONCE_BYTES));
+
+/**
+ * ⚠⚠ **Mint a mark that lets one Guest come back to one room** (`docs/adr/0029`, kagima#90).
+ *
+ * ⚠ **It is not a way in.** ⚠ **It is exchanged for a short-lived token, ⚠ and the exchange
+ * confirms the room still exists** (`.claude/rules/security.md` § 4).
+ * ⚠ **The payload is readable by anyone holding it** — ⚠ **it holds the room, an expiry and the
+ * session id, ⚠ and nothing about who is coming back.**
+ */
+export const issueRejoinMark = async (
+  roomId: string,
+  secret: string,
+  now: number,
+  sessionId: string,
+  role: Role = "guest",
+): Promise<string> => {
+  const payload = base64url(
+    utf8.encode(`${REJOIN}:${roomId}:${now + REJOIN_TTL_MS}:${sessionId}:${role}`),
+  );
   return `${payload}.${await sign(payload, secret)}`;
 };
 
@@ -173,9 +237,11 @@ export const verifyJoinToken = async (
 
   // ⚠ Only now is the payload ours to read.
   const parts = new TextDecoder().decode(base64urlDecode(payload)).split(":");
-  if (parts.length !== 4) return { ok: false, why: "malformed" };
+  // ⚠⚠ **The purpose first** (`docs/adr/0029`). ⚠ **A rejoin mark is signed with the same secret,
+  //   ⚠ so this is the only thing stopping one from opening a socket by itself.**
+  if (parts.length !== 5 || parts[0] !== JOIN) return { ok: false, why: "malformed" };
 
-  const [roomId, expText, nonce, roleText] = parts as [string, string, string, string];
+  const [, roomId, expText, nonce, roleText] = parts as [string, string, string, string, string];
   const exp = Number(expText);
   if (!Number.isSafeInteger(exp)) return { ok: false, why: "malformed" };
 
@@ -189,4 +255,52 @@ export const verifyJoinToken = async (
   if (roomId !== expectedRoomId) return { ok: false, why: "wrong-room" };
   if (now >= exp) return { ok: false, why: "expired" };
   return { ok: true, sessionId: nonce, role: roleText as Role };
+};
+
+/**
+ * ⚠⚠ **Check a rejoin mark** (`docs/adr/0029`).
+ *
+ * ⚠ **Signature first, ⚠ exactly as `verifyJoinToken` does, ⚠ and for the same reason: ⚠ reading
+ * an expiry out of an unverified payload is trusting the attacker's own arithmetic.**
+ *
+ * ⚠ **`sessionId` comes back so the token minted next carries the same one** — ⚠ **without it the
+ * returning Guest is a third person to `src/signaling/hub.ts`.**
+ */
+export type RejoinCheck =
+  | { readonly ok: true; readonly sessionId: string }
+  | { readonly ok: false; readonly why: TokenRejection };
+
+export const verifyRejoinMark = async (
+  mark: string,
+  expectedRoomId: string,
+  secret: string,
+  now: number,
+): Promise<RejoinCheck> => {
+  const dot = mark.indexOf(".");
+  if (dot <= 0 || dot === mark.length - 1) return { ok: false, why: "malformed" };
+
+  const payload = mark.slice(0, dot);
+  const signature = mark.slice(dot + 1);
+  if (!(await constantTimeEqual(signature, await sign(payload, secret))))
+    return { ok: false, why: "bad-signature" };
+
+  const parts = new TextDecoder().decode(base64urlDecode(payload)).split(":");
+  // ⚠⚠ **A join token must never pass here either.** ⚠ **The separation runs both ways, ⚠ or it
+  //   ⚠ is not a separation.**
+  if (parts.length !== 5 || parts[0] !== REJOIN) return { ok: false, why: "malformed" };
+
+  const [, roomId, expText, sessionId, roleText] = parts as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  // ⚠ Fail closed, ⚠ exactly as the join token does. ⚠ Never "guest by default".
+  if (!ROLES.includes(roleText)) return { ok: false, why: "malformed" };
+  const exp = Number(expText);
+  if (!Number.isSafeInteger(exp)) return { ok: false, why: "malformed" };
+  if (roomId !== expectedRoomId) return { ok: false, why: "wrong-room" };
+  if (now >= exp) return { ok: false, why: "expired" };
+  return { ok: true, sessionId };
 };

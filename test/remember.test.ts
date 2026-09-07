@@ -1,4 +1,7 @@
-// ⚠⚠ **The one thing kagima keeps on a device** (`docs/adr/0021`, kagima#75).
+// ⚠⚠ **The only things kagima keeps on a device** (`docs/adr/0021`, `docs/adr/0029`).
+//
+// ⚠ **Two: ⚠ the Host's key for one room, ⚠ the Guest's mark for one room.** ⚠ **Two is a ceiling,
+//   ⚠ not a starting point** — ⚠ **and the size of the pile is what these cases are about.**
 //
 // ⚠ **Measured on a real phone on 2026-09-06: ⚠ the browser discarded the backgrounded tab and
 //   ⚠ reloaded it.** ⚠ **The Host's key was a variable, ⚠ so the room stayed alive on the server
@@ -6,9 +9,19 @@
 //
 // ⚠ **`docs/PRODUCT.md` § 5 promises no way to identify a user over time.** ⚠ **One room's key is
 //   ⚠ not that** — ⚠ **but a pile of them would be.** ⚠ **So the size of the pile is a wall.**
+//
+// ⚠⚠ **A Guest keeps its OWN name alongside its mark** (⚠ Owner 決定 2026-09-07). ⚠ **The Host
+//   ⚠ keeps nobody's, ⚠ and the case above holds that shut.**
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { forget, recall, remember } from "../src/client/remember.ts";
+import {
+  forget,
+  forgetRejoin,
+  recall,
+  recallRejoin,
+  remember,
+  rememberRejoin,
+} from "../src/client/remember.ts";
 
 /** ⚠ A storage that behaves like the browser's, ⚠ including being able to refuse. */
 const fakeStorage = (options: { readonly throws?: boolean } = {}) => {
@@ -165,4 +178,65 @@ test("⚠⚠ two ways to forget, ⚠ and neither is the other's spare", () => {
 
   assert.equal(recall(), null);
   assert.equal(fake.held.size, 0, "forgetting twice left something behind");
+});
+
+// ── ⚠⚠ the Guest's mark (`docs/adr/0029`, kagima#90) ────────────────────────
+
+const AMARK = {
+  roomId: "abcdefghij123456",
+  rejoin: "a-mark-that-opens-one-room",
+  nickname: "アン",
+} as const;
+
+test("⚠ a Guest's mark comes back, ⚠ name and all", () => {
+  rememberRejoin(AMARK);
+  assert.deepEqual(recallRejoin(), AMARK);
+});
+
+test("⚠⚠ the Guest's mark never becomes a pile either", () => {
+  // ⚠ **Same reason as the Host's key** (`docs/adr/0021`): ⚠ **a record of how many rooms this
+  //   ⚠ device has been in is close to the thing we promised not to have.**
+  const fake = fakeStorage();
+  install(fake.as);
+  for (let i = 0; i < 5; i++) {
+    rememberRejoin({ roomId: `room-${i}`, rejoin: `mark-${i}`, nickname: "アン" });
+  }
+  console.log(`  observed: ${fake.held.size} entries after 5 rooms as a Guest`);
+  assert.equal(fake.held.size, 1, "the marks are piling up");
+  assert.equal(recallRejoin()?.roomId, "room-4", "the newest room is not the one kept");
+});
+
+test("⚠⚠ the Host's key and the Guest's mark do not take each other's place", () => {
+  // ⚠ **One device can be the Host of one room and the Guest of another** (`src/client/remember.ts`).
+  //   ⚠ **Sharing a slot would make becoming a Guest lose the Host's own way back.**
+  const fake = fakeStorage();
+  install(fake.as);
+  remember({ roomId: "hostsroom1234567", hostKey: "a-host-key" });
+  rememberRejoin(AMARK);
+
+  assert.equal(recall()?.roomId, "hostsroom1234567", "becoming a Guest took the Host's key");
+  assert.equal(recallRejoin()?.roomId, AMARK.roomId);
+  // ⚠⚠ Two is the ceiling, ⚠ and it is a ceiling rather than a starting point.
+  assert.equal(fake.held.size, 2, "the device kept more than the two it is allowed");
+});
+
+test("⚠⚠ half a mark is a shape we did not write, ⚠ and it is removed", () => {
+  // ⚠ **A mark without the name cannot say who is coming back** — ⚠ **and the Host's screen would
+  //   ⚠ lose the name it was showing** (`docs/adr/0029`). ⚠ **Every field, ⚠ or none.**
+  const fake = fakeStorage();
+  install(fake.as);
+  fake.as.setItem("kagima.guest", JSON.stringify({ roomId: "abcdefghij123456", rejoin: "a-mark" }));
+  assert.equal(recallRejoin(), null, "half a mark was read as a mark");
+  assert.equal(fake.held.size, 0, "a shape we did not write was left there");
+});
+
+test("⚠ forgetting the mark leaves nothing, ⚠ and does not touch the Host's key", () => {
+  const fake = fakeStorage();
+  install(fake.as);
+  remember({ roomId: "hostsroom1234567", hostKey: "a-host-key" });
+  rememberRejoin(AMARK);
+  forgetRejoin();
+  assert.equal(recallRejoin(), null);
+  assert.equal(recall()?.roomId, "hostsroom1234567", "forgetting the mark took the Host's key");
+  assert.equal(fake.held.size, 1);
 });

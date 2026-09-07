@@ -58,6 +58,41 @@ export const knock = async (
 };
 
 /**
+ * ⚠⚠ **Come back to a room this device was already let into** (`docs/adr/0029`, kagima#90).
+ *
+ * ⚠ **The mark is exchanged for a short-lived token; ⚠ it is never used in place of one**
+ * (`.claude/rules/security.md` § 4). ⚠ **The exchange confirms the room still exists, ⚠ so a
+ * room that is over refuses exactly like a mark that was never ours.**
+ *
+ * ⚠ **`null` means "not this way"** — ⚠ **and the only next move is to knock, ⚠ which is what
+ * this page did before the mark existed.** ⚠ **The caller is told nothing else, ⚠ because there
+ * is nothing else to tell: ⚠ refused, expired and "that room is over" are one answer.**
+ */
+export const rejoin = async (
+  roomId: string,
+  mark: string,
+  origin: string = location.origin,
+): Promise<{ token: string; rejoin: string } | null> => {
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/api/rooms/${roomId}/guest-session`, origin), {
+      method: "POST",
+      body: JSON.stringify({ rejoin: mark }),
+    });
+  } catch {
+    // ⚠ Nothing came back. ⚠ Not the same as being refused — ⚠ but the next move is the same one,
+    //   ⚠ and knocking is never wrong.
+    return null;
+  }
+  if (!res.ok) return null;
+  const body = (await res.json()) as { token?: unknown; rejoin?: unknown };
+  // ⚠ Both or neither. ⚠ Half an answer is not an answer.
+  return typeof body.token === "string" && typeof body.rejoin === "string"
+    ? { token: body.token, rejoin: body.rejoin }
+    : null;
+};
+
+/**
  * ⚠ **How long to wait before opening the waiting socket again, in order.**
  *
  * ⚠⚠ **Chosen values, ⚠ not measured ones** (`.claude/rules/evidence.md`).

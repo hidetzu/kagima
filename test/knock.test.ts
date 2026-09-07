@@ -76,9 +76,12 @@ test("⚠⚠ refused, closed and ended-while-waiting are one word to the Guest",
 test("⚠ a token is handed over only when the Host admits", () => {
   const k = make();
   const a = k.knock("room-a", "あん", 0);
-  assert.equal(k.read("room-a", a.id).token, undefined);
-  k.decide("room-a", a.id, true, "a-token");
-  assert.deepEqual(k.read("room-a", a.id), { state: "admitted", token: "a-token" });
+  assert.equal(k.read("room-a", a.id).granted, undefined);
+  k.decide("room-a", a.id, true, { token: "a-token", rejoin: "a-token-mark" });
+  assert.deepEqual(k.read("room-a", a.id), {
+    state: "admitted",
+    granted: { token: "a-token", rejoin: "a-token-mark" },
+  });
 });
 
 test("⚠⚠ a decision is made once, and a second one changes nothing", () => {
@@ -86,13 +89,13 @@ test("⚠⚠ a decision is made once, and a second one changes nothing", () => {
   //   ⚠ message arriving late (⚠ arrival order is not send order).
   const k = make();
   const a = k.knock("room-a", "あん", 0);
-  k.decide("room-a", a.id, true, "first");
-  k.decide("room-a", a.id, true, "second");
-  assert.equal(k.read("room-a", a.id).token, "first");
+  k.decide("room-a", a.id, true, { token: "first", rejoin: "first-mark" });
+  k.decide("room-a", a.id, true, { token: "second", rejoin: "second-mark" });
+  assert.equal(k.read("room-a", a.id).granted?.token, "first");
 
   const b = k.knock("room-a", "いん", 0);
   k.decide("room-a", b.id, false, null);
-  k.decide("room-a", b.id, true, "too-late");
+  k.decide("room-a", b.id, true, { token: "too-late", rejoin: "too-late-mark" });
   assert.deepEqual(k.read("room-a", b.id), { state: "over" });
 });
 
@@ -137,7 +140,7 @@ test("⚠ the Host sees who is waiting, oldest first", () => {
 test("⚠ a decided knock leaves the Host's list", () => {
   const k = make();
   const a = k.knock("room-a", "あん", 0);
-  k.decide("room-a", a.id, true, "t");
+  k.decide("room-a", a.id, true, { token: "t", rejoin: "t-mark" });
   assert.deepEqual(k.waiting("room-a"), []);
 });
 

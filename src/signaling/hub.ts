@@ -65,6 +65,17 @@ export type Hub = {
    * is the distinction this whole file exists to keep** (kagima#11).
    */
   leave(roomId: string, peerId: number): Peer[];
+  /**
+   * ⚠⚠ **Whether this peer is still the room's** — ⚠ **false once a reconnect has replaced it.**
+   *
+   * ⚠ **The same question `relay` asks before delivering, ⚠ asked out loud** (`CLAUDE.md` § 3:
+   * ⚠ **never two implementations of one question**).
+   *
+   * ⚠⚠ **It exists because a replaced socket still closes**, ⚠ **and a close was being read as
+   * "the other side left"** — ⚠ **which is a lie: ⚠ that person did not leave, ⚠ they came back**
+   * (`docs/adr/0029`, kagima#90). ⚠ **The Host's screen cleared the name it had just been given.**
+   */
+  holds(roomId: string, peerId: number): boolean;
   relay(roomId: string, fromPeerId: number, line: string): RelayResult;
   /**
    * ⚠⚠ **Say something to the room's Host, ⚠ and to nobody else.**
@@ -121,11 +132,15 @@ export const createHub = (): Hub => {
       return remaining;
     },
 
+    holds(roomId, peerId) {
+      return peersOf(roomId).some((p) => p.id === peerId);
+    },
+
     relay(roomId, fromPeerId, line) {
       const peers = peersOf(roomId);
       // ⚠ The sender must still BE this room's peer. ⚠ A socket that has been replaced is not,
       //   ⚠ and its late message is dropped rather than delivered as current.
-      if (!peers.some((p) => p.id === fromPeerId)) return "stale";
+      if (!this.holds(roomId, fromPeerId)) return "stale";
 
       const others = peers.filter((p) => p.id !== fromPeerId);
       if (others.length === 0) return "no-peer";

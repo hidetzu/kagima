@@ -14,7 +14,7 @@
 // ⚠ **Without it, this process holds a room slot for a peer that left.**
 import type { Knocks } from "../knock/knocks.ts";
 import { logger } from "../log.ts";
-import { issueJoinToken, type Role } from "../token/join-token.ts";
+import { issueJoinToken, issueRejoinMark, newSessionId, type Role } from "../token/join-token.ts";
 import type { Hub, Peer } from "./hub.ts";
 import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.ts";
 import { CLOSE_BAD_MESSAGE, CLOSE_ROOM_FULL, CLOSE_SILENT, pingLine } from "./protocol.ts";
@@ -227,8 +227,22 @@ export const createSessions = (options: SessionOptions): Sessions => {
 
           const { knockId, allow } = parsed.message;
           void (async () => {
-            const token = allow ? await issueJoinToken(roomId, options.secret, now()) : null;
-            options.knocks?.decide(roomId, knockId, allow, token);
+            // ⚠⚠ **One `sessionId` across both** (`docs/adr/0029`).
+            //   ⚠ **`src/signaling/hub.ts` tells "the same participant reconnecting" from "a
+            //   ⚠ third person" by it, ⚠ so a Guest who comes back with a new one can be refused
+            //   ⚠ as `room-full` by their own half-open socket.**
+            const granted = allow
+              ? await (async () => {
+                  const sessionId = newSessionId();
+                  return {
+                    token: await issueJoinToken(roomId, options.secret, now(), sessionId),
+                    // ⚠ Not a way in. ⚠ It is exchanged for a token, ⚠ and the exchange confirms
+                    //   ⚠ the room still exists (`.claude/rules/security.md` § 4).
+                    rejoin: await issueRejoinMark(roomId, options.secret, now(), sessionId),
+                  };
+                })()
+              : null;
+            options.knocks?.decide(roomId, knockId, allow, granted);
           })().catch(() => {
             // ⚠ Minting failed. ⚠ The knock stays waiting, ⚠ which is what it already looked like —
             //   ⚠ so the Guest sees no difference and the Host can decide again.
@@ -249,10 +263,21 @@ export const createSessions = (options: SessionOptions): Sessions => {
 
       onClose: () => {
         clearInterval(beat);
+        // ⚠⚠ **Asked BEFORE leaving, ⚠ because leaving is what makes it false.**
+        //
+        // ⚠ **A socket that a reconnect already replaced is not this room's peer any more**
+        //   (`./hub.ts`). ⚠ **Its close is not somebody leaving** — ⚠ **it is the old half of
+        //   ⚠ somebody coming back, ⚠ and it closes AFTER the new half has already said hello.**
+        // ⚠⚠ **Measured 2026-09-07: ⚠ the Host's screen was told the Guest's name and then had it
+        //   ⚠ cleared, ⚠ by the close of the socket the Guest had just replaced** (kagima#90).
+        // ⚠ **`.claude/skills/change-review/SKILL.md` § 4: ⚠ arrival order is not send order.**
+        const wasHere = options.hub.holds(roomId, peer.id);
         const remaining = options.hub.leave(roomId, peer.id);
         // ⚠ Tell whoever is still there. ⚠ "The other side left" is recoverable and is NOT
         //   ⚠ "the room ended" — ⚠ the two get different words, and the client keeps them apart.
-        for (const other of remaining) other.send(JSON.stringify({ type: "peer-left" }));
+        if (wasHere) {
+          for (const other of remaining) other.send(JSON.stringify({ type: "peer-left" }));
+        }
         // ⚠ The room is NOT closed here. ⚠ A signalling socket dropping is not a room ending —
         //   ⚠ an established peer-to-peer call carries on without us (`docs/adr/0003`).
         //   ⚠ Closing a room is kagima#10, and it is the host's decision.

@@ -49,7 +49,12 @@ export const waitPath = (roomId: string): string => `/api/rooms/${encodeURICompo
  * ⚠ **and two copies of an agreement are two things that can drift** (the head of this file).
  */
 export type KnockEnding =
-  | { readonly state: "admitted"; readonly token: string }
+  /**
+   * ⚠ **`token` opens the socket, ⚠ once, ⚠ within two minutes.**
+   * ⚠⚠ **`rejoin` is the mark that lets this Guest come back to this one room if the browser
+   * throws their page away** (`docs/adr/0029`, kagima#90). ⚠ **It is not a way in by itself.**
+   */
+  | { readonly state: "admitted"; readonly token: string; readonly rejoin: string }
   | { readonly state: "over" };
 
 export const knockEndingLine = (ending: KnockEnding): string => JSON.stringify(ending);
@@ -68,9 +73,15 @@ export const parseKnockEnding = (line: string): KnockEnding | null => {
   } catch {
     return null;
   }
-  const seen = body as { state?: unknown; token?: unknown };
-  if (seen.state === "admitted" && typeof seen.token === "string") {
-    return { state: "admitted", token: seen.token };
+  const seen = body as { state?: unknown; token?: unknown; rejoin?: unknown };
+  // ⚠ Both or neither. ⚠ An `admitted` without its mark is a shape we did not send, ⚠ and
+  //   ⚠ guessing at half of one is how a Guest ends up holding nothing on the way back.
+  if (
+    seen.state === "admitted" &&
+    typeof seen.token === "string" &&
+    typeof seen.rejoin === "string"
+  ) {
+    return { state: "admitted", token: seen.token, rejoin: seen.rejoin };
   }
   return seen.state === "over" ? { state: "over" } : null;
 };

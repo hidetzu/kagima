@@ -124,7 +124,10 @@ test("⚠⚠ the queue carries the name and the id, and never the token", async 
   const knockId = JSON.parse(host.sent[0] as string).knockId as string;
 
   // ⚠ Admit them, so a token exists at all — ⚠ otherwise this passes for the wrong reason.
-  knocks.decide(room.id, knockId, true, "a-real-looking-token");
+  knocks.decide(room.id, knockId, true, {
+    token: "a-real-looking-token",
+    rejoin: "a-real-looking-mark",
+  });
 
   await knock("ふたり目");
   const back = fakeSocket();
