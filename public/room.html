@@ -73,7 +73,7 @@
   import { classifyMediaError, createCall } from "/client/call.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { forgetHidden, watchDiscards } from "/client/discarded.js";
-  import { knock, readKnock, roomIdFromPath, WORDING } from "/client/guest.js";
+  import { knock, roomIdFromPath, waitForDecision, WORDING } from "/client/guest.js";
   import { connectSignaling } from "/client/transport.js";
   import { guestStatus, outranks } from "/status/status.js";
 
@@ -101,33 +101,34 @@
     // ⚠⚠ **The camera has NOT been asked for, ⚠ and will not be until the Host says yes**
     //   (`docs/PRODUCT.md` § 3 と § 5)。
     // ⚠ **Somebody who is not let in never hands over a camera.**
-    let stopped = false;
-    $("give-up").addEventListener("click", () => {
-      stopped = true;
+    // ⚠⚠ **Waited for, ⚠ not asked for** (`docs/adr/0028`, kagima#78, kagima#99).
+    //
+    // ⚠ **This used to read `/api/rooms/{roomId}/knock/{knockId}` every two seconds.**
+    // ⚠ **The knock id was in that path, ⚠ so it was in logs kagima does not run** (kagima#99),
+    //   ⚠ **and the reads were 1,800/hour per waiting person** (kagima#78).
+    // ⚠ **Silence still means waiting** — ⚠ **an unknown room, a Host who has not looked and a
+    //   ⚠ door with too many people at it all open a socket that says nothing.**
+    let stopWaiting = () => {};
+    const giveUp = () => {
+      stopWaiting();
       $("waiting").hidden = true;
       $("before").hidden = false;
       $("enter-button").disabled = false;
-    });
+    };
+    $("give-up").addEventListener("click", giveUp);
 
-    // ⚠ A person is on the other end. ⚠ Two seconds is often enough and costs little.
-    let token = null;
-    while (!stopped) {
-      const outcome = await readKnock(roomId, knocked.knockId);
-      if (outcome.state === "admitted") {
-        token = outcome.token;
-        break;
-      }
-      if (outcome.state === "over") {
+    const token = await new Promise((resolve) => {
+      $("give-up").addEventListener("click", () => resolve(null), { once: true });
+      stopWaiting = waitForDecision(roomId, knocked.knockId, (ending) => {
+        if (ending.state === "admitted") return resolve(ending.token);
         // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
-        $("waiting").hidden = true;
-        $("before").hidden = false;
+        giveUp();
         $("error").textContent = WORDING.refused;
-        $("enter-button").disabled = false;
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 2000));
-    }
+        resolve(null);
+      });
+    });
     if (token === null) return;
+    stopWaiting();
     const result = { ok: true, token };
 
 

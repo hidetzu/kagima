@@ -8,6 +8,13 @@
 // ⚠ **The server already answers all three identically.** ⚠ **This file's job is not to undo that
 //   ⚠ by explaining the difference in words the server refused to give.**
 
+import {
+  KNOCK_PROTOCOL_PREFIX,
+  type KnockEnding,
+  parseKnockEnding,
+  waitPath,
+} from "../signaling/protocol.ts";
+
 /** ⚠ **The room id, taken from the path.** ⚠ **Never from a query string somebody can craft.** */
 export const roomIdFromPath = (pathname: string): string | null =>
   /^\/r\/([0-9a-z]{16})$/.exec(pathname)?.[1] ?? null;
@@ -50,31 +57,89 @@ export const knock = async (
   return { ok: true, knockId: ((await res.json()) as { knockId: string }).knockId };
 };
 
-/** ⚠ **What the door says.** ⚠ `over` covers refused, closed, and ended while waiting. */
-export type KnockOutcome =
-  | { readonly state: "waiting" }
-  | { readonly state: "admitted"; readonly token: string }
-  | { readonly state: "over" };
+/**
+ * ⚠ **How long to wait before opening the waiting socket again, in order.**
+ *
+ * ⚠⚠ **Chosen values, ⚠ not measured ones** (`.claude/rules/evidence.md`).
+ * ⚠ **The last one repeats, ⚠ and that is the difference from `RETRY_DELAYS_MS` in
+ * `./reconnect.ts`** — ⚠ **there, the length of the list is the bound; ⚠ here the bound is the
+ * person, ⚠ who is looking at a 「やめる」 button while they wait.**
+ * ⚠ **A socket that closed without saying anything is not an answer** — ⚠ **`nothing arrived ≠
+ * it was refused`, ⚠ and giving up would tell a Guest something that did not happen.**
+ * ⚠ **At the slowest that is one handshake every 8 seconds** — ⚠ **450/hour against the 1,800/hour
+ * the two-second polling cost** (kagima#78).
+ */
+export const WAIT_RETRY_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
 
-/** ⚠ **Read once.** ⚠ The caller decides how often; ⚠ a person is on the other end. */
-export const readKnock = async (
+/**
+ * ⚠⚠ **Wait for the Host, ⚠ and be told** (`docs/adr/0028`, kagima#78, kagima#99).
+ *
+ * ⚠ **This replaces a `GET` that carried the knock id in its path and was read every two
+ * seconds.** ⚠ **The id now travels in `sec-websocket-protocol`, ⚠ where the join token already
+ * travels** (`src/signaling/protocol.ts`).
+ *
+ * ⚠ **Silence is what waiting looks like.** ⚠ **An unknown room, a Host who has not looked and a
+ * door with too many people at it all open a socket that simply says nothing**
+ * (`src/knock/knocks.ts`) — ⚠ **the same three that all read `waiting` before.**
+ *
+ * ⚠ **Returns how to stop.** ⚠ **Calling it closes the socket and cancels any pending retry.**
+ */
+export const waitForDecision = (
   roomId: string,
   knockId: string,
+  onEnding: (ending: KnockEnding) => void,
   origin: string = location.origin,
-): Promise<KnockOutcome> => {
-  try {
-    const res = await fetch(new URL(`/api/rooms/${roomId}/knock/${knockId}`, origin));
-    if (!res.ok) return { state: "waiting" };
-    const body = (await res.json()) as { state: string; token?: string };
-    if (body.state === "admitted" && typeof body.token === "string") {
-      return { state: "admitted", token: body.token };
+): (() => void) => {
+  let stopped = false;
+  let attempt = 0;
+  let socket: WebSocket | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const again = (): void => {
+    if (stopped) return;
+    const at = Math.min(attempt, WAIT_RETRY_DELAYS_MS.length - 1);
+    attempt += 1;
+    timer = setTimeout(open, WAIT_RETRY_DELAYS_MS[at] as number);
+  };
+
+  function open(): void {
+    if (stopped) return;
+    const url = new URL(waitPath(roomId), origin);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url.toString(), [`${KNOCK_PROTOCOL_PREFIX}${knockId}`]);
+    } catch {
+      // ⚠ The socket could not even be made. ⚠ That is not an answer either.
+      again();
+      return;
     }
-    // ⚠ Anything we do not recognise is "still waiting". ⚠ Never invent an ending.
-    return body.state === "over" ? { state: "over" } : { state: "waiting" };
-  } catch {
-    // ⚠ One failed read is not an answer. ⚠ Keep waiting rather than end the wait.
-    return { state: "waiting" };
+    socket = ws;
+    // ⚠ It opened, ⚠ so the next failure starts the backoff from the top rather than the bottom.
+    ws.addEventListener("open", () => {
+      attempt = 0;
+    });
+    ws.addEventListener("message", (event: MessageEvent) => {
+      const ending = parseKnockEnding(String(event.data));
+      // ⚠ A line we do not recognise is not an ending. ⚠ Never invent one.
+      if (ending === null) return;
+      stopped = true;
+      onEnding(ending);
+    });
+    ws.addEventListener("close", () => {
+      socket = null;
+      again();
+    });
+    // ⚠ `close` follows an error, ⚠ so the coming back happens in one place and not two.
+    ws.addEventListener("error", () => {});
   }
+
+  open();
+  return () => {
+    stopped = true;
+    if (timer !== null) clearTimeout(timer);
+    socket?.close();
+  };
 };
 
 /**

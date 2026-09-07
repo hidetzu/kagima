@@ -36,9 +36,20 @@ const fakeStorage = () => {
   };
 };
 
+/**
+ * ⚠ **A room nobody is waiting at** (`docs/adr/0028`).
+ *
+ * ⚠ **Every case in this file is about what is written down, ⚠ not about the door**, ⚠ **so the
+ * hibernatable sockets are empty here.** ⚠ **`test/wait.test.ts` is where they are not.**
+ */
+const noSockets = {
+  acceptWebSocket: () => {},
+  getWebSockets: () => [],
+};
+
 const anObject = (over: Record<string, unknown> = {}) => {
   const storage = fakeStorage();
-  const object = new RoomObject({ storage: storage.as } as never, {
+  const object = new RoomObject({ storage: storage.as, ...noSockets } as never, {
     JOIN_TOKEN_SECRET: "a-room-object-secret",
     PUBLIC_BASE_URL: "http://127.0.0.1:9097",
     ...over,
@@ -102,7 +113,7 @@ test("⚠⚠ the room that survived is the room that comes back", async () => {
   const { roomId, hostKey } = (await made.json()) as { roomId: string; hostKey: string };
 
   // ⚠ Evicted: ⚠ a new object, ⚠ nothing in memory, ⚠ the same storage underneath.
-  const woken = new RoomObject({ storage: storage.as } as never, {
+  const woken = new RoomObject({ storage: storage.as, ...noSockets } as never, {
     JOIN_TOKEN_SECRET: "a-room-object-secret",
     PUBLIC_BASE_URL: "http://127.0.0.1:9097",
   });
@@ -209,4 +220,94 @@ test("⚠⚠ an alarm that fires early re-arms rather than deleting", async () =
 
   assert.equal(storage.held.size, 1, "a live room was deleted by an early alarm");
   assert.ok((storage.alarmAt() ?? 0) > Date.now(), "the alarm was not re-armed");
+});
+
+// ── ⚠⚠ waking up with people still at the door (`docs/adr/0028`) ────────────
+
+/** ⚠ **One hibernatable socket, ⚠ and everything it was told.** */
+const aWaitingSocket = (attachment: unknown) => {
+  const said: string[] = [];
+  const closed: number[] = [];
+  let held = attachment;
+  return {
+    said,
+    closed,
+    as: {
+      send: (line: string) => void said.push(line),
+      close: (code?: number) => void closed.push(code ?? 0),
+      serializeAttachment: (value: unknown) => {
+        held = value;
+      },
+      deserializeAttachment: () => held,
+    },
+  };
+};
+
+test("⚠⚠ a Guest waiting across a sleep is still told when the room ends", async () => {
+  // ⚠⚠ **This is the half of `docs/adr/0028` that has nowhere else to live.**
+  //
+  // ⚠ **A hibernating object loses what it held in memory** (⚠ Cloudflare の公開文書、
+  //   ⚠ 参照日 2026-09-07), ⚠ **and a knock is never written to storage** (`docs/adr/0023` —
+  //   ⚠ the case above holds that shut). ⚠ **So the door is rebuilt from the sockets standing
+  //   ⚠ at it, ⚠ and if that rebuild does not happen the Guest waits for ever.**
+  const { storage, ask } = anObject();
+  const made = await ask("/api/rooms", { method: "POST" });
+  const { roomId, hostKey } = (await made.json()) as { roomId: string; hostKey: string };
+
+  // ⚠ Asleep and woken: ⚠ a new object, ⚠ nothing in memory, ⚠ the same storage — ⚠ and one
+  //   ⚠ socket still standing at the door, ⚠ carrying who it is.
+  const waiting = aWaitingSocket({
+    roomId,
+    knockId: "carried-on-the-socket",
+    nickname: "アン",
+    at: 1,
+  });
+  const woken = new RoomObject(
+    {
+      storage: storage.as,
+      acceptWebSocket: () => {},
+      getWebSockets: () => [waiting.as],
+    } as never,
+    { JOIN_TOKEN_SECRET: "a-room-object-secret", PUBLIC_BASE_URL: "http://127.0.0.1:9097" },
+  );
+
+  const close = new Request(`http://127.0.0.1:9097/api/rooms/${roomId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ hostKey }),
+  });
+  close.headers.set(ROOM_HEADER, roomId);
+  assert.equal((await woken.fetch(close)).status, 200);
+
+  console.log(
+    `  observed: the socket that slept through it was told ${JSON.stringify(waiting.said)}`,
+  );
+  assert.deepEqual(waiting.said, ['{"state":"over"}'], "the Guest was left waiting for ever");
+  assert.deepEqual(waiting.closed, [1000]);
+});
+
+test("⚠ a socket with nothing attached is left alone", async () => {
+  // ⚠ **We never registered it, ⚠ so we know nothing about it.** ⚠ **Saying anything would be
+  //   ⚠ inventing a knock** (`.claude/rules/evidence.md`).
+  const { storage, ask } = anObject();
+  const made = await ask("/api/rooms", { method: "POST" });
+  const { roomId, hostKey } = (await made.json()) as { roomId: string; hostKey: string };
+
+  const stranger = aWaitingSocket(null);
+  const woken = new RoomObject(
+    {
+      storage: storage.as,
+      acceptWebSocket: () => {},
+      getWebSockets: () => [stranger.as],
+    } as never,
+    { JOIN_TOKEN_SECRET: "a-room-object-secret", PUBLIC_BASE_URL: "http://127.0.0.1:9097" },
+  );
+
+  const close = new Request(`http://127.0.0.1:9097/api/rooms/${roomId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ hostKey }),
+  });
+  close.headers.set(ROOM_HEADER, roomId);
+  await woken.fetch(close);
+
+  assert.deepEqual(stranger.said, [], "a socket we never registered was told something");
 });

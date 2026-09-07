@@ -12,6 +12,7 @@
 // ⚠ **Nothing here decides anything** (`CLAUDE.md` § 3). ⚠ **The two adapters answer the same
 //   ⚠ question in two runtimes; ⚠ neither answers a question the core already answers.**
 import { authorizeUpgrade } from "./authorize.ts";
+import { TOKEN_PROTOCOL_PREFIX } from "./protocol.ts";
 import type { Sessions } from "./session.ts";
 import type { SignalingSocket } from "./socket.ts";
 
@@ -104,7 +105,7 @@ export const upgrade = async (request: Request, options: UpgradeOptions): Promis
   const ours = (offered ?? "")
     .split(",")
     .map((p) => p.trim())
-    .find((p) => p.startsWith("kagima.token."));
+    .find((p) => p.startsWith(TOKEN_PROTOCOL_PREFIX));
   if (ours !== undefined) headers.set("sec-websocket-protocol", ours);
 
   return new Response(null, { status: 101, webSocket: pair[0], headers } as ResponseInit);

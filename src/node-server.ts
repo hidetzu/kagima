@@ -148,6 +148,7 @@ export const startServer = (
     hub: ctx.hub,
     secret: ctx.secret,
     knocks: ctx.knocks,
+    knockRejections: ctx.knockRejections,
     touch: (roomId) => ctx.store.touch(roomId),
     ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
   });

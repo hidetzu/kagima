@@ -20,6 +20,62 @@
 export const TOKEN_PROTOCOL_PREFIX = "kagima.token.";
 
 /**
+ * ⚠⚠ **The subprotocol that carries the knock id** (`docs/adr/0028`, kagima#99).
+ *
+ * ⚠ **Measured 2026-09-06: ⚠ Cloudflare's own log carried
+ * `GET /api/rooms/{roomId}/knock/{knockId}`** — ⚠ **kagima never wrote that line, ⚠ and the id
+ * was in the path, ⚠ so the path is what was recorded.**
+ * ⚠ **A knock id is not the join token; ⚠ it is what the token is handed to**
+ * (`src/client/guest.ts`). ⚠ **So it travels where the token travels, ⚠ and for the same reason.**
+ */
+export const KNOCK_PROTOCOL_PREFIX = "kagima.knock.";
+
+/**
+ * ⚠ **Where the waiting socket goes.** ⚠ **The room id is in the path; ⚠ the knock id is not.**
+ *
+ * ⚠ **The room id is already in `/r/{roomId}` and in the signalling path, ⚠ so putting it here
+ * discloses nothing new.** ⚠ **The knock id is the thing kagima#99 is about.**
+ */
+export const waitPath = (roomId: string): string => `/api/rooms/${encodeURIComponent(roomId)}/wait`;
+
+/**
+ * ⚠⚠ **How a knock ends, ⚠ as it goes over the wire** (`docs/adr/0028`).
+ *
+ * ⚠ **There is no `waiting` here on purpose.** ⚠ **Waiting is what silence looks like**, ⚠ **and
+ * that is what makes an unknown room and a Host who has not answered the same thing from
+ * outside** (`.claude/rules/security.md` § 3).
+ *
+ * ⚠ **It lives in this file rather than next to the door because both ends have to agree on it**,
+ * ⚠ **and two copies of an agreement are two things that can drift** (the head of this file).
+ */
+export type KnockEnding =
+  | { readonly state: "admitted"; readonly token: string }
+  | { readonly state: "over" };
+
+export const knockEndingLine = (ending: KnockEnding): string => JSON.stringify(ending);
+
+/**
+ * ⚠ **The one line the waiting socket ever carries, ⚠ read back.**
+ *
+ * ⚠ **Anything else is `null`** — ⚠ **never guessed at, ⚠ and never turned into an ending.**
+ * ⚠ **Inventing an ending out of a line we do not recognise would end somebody's wait for a
+ * reason that did not happen** (`.claude/rules/evidence.md`).
+ */
+export const parseKnockEnding = (line: string): KnockEnding | null => {
+  let body: unknown;
+  try {
+    body = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const seen = body as { state?: unknown; token?: unknown };
+  if (seen.state === "admitted" && typeof seen.token === "string") {
+    return { state: "admitted", token: seen.token };
+  }
+  return seen.state === "over" ? { state: "over" } : null;
+};
+
+/**
  * ⚠⚠ **The heartbeat as a message, ⚠ running in shadow** (`docs/adr/0020`, kagima#62).
  *
  * ⚠ **A Worker's server-side WebSocket has no `ping`** (⚠ measured 2026-09-06, `docs/adr/0015`).

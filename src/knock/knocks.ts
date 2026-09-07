@@ -9,9 +9,11 @@
 // ⚠ a room that does not exist
 // ⚠ a room whose Host has not answered yet
 // ⚠ a knock that was dropped because too many are already waiting
+// ⚠ a watcher dropped because too many are already watching   ⚠ docs/adr/0028
 // ```
 //
-// ⚠ **All three look like "still waiting".** ⚠ **Anything else answers "does this room exist?"
+// ⚠ **All four look like "still waiting"** — ⚠ **and since `docs/adr/0028` that means a socket
+//   ⚠ that is simply silent.** ⚠ **Anything else answers "does this room exist?"
 //   ⚠ for free** (`.claude/rules/security.md` § 3), ⚠ **and the second one would also say
 //   ⚠ whether the Host is at their desk.**
 //
@@ -56,7 +58,27 @@ export type Knock = {
 };
 
 /** ⚠ **Why a knock was not taken.** ⚠ For counting only** — ⚠ never reaches a caller. */
-export type KnockRejection = "no-such-room" | "too-many-waiting";
+export type KnockRejection = "no-such-room" | "too-many-waiting" | "too-many-watching";
+
+// ⚠⚠ **How a knock ends is the wire, ⚠ so it is owned by the file both ends read**
+//   (`../signaling/protocol.ts`). ⚠ **Re-exported here so a call site that means "the door's
+//   ⚠ answer" keeps reading like one** — ⚠ **one definition, ⚠ two names for the same thing.**
+export type { KnockEnding } from "../signaling/protocol.ts";
+import type { KnockEnding } from "../signaling/protocol.ts";
+
+/** ⚠ **Told once, ⚠ and then never again.** */
+export type KnockWatcher = (ending: KnockEnding) => void;
+
+/**
+ * ⚠ **How many may be watching one room's door at once.**
+ *
+ * ⚠ **Separate from `MAX_WAITING`, ⚠ which counts knocks.** ⚠ **A watcher costs a socket, ⚠ and
+ * `security.md` § 3 says unbounded tracking is itself the attack.**
+ * ⚠ **Chosen, not measured** (`.claude/rules/evidence.md`). ⚠ **Above `MAX_WAITING` so that a
+ * page that reconnects while its old socket is still being cleaned up is not the thing that
+ * hits the cap.**
+ */
+export const MAX_WATCHING = 10;
 
 export type KnockRejectionCounts = Readonly<Record<KnockRejection, number>>;
 
@@ -73,7 +95,11 @@ export type KnockRejectionCounter = {
 };
 
 export const createKnockRejectionCounter = (): KnockRejectionCounter => {
-  const counts: Record<KnockRejection, number> = { "no-such-room": 0, "too-many-waiting": 0 };
+  const counts: Record<KnockRejection, number> = {
+    "no-such-room": 0,
+    "too-many-waiting": 0,
+    "too-many-watching": 0,
+  };
   return {
     record: (why) => {
       counts[why] += 1;
@@ -92,8 +118,48 @@ export type Knocks = {
     nickname: string,
     at: number,
   ): { id: string; refused: KnockRejection | null };
-  /** ⚠ **Unknown ids answer `waiting`.** ⚠ Same reason. */
+  /**
+   * ⚠ **The door's own state.** ⚠ **Unknown ids answer `waiting`**, ⚠ for the reason above.
+   *
+   * ⚠⚠ **No request path exposes this any more** (`docs/adr/0028`). ⚠ **It was `GET
+   * /api/rooms/{roomId}/knock/{knockId}` until 2026-09-07, ⚠ read every two seconds**
+   * (kagima#78) ⚠ **with the id in the path** (kagima#99).
+   * ⚠ **It stays because it is how the state machine is asked what it holds** — ⚠ **`watch` is
+   * the same state pushed rather than pulled, ⚠ off the same record, ⚠ so the two cannot drift.**
+   */
   read(roomId: string, id: string): { state: KnockState; token?: string };
+  /**
+   * ⚠⚠ **Be told when this knock ends, ⚠ instead of asking every two seconds**
+   * (`docs/adr/0028`, kagima#78, kagima#99).
+   *
+   * ⚠ **`notify` is called at most once, ⚠ and never with "waiting".**
+   * ⚠ **An unknown room, ⚠ an unknown id, ⚠ a knock that was dropped at the cap, ⚠ and a watcher
+   * over the cap all register nothing and are never called** — ⚠ **which is exactly what a Host
+   * who has not answered looks like** (`.claude/rules/security.md` § 3).
+   * ⚠ **A knock that has already ended fires immediately**, ⚠ so a socket that opens after the
+   * Host pressed the button is not left waiting for an event that has been and gone.
+   *
+   * ⚠ **`refused` is for counting and never reaches the caller**, ⚠ the same shape as `knock`.
+   */
+  watch(
+    roomId: string,
+    id: string,
+    notify: KnockWatcher,
+  ): { stop: () => void; refused: KnockRejection | null };
+  /**
+   * ⚠⚠ **Put a knock back with the id it already had** (`docs/adr/0028`).
+   *
+   * ⚠ **A hibernating object loses what it held in memory** (⚠ Cloudflare の公開文書、
+   * ⚠ 参照日 2026-09-07), ⚠ **and this project writes no knock to storage** (`docs/adr/0023`).
+   * ⚠ **So the waiting socket carries who it is, ⚠ and this is how it says so on the way back.**
+   * ⚠ **Never mints an id** — ⚠ **an id that was minted twice would be two knocks for one person.**
+   */
+  restore(
+    roomId: string,
+    id: string,
+    nickname: string,
+    at: number,
+  ): { refused: KnockRejection | null };
   /** ⚠ **The Host's decision.** ⚠ Ignores ids it does not know, ⚠ silently. */
   decide(roomId: string, id: string, admit: boolean, token: string | null): void;
   /** ⚠ **Everyone still at the door, oldest first.** ⚠ For the Host's own screen. */
@@ -105,13 +171,36 @@ export type Knocks = {
 export type KnocksOptions = {
   readonly newId: () => string;
   readonly maxWaiting?: number;
+  readonly maxWatching?: number;
   /** ⚠ **Which rooms exist.** ⚠ Injected so this file never reaches into the store. */
   readonly roomExists: (roomId: string) => boolean;
 };
 
 export const createKnocks = (options: KnocksOptions): Knocks => {
   const maxWaiting = options.maxWaiting ?? MAX_WAITING;
+  const maxWatching = options.maxWatching ?? MAX_WATCHING;
   const rooms = new Map<string, Map<string, Knock>>();
+  // ⚠ Per room, ⚠ so the cap is per room. ⚠ A watcher holds its own id rather than being keyed
+  //   ⚠ by it: ⚠ two sockets may watch one knock, ⚠ and an unknown id must be storable too.
+  const watchers = new Map<string, Set<{ id: string; notify: KnockWatcher }>>();
+
+  const endingOf = (k: Knock): KnockEnding | null =>
+    k.state === "admitted" && k.token !== undefined
+      ? { state: "admitted", token: k.token }
+      : k.state === "over"
+        ? { state: "over" }
+        : null;
+
+  /** ⚠ **Told once, ⚠ then forgotten.** ⚠ A watcher that has fired is not a watcher. */
+  const fire = (roomId: string, id: string, ending: KnockEnding): void => {
+    const here = watchers.get(roomId);
+    if (here === undefined) return;
+    for (const w of [...here]) {
+      if (w.id !== id) continue;
+      here.delete(w);
+      w.notify(ending);
+    }
+  };
 
   const of = (roomId: string): Map<string, Knock> => {
     const existing = rooms.get(roomId);
@@ -143,6 +232,45 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
         : { state: found.state, token: found.token };
     },
 
+    watch(roomId, id, notify) {
+      const found = rooms.get(roomId)?.get(id);
+      if (found !== undefined) {
+        const already = endingOf(found);
+        // ⚠⚠ It ended before the socket got here. ⚠ Tell it now rather than never.
+        if (already !== null) {
+          notify(already);
+          return { stop: () => {}, refused: null };
+        }
+      }
+      const here = watchers.get(roomId) ?? new Set<{ id: string; notify: KnockWatcher }>();
+      watchers.set(roomId, here);
+      if (here.size >= maxWatching) {
+        // ⚠⚠ Nothing is registered, ⚠ and nothing is said. ⚠ From outside this is a Host who
+        //   ⚠ has not answered, ⚠ which is the only answer the door has
+        //   (`.claude/rules/security.md` § 3).
+        return { stop: () => {}, refused: "too-many-watching" };
+      }
+      const w = { id, notify };
+      here.add(w);
+      return {
+        stop: () => {
+          here.delete(w);
+        },
+        refused: null,
+      };
+    },
+
+    restore(roomId, id, nickname, at) {
+      if (!options.roomExists(roomId)) return { refused: "no-such-room" };
+      const here = of(roomId);
+      // ⚠ Already here. ⚠ Two sockets for one knock must not become two people at the door.
+      if (here.has(id)) return { refused: null };
+      const stillWaiting = [...here.values()].filter((k) => k.state === "waiting").length;
+      if (stillWaiting >= maxWaiting) return { refused: "too-many-waiting" };
+      here.set(id, { nickname, at, state: "waiting" });
+      return { refused: null };
+    },
+
     decide(roomId, id, admit, token) {
       const found = rooms.get(roomId)?.get(id);
       // ⚠ Already decided stays decided. ⚠ A second admit must not mint a second token.
@@ -150,9 +278,11 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       if (admit && token !== null) {
         found.state = "admitted";
         found.token = token;
+        fire(roomId, id, { state: "admitted", token });
         return;
       }
       found.state = "over";
+      fire(roomId, id, { state: "over" });
     },
 
     waiting(roomId) {
@@ -166,9 +296,14 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       // ⚠ Everyone at the door hears the same word as everyone who was refused.
       // ⚠⚠ **The map is NOT deleted.** ⚠ **Deleting it would send them back to "waiting",
       //   ⚠ and they would wait for a room that is gone.** ⚠ **A browser check caught exactly that.**
-      for (const k of rooms.get(roomId)?.values() ?? []) {
-        if (k.state === "waiting") k.state = "over";
+      for (const [id, k] of rooms.get(roomId) ?? []) {
+        if (k.state !== "waiting") continue;
+        k.state = "over";
+        fire(roomId, id, { state: "over" });
       }
+      // ⚠⚠ **A watcher on an id this room never had is NOT told.** ⚠ **It never was told
+      //   ⚠ anything, ⚠ and being told now would say the URL was a real room** — ⚠ **which is
+      //   ⚠ the one thing an 80-bit URL is the wall against** (see the head of this file).
     },
   };
 };
