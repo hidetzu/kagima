@@ -30,7 +30,7 @@
 
 | 層 | 何ができるか | どの規格の、どの節か | 何が裏付けるか |
 |---|---|---|---|
-| ⚠ **ルームを作るところ** | ⚠ **ルームを作れるのは、⚠ Google で名乗り、⚠ 許可されたアドレスの人だけである。** ⚠ **入る人はこれに一度も触れない** | — | ⚠ **ケース `worker` の門の判定と `test/gate.test.ts` / `test/sign-in.test.ts`**。⚠ **ID token の claim(iss / aud / exp / nonce / email_verified)を 1 つずつ壊して、⚠ どれも単独で拒まれることを見る**([`adr/0030`](adr/0030-let-the-host-sign-in-with-google-and-keep-the-guest-anonymous.md))。⚠ **実サービスの Google では未確認** |
+| ⚠ **ルームを作るところ** | ⚠ **ルームを作れるのは、⚠ Google で名乗り、⚠ 許可されたアドレスの人だけである。** ⚠ **入る人はこれに一度も触れない** | — | ⚠ **ケース `worker` の門の判定と `test/gate.test.ts` / `test/sign-in.test.ts`**。⚠ **ID token の claim(iss / aud / exp / nonce / email_verified)を 1 つずつ壊して、⚠ どれも単独で拒まれることを見る**([`adr/0030`](adr/0030-let-the-host-sign-in-with-google-and-keep-the-guest-anonymous.md))。⚠ **実サービス 2026-09-08: ⚠ 本物の Google との往復が通り、⚠ 許可されたアドレスでルームを作れた**(⚠ Owner の報告であって、⚠ 取得した記録ではない)。⚠ **同日、⚠ redirect URI 不一致と 許可リスト外も 実サービスで踏み、⚠ どちらもルームは作れなかった**(⚠ 同じく Owner の報告。⚠ **画面に出た文言そのものは記録していない**) |
 | 入口 | ⚠ **URL を持つ人がノックでき、⚠ Host が入れると決めた人だけが入れる** | — | ⚠ **ケース `frames`**(`npm run e2e`)。⚠ **Host が承認するまで通話は始まらない** |
 | 入口 | ⚠ **存在しないルームと、⚠ Host が応じていないルームは、⚠ 外から区別できない** | — | ⚠ **ケース `guest-refusals`**(`npm run e2e`)。⚠ **2 つの待機画面を文字列として比較する** |
 | 入口 | ⚠ **入れなかった人のカメラは、⚠ 一度も求められない** | W3C Media Capture(`getUserMedia`) | ⚠ **ケース `third-person`**(`npm run e2e`)。⚠ **待っている側に `kagimaCall` が存在しないことを見る** |
