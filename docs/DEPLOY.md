@@ -27,7 +27,9 @@ npm run worker     # ⚠ wrangler dev --local + ブラウザ 2 つ。⚠ アカ�
 | ⚠ **アカウント ID** | ⚠⚠ **環境変数 `CLOUDFLARE_ACCOUNT_ID`。** ⚠ **リポジトリには入れない** |
 | ⚠ API token、⚠ もしくは `wrangler login` | ⚠ **同じく 環境から。** ⚠ **書かない** |
 | ⚠ `JOIN_TOKEN_SECRET` | ⚠ **`wrangler secret put`。** ⚠ **`.env` にも書かない** |
-| ⚠⚠ `ROOM_GATE` | ⚠ **同じく `wrangler secret put`。** ⚠ **`user:secret`。** ⚠ **入れなければ 誰でもルームを作れる**([`adr/0024`](adr/0024-put-a-temporary-gate-in-front-of-making-a-room.md)) |
+| ⚠⚠ `GOOGLE_CLIENT_ID` | ⚠ **Google Cloud console の OAuth クライアント。** ⚠ **`wrangler secret put`** |
+| ⚠⚠ `GOOGLE_CLIENT_SECRET` | ⚠ **同じ。** ⚠ **これが門を on にする** — ⚠ **入れなければ 誰でもルームを作れる**([`adr/0030`](adr/0030-let-the-host-sign-in-with-google-and-keep-the-guest-anonymous.md)) |
+| ⚠⚠ `ALLOWED_EMAILS` | ⚠ **ルームを作ってよい人のアドレス、⚠ カンマ区切り。** ⚠ **空は 誰も通さない**(⚠ fail closed) |
 | ⚠ `PUBLIC_BASE_URL` | ⚠ **`wrangler.toml` の `[vars]`、⚠ もしくは deploy 時に** |
 
 ## 手順
@@ -43,9 +45,15 @@ npx wrangler login
 #    (`../.claude/rules/security.md` § 6)
 npx wrangler secret put JOIN_TOKEN_SECRET
 
-# 3-2. ⚠⚠ ルームを作るところの門(`adr/0024`)。⚠ `user:secret` の形で入れる
+# 3-2. ⚠⚠ ルームを作る人が名乗る先(`adr/0030`)
 #      ⚠ 入れなければ 門は無い — ⚠ 誰でもルームを作れる
-npx wrangler secret put ROOM_GATE
+#      ⚠⚠ Google 側に redirect URI を登録すること: https://<出した先>/auth/google/callback
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+
+# 3-3. ⚠⚠ ルームを作ってよい人(`adr/0030` 段階 1)。⚠ カンマ区切り
+#      ⚠ 空は 誰も通さない。⚠ 「入れ忘れ = 誰でも」にはならない
+npx wrangler secret put ALLOWED_EMAILS
 
 # 4. ⚠ 出す
 npx wrangler deploy

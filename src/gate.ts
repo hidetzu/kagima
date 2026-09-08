@@ -14,8 +14,14 @@
 // ⚠ **`CLAUDE.md` § 4: ⚠ "passphrase" is the word for the thing a human says out loud at the
 //   ⚠ door.** ⚠ **This is not that, ⚠ and it is not called that.**
 //
-// ⚠ **It is time-limited, ⚠ and `docs/adr/0024` says how it ends.**
-import { constantTimeEqual } from "./token/join-token.ts";
+// ⚠⚠ **2026-09-08: ⚠ the gate stopped being a shared secret** (`docs/adr/0030`).
+//
+// ⚠ **It was Basic auth: ⚠ one `user:secret`, ⚠ handed round, ⚠ saying nothing about who used it
+//   ⚠ and revocable only for everybody at once.** ⚠ **Now the person who makes a room signs in
+//   ⚠ with Google** (Owner 決定 2026-09-08, `docs/PRODUCT.md` § 4 と § 5 が動いた)。
+// ⚠⚠ **What did not change: ⚠ which paths this stands in front of.** ⚠ **A Guest still never
+//   ⚠ meets it.**
+import { readSession, SESSION_COOKIE, cookieFrom } from "./auth/session.ts";
 
 /**
  * ⚠ **Which paths the gate stands in front of** (`docs/adr/0024`).
@@ -29,49 +35,65 @@ export const isGated = (method: string, pathname: string): boolean =>
   (method === "POST" && pathname === "/api/rooms");
 
 /**
+ * ⚠⚠ **Signing in is outside the gate, ⚠ or nobody can ever get through it** (`docs/adr/0030`).
+ *
+ * ⚠ **Said as its own function rather than folded into `isGated`** — ⚠ **a gate that stands in
+ * front of its own door is a mistake that reads as correct.**
+ */
+export const isSignIn = (pathname: string): boolean => pathname.startsWith("/auth/");
+
+/**
  * ⚠ **The one answer to every refusal.**
  *
  * ⚠ **A wrong name, ⚠ a wrong secret, ⚠ a malformed header and no header at all are one answer**
  * (`.claude/rules/security.md` § 3). ⚠ **`WWW-Authenticate` is what makes a browser ask, ⚠ and
  * it says nothing about what was wrong.**
  */
-const ASK = new Response(null, {
-  status: 401,
-  headers: { "www-authenticate": 'Basic realm="kagima", charset="UTF-8"' },
-});
+/**
+ * ⚠⚠ **Built when it is needed, ⚠ never at module scope** (⚠ measured 2026-09-08).
+ *
+ * ⚠ **A Worker refuses I/O in global scope, ⚠ and a `Response` with a body counts** —
+ * ⚠ **`wrangler dev --local` said `Disallowed operation called within global scope` and the
+ * isolate never started.** ⚠ **The version before this held a body-less `Response` there and was
+ * fine, ⚠ so the shape looked safe and was not.**
+ * ⚠ **`src/token/join-token.ts` already carries the same lesson about random values.**
+ */
+const refused = (): Response =>
+  new Response(JSON.stringify({ error: "sign in first" }), {
+    status: 401,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  });
 
 /**
- * ⚠ **Whether this request may pass.**
+ * ⚠ **Whether this request may pass** (`docs/adr/0030`).
  *
- * ⚠ **`expected` is `undefined` when no gate is configured** — ⚠ **then there is no gate, ⚠ and
- * the caller says so out loud at startup rather than passing silently**
+ * ⚠ **`secret` is `undefined` when nothing is configured** — ⚠ **then there is no gate, ⚠ and the
+ * caller says so out loud at startup rather than passing silently**
  * (`.claude/rules/security.md` § 6: ⚠ **never a default value**).
+ * ⚠ **This is unchanged from the Basic auth version, ⚠ deliberately** — ⚠ **`wrangler dev --local`
+ * and every check run without one.**
  *
- * ⚠ **Compared in constant time.** ⚠ **`===` on the raw string would let the secret be guessed
- * one byte at a time** (`.claude/rules/security.md` § 1).
+ * ⚠⚠ **A browser is sent to sign in; ⚠ anything else is refused.**
  *
- * ⚠ **Only meaningful over HTTPS.** ⚠ **Basic sends the secret with every request; ⚠ on plain
- * HTTP it is in the open.** ⚠ **kagima is served over TLS** (`docs/adr/0003`).
+ * ⚠ **The redirect is what the Basic auth box did**: ⚠ **arrive without a credential and you are
+ * asked for one, immediately.** ⚠ **No new sentence is put in front of anybody** (`CLAUDE.md` § 4).
+ * ⚠ **`POST /api/rooms` gets the refusal instead** — ⚠ **a caller that is not a browser cannot
+ * follow a redirect to a consent screen, ⚠ and pretending otherwise would hang it.**
  */
 export const mayPass = async (
   request: Request,
-  expected: string | undefined,
+  secret: string | undefined,
+  now: number = Date.now(),
 ): Promise<Response | null> => {
-  if (expected === undefined || expected === "") return null;
+  if (secret === undefined || secret === "") return null;
 
-  const offered = request.headers.get("authorization") ?? "";
-  const [scheme, encoded] = offered.split(" ");
-  if (scheme?.toLowerCase() !== "basic" || encoded === undefined) return ASK.clone();
+  const cookie = cookieFrom(request.headers.get("cookie"), SESSION_COOKIE);
+  if ((await readSession(cookie, secret, now)) !== null) return null;
 
-  let decoded: string;
-  try {
-    decoded = new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)));
-  } catch {
-    // ⚠ Malformed. ⚠ Same answer as wrong — ⚠ telling them apart says which half was read.
-    return ASK.clone();
+  // ⚠ Expired, ⚠ forged, ⚠ absent, ⚠ and for another purpose are one answer
+  //   (`.claude/rules/security.md` § 3). ⚠ Nothing here says which it was.
+  if (request.method === "GET") {
+    return new Response(null, { status: 302, headers: { location: "/auth/google" } });
   }
-
-  // ⚠ The whole `user:secret` is compared, ⚠ not the halves. ⚠ Comparing them separately would
-  //   ⚠ leak whether the name was right.
-  return (await constantTimeEqual(decoded, expected)) ? null : ASK.clone();
+  return refused();
 };

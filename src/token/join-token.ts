@@ -126,8 +126,19 @@ const equalDigests = (a: Uint8Array, b: Uint8Array): boolean => {
 export const constantTimeEqual = async (a: string, b: string): Promise<boolean> =>
   equalDigests(await hmac(compareKeyOf(), a), await hmac(compareKeyOf(), b));
 
-const sign = async (payload: string, secret: string): Promise<string> =>
+/**
+ * ⚠⚠ **The one signer** (`CLAUDE.md` § 3: ⚠ **never two implementations of one question**).
+ *
+ * ⚠ **Exported because the sign-in cookie is signed the same way** (`src/auth/session.ts`,
+ * `docs/adr/0030`) — ⚠ **and a second HMAC written next to this one would be a second thing to
+ * keep right.**
+ * ⚠ **What keeps the two apart is the purpose at the head of the payload, ⚠ not the fact that
+ * they live in different files** (`docs/adr/0029` paid for that lesson).
+ */
+export const signPayload = async (payload: string, secret: string): Promise<string> =>
   base64url(await hmac(secret, payload));
+
+const sign = signPayload;
 
 /**
  * ⚠⚠ **What this connection may do inside one room** ([`docs/adr/0018`](../../docs/adr/0018-give-the-host-a-short-lived-role-inside-one-room.md)).

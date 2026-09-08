@@ -21,6 +21,8 @@ import { randomToken } from "./random.ts";
 import { createRoom, defaultDeps as defaultCreateRoomDeps } from "./room/create-room.ts";
 import { isRoomId } from "./room/room-id.ts";
 import { createRoomStore, type RoomStore } from "./room/store.ts";
+import type { ExchangeCode, GoogleConfig } from "./auth/google.ts";
+import { handleSignIn } from "./auth/routes.ts";
 import { createHub, type Hub } from "./signaling/hub.ts";
 import { parseClientMessage } from "./signaling/messages.ts";
 import { CLOSE_ROOM_CLOSED } from "./signaling/protocol.ts";
@@ -90,6 +92,17 @@ export type Context = {
    * ⚠ **So it is off unless the deployment says otherwise** (`src/server.ts` § sourceOf).
    */
   readonly trustedSourceHeader: string;
+  /**
+   * ⚠⚠ **How the person who makes a room says who they are** (`docs/adr/0030`).
+   *
+   * ⚠ **`null` when nothing is configured** — ⚠ **then there is no sign-in and no gate, ⚠ which
+   * is what `wrangler dev --local` and every check run as.**
+   */
+  readonly google?: GoogleConfig | null;
+  /** ⚠ **Who may make a room.** ⚠ **Addresses in a secret; ⚠ no database** (stage 1 of `0030`). */
+  readonly allowList?: string;
+  /** ⚠ **Injected so a check needs no network** (`.claude/rules/verification.md`). */
+  readonly exchangeCode?: ExchangeCode;
 };
 
 /**
@@ -210,6 +223,22 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
     const asset = await ctx.asset(url.pathname);
     if (asset !== null) return asset;
   }
+
+  // ⚠⚠ **Signing in** (`docs/adr/0030`). ⚠ **It is not a room's business, ⚠ so it does not live
+  //   ⚠ here** — ⚠ **on Cloudflare the room routes go to a Durable Object and this must not**
+  //   (`src/auth/routes.ts`). ⚠ **Both platforms call the same function.**
+  const signIn = await handleSignIn(
+    {
+      google: ctx.google ?? null,
+      secret: ctx.secret,
+      allowList: ctx.allowList,
+      secure: ctx.baseUrl.startsWith("https:"),
+      ...(ctx.exchangeCode === undefined ? {} : { exchangeCode: ctx.exchangeCode }),
+    },
+    request,
+    url,
+  );
+  if (signIn !== null) return signIn;
 
   if (url.pathname === "/api/rooms") {
     if (request.method !== "POST") {
@@ -427,6 +456,7 @@ export const handle = async (ctx: Context, request: Request): Promise<Response> 
   return json(404, {
     error: "no such endpoint",
     endpoints: [
+      "GET /auth/google",
       "POST /api/rooms",
       "POST /api/rooms/{roomId}/host-session",
       "POST /api/rooms/{roomId}/guest-session",

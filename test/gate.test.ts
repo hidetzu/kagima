@@ -10,14 +10,18 @@
 //   ⚠ purpose; ⚠ a gate that a Guest had to pass would put it back through the side.**
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isGated, mayPass } from "../src/gate.ts";
+import { isGated, isSignIn, mayPass } from "../src/gate.ts";
+import { issueSession, SESSION_COOKIE, SESSION_TTL_MS } from "../src/auth/session.ts";
+import { issueJoinToken } from "../src/token/join-token.ts";
 
-const SECRET = "kagima:a-temporary-gate";
-const basic = (value: string) => `Basic ${Buffer.from(value, "utf8").toString("base64")}`;
-const ask = (path: string, method = "GET", auth?: string) =>
+// ⚠⚠ **2026-09-08: ⚠ the gate stopped being a shared secret** (`docs/adr/0030`).
+//   ⚠ **The person who makes a room signs in; ⚠ the Guest still never meets any of this.**
+
+const SECRET = "a-signing-secret-for-this-test";
+const ask = (path: string, method = "GET", cookie?: string) =>
   new Request(`http://127.0.0.1:9095${path}`, {
     method,
-    ...(auth === undefined ? {} : { headers: { authorization: auth } }),
+    ...(cookie === undefined ? {} : { headers: { cookie } }),
   });
 
 test("⚠⚠ everything a Guest touches is outside the gate", () => {
@@ -52,69 +56,98 @@ test("⚠⚠ everything a Guest touches is outside the gate", () => {
   }
 });
 
-test("⚠ the right secret passes", async () => {
-  assert.equal(await mayPass(ask("/", "GET", basic(SECRET)), SECRET), null);
+test("⚠⚠ signing in is outside the gate", () => {
+  // ⚠⚠ **A gate in front of its own door lets nobody through, ⚠ ever.**
+  for (const path of ["/auth/google", "/auth/google/callback"]) {
+    assert.equal(isSignIn(path), true, `${path} is behind the gate`);
+  }
+  // ⚠ And it is not a prefix that swallows the site.
+  assert.equal(isSignIn("/"), false);
+  assert.equal(isSignIn("/r/abcdefghij123456"), false);
+});
+
+test("⚠ a signed-in person passes", async () => {
+  const cookie = `${SESSION_COOKIE}=${await issueSession("somebody@example.test", SECRET, Date.now())}`;
+  assert.equal(await mayPass(ask("/", "GET", cookie), SECRET), null);
+});
+
+test("⚠ a sign-in that has run out does not", async () => {
+  const then = Date.now() - SESSION_TTL_MS - 1;
+  const cookie = `${SESSION_COOKIE}=${await issueSession("somebody@example.test", SECRET, then)}`;
+  assert.notEqual(await mayPass(ask("/", "GET", cookie), SECRET), null);
+});
+
+test("⚠⚠ a join token is not a way through the gate", async () => {
+  // ⚠⚠ **Both are signed with the same secret** (`docs/adr/0030`). ⚠ **Only the purpose inside
+  //   ⚠ the payload keeps one from being the other** — ⚠ **and `docs/adr/0029` paid to learn that
+  //   ⚠ a separation which holds by accident is not a separation.**
+  const token = await issueJoinToken("abcdefghij123456", SECRET, Date.now());
+  const refused = await mayPass(ask("/", "GET", `${SESSION_COOKIE}=${token}`), SECRET);
+  assert.notEqual(refused, null, "a join token opened the gate");
 });
 
 test("⚠⚠ every refusal is the same refusal", async () => {
-  // ⚠ `.claude/rules/security.md` § 3. ⚠ A wrong name, ⚠ a wrong secret, ⚠ a broken header and
-  //   ⚠ none at all are one answer.
-  const refusals = [
-    await mayPass(ask("/"), SECRET),
-    await mayPass(ask("/", "GET", "Basic not-base64!!"), SECRET),
-    await mayPass(ask("/", "GET", "Bearer something"), SECRET),
-    await mayPass(ask("/", "GET", basic("kagima:wrong")), SECRET),
-    await mayPass(ask("/", "GET", basic("wrong:a-temporary-gate")), SECRET),
-    await mayPass(ask("/", "GET", basic("")), SECRET),
-  ];
+  // ⚠ `.claude/rules/security.md` § 3. ⚠ Absent, ⚠ forged, ⚠ expired and for another purpose are
+  //   ⚠ one answer. ⚠ Nothing says which it was.
+  const stale = await issueSession(
+    "somebody@example.test",
+    SECRET,
+    Date.now() - SESSION_TTL_MS - 1,
+  );
+  const elsewhere = await issueSession("somebody@example.test", "another-secret", Date.now());
+  const refusals = await Promise.all(
+    [
+      undefined,
+      `${SESSION_COOKIE}=not-a-cookie`,
+      `${SESSION_COOKIE}=${stale}`,
+      `${SESSION_COOKIE}=${elsewhere}`,
+      "something.else=whatever",
+    ].map((cookie) => mayPass(ask("/", "GET", cookie), SECRET)),
+  );
 
   console.log(`  observed: ${refusals.length} ways to be refused`);
   const shapes = new Set<string>();
   for (const answer of refusals) {
     assert.ok(answer !== null, "something was let through");
-    shapes.add(`${answer.status} ${answer.headers.get("www-authenticate")}`);
-    // ⚠ Nothing about what was wrong. ⚠ A body would be somewhere to put it.
+    shapes.add(`${answer.status} ${answer.headers.get("location")}`);
     assert.equal(await answer.text(), "", "the refusal carried a body");
   }
   assert.equal(shapes.size, 1, "the refusals differ from each other");
-  assert.match([...shapes][0] as string, /^401 Basic/, "a browser will not be asked");
+  // ⚠⚠ **A browser is sent to sign in** — ⚠ **which is what the Basic auth box did: ⚠ arrive
+  //   ⚠ without a credential and you are asked for one, immediately.** ⚠ **No new sentence.**
+  assert.equal([...shapes][0], "302 /auth/google");
 });
 
-test("⚠⚠ no gate configured means no gate, ⚠ and that is not a default", async () => {
+test("⚠⚠ something that is not a browser is refused rather than redirected", async () => {
+  // ⚠ **`POST /api/rooms` is not followed by a consent screen.** ⚠ **Redirecting it would hang a
+  //   ⚠ caller that cannot sign in** (`CLAUDE.md` § 4-1: ⚠ **the reader's next move**).
+  const refused = await mayPass(ask("/api/rooms", "POST"), SECRET);
+  assert.equal(refused?.status, 401);
+});
+
+test("⚠⚠ no sign-in configured means no gate, ⚠ and that is not a default", async () => {
   // ⚠ `.claude/rules/security.md` § 6: ⚠ never a default value. ⚠ The absence is a state, ⚠ and
   //   ⚠ the callers say it out loud rather than passing silently.
   assert.equal(await mayPass(ask("/"), undefined), null);
   assert.equal(await mayPass(ask("/"), ""), null);
 });
 
-test("⚠⚠ the two halves are not compared separately", async () => {
-  // ⚠ **Comparing the name and the secret apart would say which half was right** — ⚠ **and a
-  //   ⚠ wrong name with the right secret would answer differently from the other way round.**
-  const wrongName = await mayPass(ask("/", "GET", basic("nobody:a-temporary-gate")), SECRET);
-  const wrongSecret = await mayPass(ask("/", "GET", basic("kagima:nothing")), SECRET);
-  assert.ok(wrongName !== null && wrongSecret !== null);
-  assert.equal(wrongName.status, wrongSecret.status);
-  assert.equal(
-    wrongName.headers.get("www-authenticate"),
-    wrongSecret.headers.get("www-authenticate"),
-  );
-});
-
-test("⚠⚠ the gate is compared in constant time, ⚠ and is never logged", async () => {
+test("⚠⚠ the session is compared in constant time, ⚠ and is never logged", async () => {
   // ⚠ `.claude/rules/security.md` § 1 and § 2. ⚠ Read as source, ⚠ because neither is visible
   //   ⚠ from the outside of a passing call.
+  //
+  // ⚠⚠ **The comparison moved with the code** (`docs/adr/0030`): ⚠ **it used to be in `gate.ts`
+  //   ⚠ and is now in `src/auth/session.ts`, ⚠ where the cookie is opened.**
+  // ⚠ **A wall about what a file does must follow what it loads** (`CLAUDE.md` § 9, 2026-09-06).
   const { readFile } = await import("node:fs/promises");
   const { codeOf } = await import("./source-text.ts");
-  const code = codeOf(await readFile("src/gate.ts", "utf8"));
+  const gate = codeOf(await readFile("src/gate.ts", "utf8"));
+  const session = codeOf(await readFile("src/auth/session.ts", "utf8"));
 
-  assert.match(code, /constantTimeEqual/, "the gate is compared some other way");
-  // ⚠ **The comparison, ⚠ not every `===` in the file.** ⚠ **`expected === undefined` is asking
-  //   ⚠ whether a gate exists, ⚠ which is not a secret and has no timing to leak.**
-  // ⚠ **The first version banned both and failed on the wrong one** — ⚠ **a wall that names
-  //   ⚠ something innocent is one that gets turned off** (`CLAUDE.md` § 9, 2026-09-06).
-  assert.doesNotMatch(code, /===\s*decoded|decoded\s*===/, "what was offered is compared with ===");
-  assert.doesNotMatch(code, /logger|console/, "the gate reaches for a log");
-
-  // ⚠ And the whole `user:secret` is what goes into the comparison, ⚠ not a half of it.
-  assert.match(code, /constantTimeEqual\(decoded, expected\)/, "the halves are compared apart");
+  assert.match(session, /constantTimeEqual/, "the cookie is compared some other way");
+  assert.doesNotMatch(session, /logger|console/, "the sign-in reaches for a log");
+  assert.doesNotMatch(gate, /logger|console/, "the gate reaches for a log");
+  // ⚠⚠ **The address is what a log would leak** (`.claude/rules/security.md` § 2), ⚠ **and the
+  //   ⚠ allow-list is compared, ⚠ never printed.**
+  assert.doesNotMatch(session, /===\s*looking|looking\s*===/, "an address is compared with ===");
 });

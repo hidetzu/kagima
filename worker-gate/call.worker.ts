@@ -18,13 +18,24 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, test } from "node:test";
 import { type Browser, chromium, type Page } from "playwright";
+import { issueSession, SESSION_COOKIE } from "../src/auth/session.ts";
 
 const PORT = 8971;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-/** ⚠ **The temporary gate** (`docs/adr/0024`). ⚠ **Only the Host's page and making a room.** */
-const GATE = "kagima:a-worker-gate";
-const AS_HOST = `Basic ${Buffer.from(GATE, "utf8").toString("base64")}`;
+/**
+ * ⚠⚠ **The gate** (`docs/adr/0030`). ⚠ **Only the Host's page and making a room.**
+ *
+ * ⚠ **It stopped being a shared secret on 2026-09-08.** ⚠ **The person who makes a room signs in
+ * with Google** — ⚠ **which no local check can do, ⚠ and must not try** (`.claude/rules/verification.md`:
+ * ⚠ **a check whose result depends on a third party being up cannot assert our correctness**).
+ *
+ * ⚠⚠ **So the check mints the session itself, ⚠ with the same secret the Worker is given.**
+ * ⚠ **What that proves: ⚠ the gate is ON, ⚠ a valid session passes it, ⚠ and the Guest half never
+ * meets it.** ⚠ **What it does NOT prove: ⚠ anything about Google** — ⚠ **that half is
+ * `test/sign-in.test.ts`, ⚠ against fixtures.**
+ */
+const SIGNING_SECRET = "a-worker-gate-secret";
 
 const started: Array<{ kill: () => void }> = [];
 const browsers: Browser[] = [];
@@ -48,11 +59,15 @@ const theWorker = async (): Promise<void> => {
       "--var",
       `PUBLIC_BASE_URL:${BASE}`,
       "--var",
-      "JOIN_TOKEN_SECRET:a-worker-gate-secret",
-      // ⚠⚠ **The door before the door, ⚠ on** (`docs/adr/0024`). ⚠ **A run with it off would
+      `JOIN_TOKEN_SECRET:${SIGNING_SECRET}`,
+      // ⚠⚠ **The door before the door, ⚠ on** (`docs/adr/0030`). ⚠ **A run with it off would
       //   ⚠ prove nothing about it, ⚠ and the Guest half is the claim.**
+      // ⚠ **The gate exists exactly when signing in does** (`src/worker.ts`), ⚠ **so these two
+      //   ⚠ turn it on.** ⚠ **Neither is ever used: ⚠ nothing here talks to Google.**
       "--var",
-      `ROOM_GATE:${GATE}`,
+      "GOOGLE_CLIENT_ID:a-client-id-nothing-here-uses",
+      "--var",
+      "GOOGLE_CLIENT_SECRET:a-client-secret-nothing-here-uses",
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -102,21 +117,39 @@ test("⚠⚠ two browsers talking through a Worker and a Durable Object", async 
   });
   browsers.push(browser);
 
-  // ⚠⚠ **The gate is real** (`docs/adr/0024`). ⚠ **Asserted before anything is opened, ⚠ so a
+  // ⚠⚠ **The gate is real** (`docs/adr/0030`). ⚠ **Asserted before anything is opened, ⚠ so a
   //   ⚠ run that forgot to turn it on cannot look like a run that passed it.**
-  for (const [method, path] of [
-    ["GET", "/"],
-    ["POST", "/api/rooms"],
-  ] as const) {
-    const answer = await fetch(`${BASE}${path}`, { method });
-    assert.equal(answer.status, 401, `${method} ${path} is not behind the gate`);
-  }
+  //
+  // ⚠ **A browser is sent to sign in; ⚠ anything else is refused** (`src/gate.ts`) — ⚠ **a caller
+  //   ⚠ that is not a browser cannot follow a redirect to a consent screen.**
+  // ⚠ **`redirect: "manual"`, ⚠ or `fetch` would follow it to Google and this would measure
+  //   ⚠ somebody else's uptime** (`.claude/rules/verification.md`).
+  const sentToSignIn = await fetch(`${BASE}/`, { redirect: "manual" });
+  assert.equal(sentToSignIn.status, 302, "GET / is not behind the gate");
+  assert.equal(sentToSignIn.headers.get("location"), "/auth/google");
+  const refused = await fetch(`${BASE}/api/rooms`, { method: "POST", redirect: "manual" });
+  assert.equal(refused.status, 401, "POST /api/rooms is not behind the gate");
   console.log("  observed: making a room is behind the gate");
 
   const hostContext = await browser.newContext({
     permissions: ["camera", "microphone"],
     // ⚠ The Host has it. ⚠ A browser would be asked; ⚠ here it is handed over.
-    httpCredentials: { username: "kagima", password: "a-worker-gate" },
+    // ⚠ Signed here rather than obtained from Google — ⚠ see `SIGNING_SECRET` above.
+    storageState: {
+      cookies: [
+        {
+          name: SESSION_COOKIE,
+          value: await issueSession("a-host@example.test", SIGNING_SECRET, Date.now()),
+          domain: "127.0.0.1",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax" as const,
+        },
+      ],
+      origins: [],
+    },
   });
   const host = await hostContext.newPage();
   host.on("pageerror", (e) => assert.fail(`the host page threw: ${e.message}`));
