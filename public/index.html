@@ -231,9 +231,17 @@
       //   ⚠ say a socket closed and never that one returned.**
       transport.onOpen(() => noteSocketOpen());
 
+      // ⚠⚠ **The close is NOT written down again here** (⚠ measured 2026-09-08).
+      //
+      // ⚠ **`onGaveUp` is always preceded by the `onDrop` for the same close** — ⚠ **giving up
+      //   ⚠ happens either on that close, ⚠ or after retries that began with it**
+      //   (`src/client/reconnect.ts`).
+      // ⚠⚠ **A real panel showed `984639ms socket -> closed` twice, ⚠ on the same millisecond.**
+      //   ⚠ **One socket closing must read as one line** — ⚠ **otherwise a reader cannot tell it
+      //   ⚠ from two sockets closing together, ⚠ and the instrument has handed its own confusion
+      //   ⚠ to the person reading it** (`.claude/rules/evidence.md`).
       transport.onGaveUp((code) => {
         closedCode ??= code;
-        noteSocketClosed(code);
         if (code === 4005) {
           // ⚠⚠ The room is over. ⚠ Its key opens nothing now (`docs/adr/0021`).
           forget();

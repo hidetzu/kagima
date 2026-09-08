@@ -214,3 +214,41 @@ test("⚠ a Host who was told the other side left, and then who came back, reads
   assert.notEqual(back, left, "the screen said the same thing before and after they came back");
   assert.match(back, /アン/);
 });
+
+test("⚠⚠ one socket closing is written down once, ⚠ not twice", async () => {
+  // ⚠⚠ **Measured on a real device 2026-09-08** (kagima#98): ⚠ **a panel carried**
+  //
+  // ```text
+  // 984639ms  socket -> closed
+  // 984639ms  socket -> closed
+  // ```
+  //
+  // ⚠ **Both pages wired `onDrop` AND `onGaveUp` to write the close down, ⚠ and giving up is
+  //   ⚠ always preceded by the drop that started it** (`src/client/reconnect.ts`) — ⚠ **so the
+  //   ⚠ last close of a call was recorded twice.**
+  // ⚠⚠ **Two lines on one millisecond cannot be told from two sockets closing together**, ⚠ **and
+  //   ⚠ an instrument that hands its own confusion to the reader is the thing kagima#91 was
+  //   ⚠ about** (`.claude/rules/evidence.md`).
+  //
+  // ⚠ **The claim is about WHERE it is written, ⚠ not about how many times it happens to run** —
+  //   ⚠ **`onDrop` is the one place, ⚠ because it fires for every close and `onGaveUp` does not.**
+  for (const page of ["public/index.html", "public/room.html"]) {
+    const code = (await readFile(page, "utf8")).replace(/^\s*\/\/.*$/gm, "");
+    const from = code.indexOf("transport.onGaveUp(");
+    assert.ok(from >= 0, `${page} never hears that there is no coming back`);
+    const handler = code.slice(from, code.indexOf("\n      });", from));
+    assert.doesNotMatch(
+      handler,
+      /noteSocketClosed\(/,
+      `${page} writes the same close down twice: once on the drop, once on giving up`,
+    );
+    // ⚠ And the one place that does write it is still there — ⚠ never assert only the negative.
+    const drop = code.indexOf("transport.onDrop(");
+    assert.ok(drop >= 0, `${page} does not record drops at all`);
+    assert.match(
+      code.slice(drop, code.indexOf("\n      });", drop)),
+      /noteSocketClosed\(/,
+      `${page} records no close on a drop`,
+    );
+  }
+});
