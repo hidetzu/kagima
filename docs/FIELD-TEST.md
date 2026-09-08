@@ -169,6 +169,23 @@ curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
 ⚠ **so 下の表は「何が観測されたか」であって、⚠ 「何が原因か」ではない。**
 ⚠ **原因を決めるには、⚠ どう試験したかを知っている人が要る。**
 
+### ⚠⚠ 種別(`v4`/`v6`)は、⚠ 相手側のパネルから読む
+
+⚠ **実測 2026-09-08、⚠ 2 回連続:** ⚠ **PC 側の selected pair の種別が `?` だった。**
+
+```text
+PC   selected pair: host/host over udp ?      ⚠ 読めない
+スマホ selected pair: host/srflx over udp v6   ⚠ 読める
+```
+
+⚠ **Chrome は host candidate の住所を mDNS(`.local`)で伏せる。** ⚠ **`familyOf` は
+⚠ 名前から種別を決められないので `?` を返す** — ⚠ **これは故障ではなく、⚠ 正直な答えである**
+([`adr/0012`](adr/0012-let-the-diagnostics-say-the-address-family-and-nothing-more.md))。
+
+⚠⚠ **so mDNS を使う側の種別は、⚠ 構造上いつも読めない。**
+⚠ **`v4` か `v6` かは、⚠ **相手側のパネル** の行から読むこと。**
+⚠ **片端しか無いときは、⚠ 種別は「未確定」と記録する** — ⚠ **`?` を v4 と読み替えない。**
+
 | 観測 | ⚠ 分かること | ⚠ 分からないこと |
 |---|---|---|
 | `srflx` または `relay` が selected pair に出る | ⚠ **reflexive / relay 経由の経路が選ばれた** | — |
@@ -213,6 +230,19 @@ curl -s -X POST "$TUNNEL/api/rooms" | grep -o '"shareUrl":"[^"]*"'
    ⚠ **が、⚠ 戻ったページの `held for` と `frames decoded` は 数え直しになる** — ⚠ **so
    ⚠ 貼るのは 2 台とも コピーし終えてからにする。**
    ⚠⚠ **捨てられたこと自体も観測である。** ⚠ **パネルの `thrown away while hidden` に出る。**
+
+   ⚠⚠ **背面から戻したら、⚠ 何よりも先にコピーすること。** ⚠ **通話を続けるほど `held for` と
+   ⚠ `frames decoded` が進み、⚠ 捨てられた直後かどうかが読みにくくなる。**
+   ⚠ **捨てられたか、⚠ ただ隠れていただけかは、⚠ この 2 行でしか見分けられない:**
+
+```text
+⚠ 捨てられた  → held for が数え直し、⚠ thrown away while hidden: 1 — lasted at least Xs
+⚠ 隠れただけ  → 同じページのまま、⚠ longest hidden に値、⚠ thrown away は none observed
+```
+
+   ⚠⚠ **画面に何が出たかは、⚠ 目で追わずに録画すること。** ⚠ **戻る往復は速く、⚠ 「出なかった
+   ように見えた」は観測ではない**([`../.claude/rules/evidence.md`](../.claude/rules/evidence.md):
+   ⚠ **not observed ≠ did not happen**)。
 
    ⚠ **サーバは観測を集めない**([`adr/0014`](adr/0014-retire-the-field-test-mode-now-that-kagima-16-is-closed.md))。
    ⚠ **集約する仕組みは一度あったが、⚠ 合言葉を短くする経路と一体だったので、
