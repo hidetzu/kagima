@@ -1126,6 +1126,19 @@ test(titleOf("guest-comes-back-to-a-thrown-away-page"), async () => {
   await guest.page.reload({ waitUntil: "domcontentloaded" });
   console.log("  observed: the Guest's page was thrown away and built again");
 
+  // ⚠⚠ **The door's form must not come back with it** (⚠ measured on a real phone, 2026-09-08).
+  //
+  // ⚠ **Observed: ⚠ the page was thrown away while its panel was being pasted, ⚠ came back on its
+  //   ⚠ own, ⚠ and showed "入室をお願いする" on the way** — ⚠ **a form asking this person to ask
+  //   ⚠ permission for a room they are already in** (`CLAUDE.md` § 4-1).
+  // ⚠ **It is a race against one round trip, ⚠ so it is checked from the first paint rather than
+  //   ⚠ waited for** — ⚠ **`waitUntil: "domcontentloaded"` has already returned by here.**
+  assert.equal(
+    await guest.page.evaluate(() => document.getElementById("before")?.hidden === true),
+    true,
+    "the Guest was shown the door's form on the way back into a room it was already in",
+  );
+
   // ⚠⚠ **Nobody presses anything.** ⚠ **This is the whole case** (`docs/adr/0029`).
   const backFrames = await waitForFrames(guest.page, "the guest, after coming back");
   console.log(`  observed: the Guest decoded ${backFrames} frames without knocking again`);

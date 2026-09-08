@@ -410,15 +410,27 @@
    */
   const held = roomId === null ? null : recallRejoin();
   if (held !== null && held.roomId === roomId) {
+    // ⚠⚠ **The form comes down BEFORE the round trip, ⚠ not after it** (⚠ measured 2026-09-08).
+    //
+    // ⚠ **Observed on a real phone: ⚠ the page was thrown away while its panel was being pasted,
+    //   ⚠ came back on its own, ⚠ and showed "入室をお願いする" on the way** — ⚠ **a form asking
+    //   ⚠ this person to ask permission for a room they are already in.**
+    // ⚠ **`#waiting` cannot stand in for it: ⚠ "ホストが気づくまでお待ちください" would be false,
+    //   ⚠ because nobody is being asked.** ⚠ **`#after` says "つないでいます。", ⚠ which is exactly
+    //   ⚠ what is happening** — ⚠ **and it is the same move `public/index.html` makes when the
+    //   ⚠ Host comes back to its own room.** ⚠ **No new sentence.**
+    $("before").hidden = true;
+    $("after").hidden = false;
     const back = await rejoin(roomId, held.rejoin);
     if (back === null) {
       // ⚠ It opens nothing. ⚠ Holding a dead mark is how one becomes a pile (`docs/adr/0021`).
       forgetRejoin();
+      // ⚠ And back to the door, ⚠ because now they really do have to knock.
+      $("after").hidden = true;
+      $("before").hidden = false;
     } else {
       // ⚠ Refreshed on every way in (`docs/adr/0029`).
       rememberRejoin({ roomId, rejoin: back.rejoin, nickname: held.nickname });
-      $("before").hidden = true;
-      $("waiting").hidden = false;
       await enterWith(back.token, held.nickname);
     }
   }
