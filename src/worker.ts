@@ -17,7 +17,8 @@
 //   ⚠ different thing from "unavailable", ⚠ and the reader's next move depends on which**
 //   (`CLAUDE.md` § 4-1).
 import { servedHeaders, servedPath } from "./assets.ts";
-import { isGated, mayPass } from "./gate.ts";
+import { handleSignIn } from "./auth/routes.ts";
+import { isGated, isSignIn, mayPass } from "./gate.ts";
 import { MAX_ID_ATTEMPTS } from "./room/create-room.ts";
 import { generateRoomId } from "./room/room-id.ts";
 import { ROOM_HEADER } from "./room-object.ts";
@@ -47,6 +48,17 @@ export type Env = {
    * ⚠ **It is time-limited; ⚠ `docs/adr/0024` says how it ends.**
    */
   readonly ROOM_GATE?: string;
+  /**
+   * ⚠⚠ **How the person who makes a room says who they are** (`docs/adr/0030`).
+   *
+   * ⚠ **All three, or none.** ⚠ **Half a configuration is a gate that does not gate.**
+   * ⚠ **`GOOGLE_CLIENT_SECRET` and `ALLOWED_EMAILS` go in with `wrangler secret put`**
+   * (`docs/DEPLOY.md`). ⚠ **Nothing of this is written into the repository.**
+   */
+  readonly GOOGLE_CLIENT_ID?: string;
+  readonly GOOGLE_CLIENT_SECRET?: string;
+  /** ⚠ **Who may make a room.** ⚠ Comma separated. ⚠ **Empty allows nobody** — ⚠ fail closed. */
+  readonly ALLOWED_EMAILS?: string;
 };
 
 /**
@@ -55,6 +67,22 @@ export type Env = {
  * ⚠ **The id is read out of the path and used to address one object.** ⚠ **Nothing is built from
  * it** — ⚠ **a name is a name, ⚠ and `docs/adr/0022` says one room is one object.**
  */
+/**
+ * ⚠⚠ **The gate exists exactly when signing in does** (`docs/adr/0030`).
+ *
+ * ⚠ **`undefined` means no gate** — ⚠ **which is what `wrangler dev --local` and every check run
+ * as, ⚠ and it is the same posture `ROOM_GATE` had.**
+ * ⚠ **The secret it returns is the signing secret, ⚠ not a password** — ⚠ **there is no shared
+ * secret to hand round any more.**
+ */
+const gateSecret = (env: Env): string | undefined =>
+  env.GOOGLE_CLIENT_ID !== undefined &&
+  env.GOOGLE_CLIENT_ID !== "" &&
+  env.JOIN_TOKEN_SECRET !== undefined &&
+  env.JOIN_TOKEN_SECRET !== ""
+    ? env.JOIN_TOKEN_SECRET
+    : undefined;
+
 const roomOf = (pathname: string): string | null =>
   /^\/api\/rooms\/([^/]+)(\/|$)/.exec(pathname)?.[1] ?? null;
 
@@ -104,10 +132,44 @@ export default {
     //   ⚠ this: ⚠ `/r/{id}`, ⚠ the knock, ⚠ the waiting socket and the signalling socket are all
     //   ⚠ outside it**
     //   (`docs/adr/0017` took the passphrase off the door, ⚠ and this does not put it back).
-    if (isGated(request.method, url.pathname)) {
-      const refused = await mayPass(request, env.ROOM_GATE);
+    // ⚠⚠ **Signing in is outside the gate** (`src/gate.ts`) — ⚠ **a gate in front of its own door
+    //   ⚠ lets nobody through, ⚠ ever.**
+    if (!isSignIn(url.pathname) && isGated(request.method, url.pathname)) {
+      // ⚠ The session is signed with the same secret everything else is (`docs/adr/0030`).
+      //   ⚠ ⚠ The gate exists only when signing in does.
+      const refused = await mayPass(request, gateSecret(env));
       if (refused !== null) return refused;
     }
+
+    // ⚠⚠ **Signing in, ⚠ before anything is routed to a room** (`docs/adr/0030`).
+    //
+    // ⚠ **`/auth/...` belongs to nobody's room** — ⚠ **sending it to a Durable Object would put
+    //   ⚠ one person's sign-in inside somebody else's room.** ⚠ **It is answered here.**
+    const signIn = await handleSignIn(
+      {
+        google:
+          env.GOOGLE_CLIENT_ID !== undefined &&
+          env.GOOGLE_CLIENT_ID !== "" &&
+          env.GOOGLE_CLIENT_SECRET !== undefined &&
+          env.GOOGLE_CLIENT_SECRET !== ""
+            ? {
+                clientId: env.GOOGLE_CLIENT_ID,
+                clientSecret: env.GOOGLE_CLIENT_SECRET,
+                // ⚠⚠ **Must match what is registered at Google, ⚠ exactly.**
+                //   ⚠ **Built from the origin this request arrived on, ⚠ not from a variable** —
+                //   ⚠ **a stale one would send people somewhere Google refuses, ⚠ and that is a
+                //   ⚠ mistake `docs/FIELD-TEST.md` has already recorded once for the share URL.**
+                redirectUri: `${url.origin}/auth/google/callback`,
+              }
+            : null,
+        secret: env.JOIN_TOKEN_SECRET ?? "",
+        allowList: env.ALLOWED_EMAILS,
+        secure: url.protocol === "https:",
+      },
+      request,
+      url,
+    );
+    if (signIn !== null) return signIn;
 
     if (request.method === "GET") {
       const found = await asset(env, url.origin, url.pathname);

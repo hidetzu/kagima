@@ -10,7 +10,7 @@
 // ⚠ **That is the whole reason for the split** (`CLAUDE.md` § 3: ⚠ **never two implementations of
 //   ⚠ the same question**).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { isGated, mayPass } from "./gate.ts";
+import { isGated, isSignIn, mayPass } from "./gate.ts";
 import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
@@ -75,9 +75,23 @@ export const startServer = (
 
   // ⚠⚠ **A door before the door** (`docs/adr/0024`). ⚠ **Absent means there is no gate** —
   //   ⚠ **said out loud rather than passed silently** (`.claude/rules/security.md` § 6).
-  const roomGate = process.env["ROOM_GATE"];
+  // ⚠⚠ **The gate exists exactly when signing in does** (`docs/adr/0030`).
+  //   ⚠ **`ROOM_GATE` is gone: ⚠ a shared secret handed round said nothing about who used it.**
+  const googleId = process.env["GOOGLE_CLIENT_ID"];
+  const googleSecret = process.env["GOOGLE_CLIENT_SECRET"];
+  const google =
+    googleId !== undefined && googleId !== "" && googleSecret !== undefined && googleSecret !== ""
+      ? {
+          clientId: googleId,
+          clientSecret: googleSecret,
+          redirectUri: `${baseUrl}/auth/google/callback`,
+        }
+      : null;
+  const signingSecret = joinTokenSecret();
+  const roomGate = google === null ? undefined : signingSecret;
   if (roomGate === undefined || roomGate === "") {
-    logger.warn("ROOM_GATE is not set — anybody who can reach this can make a room");
+    logger.warn("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set — there is no sign-in");
+    logger.warn("so anybody who can reach this can make a room");
   }
   if (trustedSourceHeader === "") {
     logger.warn("TRUSTED_SOURCE_HEADER is not set — the caller's address comes from the socket");
@@ -89,7 +103,11 @@ export const startServer = (
     // ⚠ Node's answer to "the browser's own files": ⚠ read them off disk (`docs/adr/0016`).
     asset: serveStatic,
     baseUrl,
-    secret: joinTokenSecret(),
+    secret: signingSecret,
+    google,
+    ...(process.env["ALLOWED_EMAILS"] === undefined
+      ? {}
+      : { allowList: process.env["ALLOWED_EMAILS"] }),
     hub: createHub(),
     knockRejections: createKnockRejectionCounter(),
     knocks: createKnocks({
@@ -126,9 +144,11 @@ export const startServer = (
       } as RequestInit);
       // ⚠⚠ **A door before the door** (`docs/adr/0024`). ⚠ **One implementation, ⚠ two runtimes**
       //   (`CLAUDE.md` § 3) — ⚠ **the same `src/gate.ts` the Worker uses.**
-      const gated = isGated(request.method, new URL(request.url).pathname)
-        ? await mayPass(request, roomGate)
-        : null;
+      const path = new URL(request.url).pathname;
+      // ⚠ Signing in is outside the gate (`src/gate.ts`) — ⚠ a gate in front of its own door
+      //   ⚠ lets nobody through.
+      const gated =
+        !isSignIn(path) && isGated(request.method, path) ? await mayPass(request, roomGate) : null;
       const answer = gated ?? (await handle(ctx, request));
       res.writeHead(answer.status, Object.fromEntries(answer.headers));
       res.end(await answer.text());
