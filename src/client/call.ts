@@ -15,6 +15,7 @@
 // ⚠ **So this exposes what a check needs to read frames**, ⚠ **and never reports success on the
 //   ⚠ strength of a state name.**
 
+import { NOTICE_CHANNEL, type Notice, readNotice, writeNotice } from "../call/notice.ts";
 import { driveRestart, onIncomingOffer, restartDelaysFor } from "../call/restart.ts";
 
 /**
@@ -62,6 +63,50 @@ export type Call = {
   readonly pc: RTCPeerConnection;
   readonly localStream: MediaStream;
   readonly remoteStream: MediaStream;
+  /**
+   * ⚠⚠ **What the other side is showing us** (`docs/adr/0033`).
+   *
+   * ⚠ **Kept apart from `remoteStream` on purpose**: ⚠ **the face and the screen are two
+   * different things to look at, ⚠ and putting both in one stream would make one replace the
+   * other in a single `<video>`.**
+   * ⚠ **`docs/PRODUCT.md` § 1: ⚠ 顔を見ながら話し、⚠ 同じ画面を見て。** ⚠ **Both, ⚠ at once.**
+   */
+  readonly remoteShareStream: MediaStream;
+  /**
+   * ⚠ **Put a screen into the call.** ⚠ **The picker is the browser's own** — ⚠ **kagima adds no
+   * consent screen of its own and never sees what was chosen.**
+   *
+   * ⚠ **No renegotiation happens here** (`docs/adr/0033`): ⚠ **the m= section was settled when the
+   * call was built, ⚠ so this is a `replaceTrack` on a sender that is already negotiated.**
+   */
+  startSharing(get?: () => Promise<MediaStream>): Promise<void>;
+  /**
+   * ⚠ **Stops the track, ⚠ not just the display** (`.claude/rules/security.md` § 5),
+   * ⚠ **and tells the other side** — ⚠ **nothing in the media path says a share ended.**
+   */
+  stopSharing(): void;
+  sharing(): boolean;
+  /**
+   * ⚠⚠ **Whether the other side's screen is carrying frames right now** (`docs/adr/0033`).
+   *
+   * ⚠ **Not "is there a track".** ⚠ **The second m= section is open from the moment the call is
+   * built, ⚠ so a track is there the whole time and says nothing.**
+   *
+   * ⚠ **Starting and stopping are read from two different places, ⚠ and that is not tidiness:**
+   * ⚠ **`unmute` — the W3C's own word for media arriving — ⚠ says a share started;**
+   * ⚠ **nothing in the media path says one ended** (`src/call/notice.ts`), ⚠ **so the other side
+   * has to say so.**
+   * ⚠ **Called once with the state as it is now, ⚠ then again on every change.**
+   */
+  onShared(handler: (showing: boolean) => void): void;
+  /**
+   * ⚠ **Whether this side is showing its own screen right now.**
+   *
+   * ⚠ **The browser's own "stop sharing" bar ends a share without the page being asked**, ⚠ **so a
+   * button labelled from what the page last did goes stale.** ⚠ **Called once with the state as it
+   * is now, ⚠ then again on every change, ⚠ whoever caused it.**
+   */
+  onSharing(handler: (sharing: boolean) => void): void;
   /** ⚠ **The offerer starts negotiation.** ⚠ Both sides answering, or neither, is a deadlock. */
   start(): Promise<void>;
   state(): CallState;
@@ -93,6 +138,16 @@ export type CallOptions = {
 /** ⚠ **The only call to `getUserMedia` in kagima.** ⚠ It asks for both, because a call is both. */
 export const defaultGetMedia = (): Promise<MediaStream> =>
   navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+
+/**
+ * ⚠ **The only call to `getDisplayMedia` in kagima** (`docs/adr/0033`).
+ *
+ * ⚠ **Audio is not asked for.** ⚠ **A shared screen's sound is not what "同じものを見る" is
+ * about, ⚠ and asking for it would take more than the feature needs**
+ * (`docs/PRODUCT.md` § 5: ⚠ **the least that works**).
+ */
+const defaultGetDisplay = (): Promise<MediaStream> =>
+  navigator.mediaDevices.getDisplayMedia({ video: true });
 
 /**
  * ⚠ **Why permission failure is separated from everything else.**
@@ -131,7 +186,109 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
   const localStream = await (options.getMedia ?? defaultGetMedia)();
   for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
 
+  // ⚠⚠ **Which transceivers carry the face.** ⚠ **Read now, ⚠ before anything else is added** —
+  //   ⚠ **so "the screen" can be defined as "the video that is not one of these", ⚠ without
+  //   ⚠ depending on an object we happen to hold.**
+  const faceTransceivers = new Set(pc.getTransceivers());
+
+  // ⚠⚠ **The second video, ⚠ negotiated before anybody asks for it** (`docs/adr/0033`).
+  //
+  // ⚠ **Adding it when sharing starts would need a renegotiation right then** — ⚠ **and the side
+  //   ⚠ that starts sharing is not always the side that offers** (`public/room.html` decides that
+  //   ⚠ once). ⚠ **Making the answerer offer would touch `docs/adr/0026` and `0027` at the same
+  //   ⚠ time, ⚠ which is two ADRs for one feature.**
+  // ⚠ **So it is negotiated once, with everything else, ⚠ and sits empty until it is used.**
+  //
+  // ⚠⚠ **Only the offerer creates it, ⚠ and that is not a simplification.**
+  //   ⚠ **RFC 8829 § 5.10: ⚠ applying a remote offer associates an m= section only with a
+  //   ⚠ transceiver "created by addTrack".** ⚠ **One made by `addTransceiver` is never matched** —
+  //   ⚠ **the answerer's own would sit unassociated for ever while the browser made a fresh
+  //   ⚠ `recvonly` one beside it, ⚠ and `replaceTrack` onto the orphan would leave the page.**
+  //   ⚠ **Measured on 2026-09-09: ⚠ the answerer ended up with mids `0/1//2`.**
+  // ⚠ **So the answerer adopts the m= section the offer brings** (see the `offer` case below).
+  // ⚠ **The cost is one unused m-line.** ⚠ **`sendrecv`: ⚠ either side may be the one who shows.**
+  if (options.isOfferer) pc.addTransceiver("video", { direction: "sendrecv" });
+
+  /** ⚠ **The screen's transceiver: ⚠ the video that is not a face.** ⚠ Absent until negotiated. */
+  const shareTransceiver = (): RTCRtpTransceiver | undefined =>
+    pc
+      .getTransceivers()
+      .find((t) => !faceTransceivers.has(t) && t.receiver.track?.kind === "video");
+
+  const remoteShareStream = new MediaStream();
+  const shareStream = new MediaStream();
+
+  const sharingHandlers: ((sharing: boolean) => void)[] = [];
+  const sharingNow = (): boolean => shareStream.getVideoTracks().length > 0;
+  const tellSharing = (): void => {
+    const sharing = sharingNow();
+    for (const handler of sharingHandlers) handler(sharing);
+  };
+
+  const sharedHandlers: ((showing: boolean) => void)[] = [];
+  /**
+   * ⚠⚠ **What the other side last said about its own screen.** ⚠ `null` until it has said anything.
+   *
+   * ⚠ **Measured on 2026-09-09, Chromium: ⚠ `replaceTrack(null)` on the sending side does NOT
+   * ⚠ mute the receiving track.** ⚠ **The `<video>` froze on the last frame and stayed there for
+   * ⚠ the 30 s the check waited.** ⚠ **So "they stopped showing" cannot be read off the media —
+   * ⚠ it has to be said.**
+   */
+  let toldShowing: boolean | null = null;
+  const showingShared = (): boolean =>
+    (toldShowing ?? true) &&
+    remoteShareStream.getVideoTracks().some((t) => !t.muted && t.readyState === "live");
+  const tellShared = (): void => {
+    const showing = showingShared();
+    for (const handler of sharedHandlers) handler(showing);
+  };
+
+  // ⚠⚠ **"I am showing my screen now" goes browser to browser, ⚠ never through our server**
+  //   (`docs/adr/0033`, `CLAUDE.md` § 3: ⚠ **the control plane carries who may join, ⚠ and never
+  //   ⚠ what they say**). ⚠ **Sending it over the signalling socket would hand kagima's own server
+  //   ⚠ a new fact about the call it has no business holding.**
+  // ⚠ **Only the offerer creates the channel** — ⚠ **the answerer is handed the same one, ⚠ which
+  //   ⚠ is the one shape that needs no second negotiation.**
+  let notices: RTCDataChannel | null = null;
+  const wireNotices = (channel: RTCDataChannel): void => {
+    channel.addEventListener("message", (event) => {
+      // ⚠ It came from the other browser. ⚠ Anything may arrive; ⚠ nothing here trusts a shape.
+      // ⚠ **A later notice may overwrite an earlier one, ⚠ and that is correct here**: ⚠ a default
+      //   ⚠ `RTCDataChannel` is ordered and reliable, ⚠ so arrival order is send order.
+      const said = readNotice(event.data);
+      if (said === null) return;
+      toldShowing = said.showing;
+      tellShared();
+    });
+  };
+  const say = (notice: Notice): void => {
+    if (notices?.readyState !== "open") return;
+    notices.send(writeNotice(notice));
+  };
+  if (options.isOfferer) {
+    notices = pc.createDataChannel(NOTICE_CHANNEL);
+    wireNotices(notices);
+  }
+  pc.addEventListener("datachannel", (event) => {
+    if (event.channel.label !== NOTICE_CHANNEL) return;
+    notices = event.channel;
+    wireNotices(notices);
+  });
+
   pc.addEventListener("track", (event) => {
+    // ⚠⚠ **Which of the two videos this is, ⚠ decided by the transceiver rather than by order.**
+    //   ⚠ **The face's transceivers were read before anything else existed, ⚠ so anything else
+    //   ⚠ is the screen** — ⚠ **and that holds whether this side made the m= section or adopted it.**
+    if (!faceTransceivers.has(event.transceiver)) {
+      remoteShareStream.addTrack(event.track);
+      // ⚠ `addtrack` does not fire for a track a script adds — ⚠ the event belongs to the browser
+      //   ⚠ adding one. ⚠ So the pages are told here, ⚠ where it actually happened.
+      for (const name of ["unmute", "mute", "ended"]) {
+        event.track.addEventListener(name, tellShared);
+      }
+      tellShared();
+      return;
+    }
     for (const track of event.streams[0]?.getTracks() ?? [event.track]) {
       remoteStream.addTrack(track);
     }
@@ -162,6 +319,11 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
         if (glare === "roll-back-first") await pc.setLocalDescription({ type: "rollback" });
         await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
         await flushCandidates();
+        // ⚠⚠ **Adopt the screen's m= section, ⚠ and answer it `sendrecv`.**
+        //   ⚠ **The browser made it `recvonly`, ⚠ which would let this side watch and never show.**
+        //   ⚠ **Saying `sendrecv` now costs no renegotiation — ⚠ the answer has not been made yet.**
+        const share = shareTransceiver();
+        if (share !== undefined && share.direction !== "sendrecv") share.direction = "sendrecv";
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         options.transport.send({ type: "answer", sdp: answer.sdp ?? "" });
@@ -264,12 +426,73 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
         iceRestarts,
       };
     },
+    remoteShareStream,
+
+    async startSharing(get) {
+      const display = await (get ?? defaultGetDisplay)();
+      const [video] = display.getVideoTracks();
+      if (video === undefined) return;
+      // ⚠⚠ **Nothing to put it on yet.** ⚠ **On the answering side the m= section arrives with the
+      //   ⚠ offer, ⚠ so there is a short window where the page is up and this is not.**
+      //   ⚠ **Half-starting would leave this side believing it is showing while nothing leaves** —
+      //   ⚠ **so the track is stopped (⚠ the sharing bar goes out) and nothing changes.**
+      //   ⚠ **The button still says 画面を共有する, ⚠ so pressing it again is the whole recovery.**
+      if (shareTransceiver() === undefined) {
+        video.stop();
+        return;
+      }
+      // ⚠ The browser's own "stop sharing" bar ends the track without telling this page in any
+      //   ⚠ other way. ⚠ Listening to it is how the two stay in step.
+      video.addEventListener("ended", () => {
+        for (const track of shareStream.getTracks()) shareStream.removeTrack(track);
+        void shareTransceiver()?.sender.replaceTrack(null);
+        say({ showing: false });
+        tellSharing();
+      });
+      shareStream.addTrack(video);
+      // ⚠ Negotiated already, ⚠ or not at all. ⚠ Nothing here starts a negotiation.
+      await shareTransceiver()?.sender.replaceTrack(video);
+      say({ showing: true });
+      tellSharing();
+    },
+
+    stopSharing() {
+      // ⚠ Stopped, ⚠ not merely detached. ⚠ The browser's sharing bar is the only thing the
+      //   ⚠ person can see, ⚠ and it must go out (`.claude/rules/security.md` § 5).
+      for (const track of shareStream.getTracks()) {
+        track.stop();
+        shareStream.removeTrack(track);
+      }
+      void shareTransceiver()?.sender.replaceTrack(null);
+      // ⚠⚠ **The other side is told.** ⚠ **Nothing in the media path says a share ended, ⚠ so
+      //   ⚠ without this their `<video>` keeps the last frame of a screen that is no longer shared.**
+      say({ showing: false });
+      tellSharing();
+    },
+
+    sharing() {
+      return sharingNow();
+    },
+
+    onShared(handler) {
+      sharedHandlers.push(handler);
+      handler(showingShared());
+    },
+
+    onSharing(handler) {
+      sharingHandlers.push(handler);
+      handler(sharingNow());
+    },
+
     hangUp() {
       // ⚠ Stop the tracks, not just the display. ⚠ A hidden video element with a live track is
       //   ⚠ a camera that is still on, and the tally light is all the user can see
       //   (`.claude/rules/security.md` § 5).
       for (const track of localStream.getTracks()) track.stop();
       for (const track of remoteStream.getTracks()) track.stop();
+      // ⚠ The shared screen is the same claim. ⚠ The browser's sharing bar must go out too.
+      for (const track of shareStream.getTracks()) track.stop();
+      for (const track of remoteShareStream.getTracks()) track.stop();
       pc.close();
     },
   };
