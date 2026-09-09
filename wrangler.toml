@@ -35,11 +35,27 @@ PUBLIC_BASE_URL = "https://kagima.hidetzu.workers.dev"
 name = "ROOM"
 class_name = "Room"
 
+# ⚠⚠ **The day's budget, ⚠ in one object for the whole service** (`docs/adr/0031`).
+#
+# ⚠ **The first thing in kagima that outlives a single room.** ⚠ **`CLAUDE.md` § 3 says nothing
+#   ⚠ survives the process without an ADR; ⚠ `docs/adr/0031` is that ADR.**
+# ⚠ **A Durable Object rather than KV because it runs one call at a time** — ⚠ **read, add, write
+#   ⚠ is atomic, ⚠ and a budget that is not atomic is not a budget.**
+# ⚠ **It holds no address** — ⚠ **an HMAC of the account, ⚠ thrown away when the UTC day turns.**
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "Ledger"
+
 # ⚠ **SQLite-backed, ⚠ because that is what a new class gets.**
 # ⚠ **What is written is four fields** (`docs/adr/0023`) — ⚠ **never a knock, ⚠ never a token.**
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# ⚠ **The ledger** (`docs/adr/0031`). ⚠ **Its own tag: ⚠ a migration is never edited in place.**
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Ledger"]
 
 # ⚠⚠ **The browser's own files** (`docs/adr/0016`).
 #

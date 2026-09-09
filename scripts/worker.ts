@@ -21,6 +21,10 @@ const CASES = [
     name: "call",
     sees: "two browsers talking through a Worker and a Durable Object",
   },
+  {
+    name: "the-day",
+    sees: "the day's budget refusing a new room, and letting go when one ends",
+  },
 ] as const;
 
 if (argv.includes("--list")) {

@@ -42,6 +42,7 @@ const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string
     "/client/pointing.js",
     { file: "dist/client/pointing.js", type: "text/javascript; charset=utf-8" },
   ],
+  ["/quota/ledger.js", { file: "dist/quota/ledger.js", type: "text/javascript; charset=utf-8" }],
   ["/call/restart.js", { file: "dist/call/restart.js", type: "text/javascript; charset=utf-8" }],
   ["/client/share.js", { file: "dist/client/share.js", type: "text/javascript; charset=utf-8" }],
   [

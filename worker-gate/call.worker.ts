@@ -16,9 +16,13 @@
 //   ⚠ runtime, ⚠ and nothing about the platform it will run on.**
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import { type Browser, chromium, type Page } from "playwright";
 import { issueSession, SESSION_COOKIE } from "../src/auth/session.ts";
+import { LIMITS, WORDING } from "../src/quota/ledger.ts";
 
 const PORT = 8971;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -46,12 +50,25 @@ after(async () => {
 });
 
 /** ⚠ **A real Worker.** ⚠ **No account, ⚠ no deploy, ⚠ nothing that costs anything.** */
+let running = false;
 const theWorker = async (): Promise<void> => {
+  // ⚠ One Worker for the whole file. ⚠ A second would fight the first for the port, ⚠ and the
+  //   ⚠ failure would look like the code rather than like the check.
+  if (running) return;
+  running = true;
   const child = spawn(
     "node_modules/.bin/wrangler",
     [
       "dev",
       "--local",
+      // ⚠⚠ **A state directory of its own, ⚠ made fresh for this run**
+      //   (`.claude/rules/verification.md`: ⚠ **a leftover environment measures the previous run**).
+      // ⚠ **`wrangler dev --local` keeps Durable Object storage between runs by default** —
+      //   ⚠ **so the day's ledger, ⚠ and every room row in it, ⚠ would carry over.**
+      // ⚠ **Measured 2026-09-09: ⚠ it did, ⚠ and the cap on how many rooms are open was already
+      //   ⚠ half spent before the check began.**
+      "--persist-to",
+      mkdtempSync(join(tmpdir(), "kagima-worker-gate-")),
       "--port",
       String(PORT),
       "--ip",
@@ -94,6 +111,10 @@ const theWorker = async (): Promise<void> => {
   }
   assert.fail(`the Worker did not start:\n${said.join("")}`);
 };
+
+/** ⚠ **The session the Host would have.** ⚠ **Signed here; ⚠ nothing talks to Google.** */
+const asTheHost = async (): Promise<string> =>
+  `${SESSION_COOKIE}=${await issueSession("a-host@example.test", SIGNING_SECRET, Date.now())}`;
 
 const framesOf = (page: Page): Promise<number> =>
   page.evaluate(async () => {
@@ -205,6 +226,110 @@ test("⚠⚠ two browsers talking through a Worker and a Durable Object", async 
   console.log(`  observed: the host was told "${said}"`);
   assert.match(said, /アン/, `the host was not told who came in: ${said}`);
 
+  // ⚠⚠ **Closed before leaving.** ⚠ **A room left open holds a place in the day's budget**
+  //   (`docs/adr/0031`), ⚠ **and the next case counts places.**
+  await host.click("#close");
   await hostContext.close();
   await guestContext.close();
+});
+
+test("⚠⚠ the day's budget stops a new room, and lets go when one ends", async () => {
+  // ⚠⚠ **`docs/adr/0031`.** ⚠ **A Durable Object is what makes "read, add, write" atomic** —
+  //   ⚠ **so this has to run against a real one.** ⚠ **The arithmetic itself is
+  //   ⚠ `test/ledger.test.ts`, ⚠ which needs no object.**
+  //
+  // ⚠⚠ **What this case can reach: ⚠ the cap on how many rooms are open at once.**
+  //   ⚠ **What it cannot: ⚠ the 60 room-minutes and the 20 room-hours** — ⚠ **both need hours of
+  //   ⚠ wall-clock, ⚠ and there is no way to seed the ledger that is not a way in.**
+  //   ⚠ **Those two are asserted as arithmetic and nowhere else, ⚠ and `docs/SPEC.md` says so.**
+  await theWorker();
+  const cookie = await asTheHost();
+
+  const make = () => fetch(`${BASE}/api/rooms`, { method: "POST", headers: { cookie } });
+
+  const mine: Array<{ roomId: string; hostKey: string }> = [];
+  let refused: Response | null = null;
+  // ⚠ The call case above leaves a room open, ⚠ so the number that fits here is not the cap.
+  //   ⚠ What is asserted is that a refusal arrives, ⚠ not how many rooms preceded it.
+  for (let i = 0; i < LIMITS.openRooms + 2; i++) {
+    const answer = await make();
+    if (answer.status === 429) {
+      refused = answer;
+      break;
+    }
+    assert.equal(answer.status, 201, `making a room answered ${answer.status}`);
+    mine.push((await answer.json()) as { roomId: string; hostKey: string });
+  }
+
+  assert.ok(refused !== null, "the cap on how many rooms are open never refused anything");
+  // ⚠⚠ **Exactly the cap.** ⚠ **The case above closes its room, ⚠ and the state directory is
+  //   ⚠ this run's own** — ⚠ **so this number is the cap and not "whatever was left over".**
+  assert.equal(
+    mine.length,
+    LIMITS.openRooms,
+    `${mine.length} rooms fitted, and the cap is ${LIMITS.openRooms}`,
+  );
+  assert.deepEqual(await refused.json(), { refused: "busy" });
+  console.log(`  observed: ${mine.length} rooms were made, and then one was refused`);
+
+  // ⚠⚠ **The words a person reads** (`docs/adr/0031`, Owner 決定 2026-09-08).
+  //   ⚠ **A 429 on the wire is not the claim; ⚠ what the screen says is.**
+  const browser = await chromium.launch({ args: ["--no-sandbox"] });
+  browsers.push(browser);
+  const context = await browser.newContext({
+    storageState: {
+      cookies: [
+        {
+          name: SESSION_COOKIE,
+          value: cookie.slice(SESSION_COOKIE.length + 1),
+          domain: "127.0.0.1",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax" as const,
+        },
+      ],
+      origins: [],
+    },
+  });
+  const page = await context.newPage();
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.click("#create");
+  await page.waitForFunction(
+    (want) => document.getElementById("cannot-open")?.textContent === want,
+    WORDING.busy,
+    { timeout: 30_000 },
+  );
+  // ⚠ ⚠ そして 部屋は できていない ― ⚠ 文言だけ出して 作っていては 意味がない。
+  assert.equal(
+    await page.evaluate(() => document.getElementById("share-url")?.textContent ?? ""),
+    "",
+    "a room was made anyway, and the sentence was shown over it",
+  );
+  console.log(`  observed: the screen said "${WORDING.busy}"`);
+
+  // ⚠⚠ **And it lets go.** ⚠ **Closing a room has to take its row out of the ledger, ⚠ or the cap
+  //   ⚠ would only ever go one way** — ⚠ **which is the report path, ⚠ end to end.**
+  const first = mine[0] as { roomId: string; hostKey: string };
+  const closed = await fetch(`${BASE}/api/rooms/${first.roomId}`, {
+    method: "DELETE",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ hostKey: first.hostKey }),
+  });
+  assert.equal(closed.status, 200, "the room did not close");
+
+  const again = await make();
+  assert.equal(again.status, 201, "a room ending did not give its place back");
+  mine.push((await again.json()) as { roomId: string; hostKey: string });
+  console.log("  observed: a room ending gave its place back");
+
+  await context.close();
+  for (const room of mine) {
+    await fetch(`${BASE}/api/rooms/${room.roomId}`, {
+      method: "DELETE",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ hostKey: room.hostKey }),
+    }).catch(() => {});
+  }
 });

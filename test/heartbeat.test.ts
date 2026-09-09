@@ -44,6 +44,8 @@ const fakeSocket = () => {
     say: (line: string) => handlers?.onText(line),
     /** ⚠ **Answers the number that was sent.** ⚠ An older echo is not an answer. */
     pong: (n: number) => handlers?.onText(JSON.stringify({ type: "pong", n })),
+    /** ⚠ **The socket went.** ⚠ **Whether it was closed or simply died is not this side's to know.** */
+    hangUp: () => handlers?.onClose(),
   };
 };
 
@@ -256,4 +258,86 @@ test("⚠⚠ the shadow ended, ⚠ and what it left is held absent", async () =>
   const socket = await readFile("src/signaling/socket.ts", "utf8");
   assert.doesNotMatch(socket, /readonly ping/, "the seam still carries a protocol ping");
   assert.doesNotMatch(socket, /onPong/, "the seam still carries a protocol pong");
+});
+
+// ⚠⚠ **The same beat says how long this room has been held** (`docs/adr/0031`).
+//
+// ⚠ **The budget is arithmetic in `src/quota/ledger.ts`, ⚠ and it is checked there.**
+// ⚠ **What is checked here is that anything is ever handed to it** — ⚠ **a budget wired to
+//   ⚠ nothing counts zero for ever, ⚠ and every sum in it stays right while it does.**
+
+test("⚠⚠ the beat says how long the room has been held, and the close closes the span", () => {
+  withBeats((beat) => {
+    const said: Array<[string, number, boolean]> = [];
+    let clock = 1_000;
+    const sessions = createSessions({
+      hub: createHub(),
+      secret: "s",
+      now: () => clock,
+      usedSoFar: (roomId, ms, stillHolding) => void said.push([roomId, ms, stillHolding]),
+    });
+    const a = fakeSocket();
+    sessions.open(a.socket, ROOM, "sa");
+
+    clock += 5_000;
+    beat();
+    assert.deepEqual(said, [[ROOM, 5_000, true]], "the beat said nothing about the room's span");
+
+    // ⚠ 2 人目が来ても、⚠ 部屋の span は 1 つである ― ⚠ socket の合計ではない (`docs/adr/0022`)。
+    const b = fakeSocket();
+    sessions.open(b.socket, ROOM, "sb");
+    clock += 5_000;
+    beat();
+    assert.deepEqual(
+      said.slice(1),
+      [
+        [ROOM, 10_000, true],
+        [ROOM, 10_000, true],
+      ],
+      "two sockets made the room's span count twice",
+    );
+
+    said.length = 0;
+    clock += 1_000;
+    a.hangUp();
+    assert.deepEqual(said, [], "the span was closed while somebody was still in the room");
+
+    clock += 1_000;
+    b.hangUp();
+    assert.deepEqual(
+      said,
+      [[ROOM, 12_000, false]],
+      "the last socket leaving did not close the room's span",
+    );
+  });
+});
+
+test("⚠ a room that is held again starts a new span, and the first is not repeated", () => {
+  // ⚠⚠ **The total is the room's, ⚠ and it is kept by whoever is counting**
+  //   (`src/room-object.ts` adds the spans up). ⚠ **What this side reports is one span.**
+  withBeats((beat) => {
+    const said: Array<[string, number, boolean]> = [];
+    let clock = 0;
+    const sessions = createSessions({
+      hub: createHub(),
+      secret: "s",
+      now: () => clock,
+      usedSoFar: (roomId, ms, stillHolding) => void said.push([roomId, ms, stillHolding]),
+    });
+
+    const a = fakeSocket();
+    sessions.open(a.socket, ROOM, "sa");
+    clock += 3_000;
+    a.hangUp();
+
+    const b = fakeSocket();
+    sessions.open(b.socket, ROOM, "sb");
+    clock += 4_000;
+    beat();
+
+    assert.deepEqual(said, [
+      [ROOM, 3_000, false],
+      [ROOM, 4_000, true],
+    ]);
+  });
 });

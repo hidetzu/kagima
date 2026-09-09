@@ -17,9 +17,11 @@
 //   ⚠ 73 s after it goes to the background** (kagima#75).
 // ⚠ **So "memory only" does not keep a room here** (`docs/adr/0023`).
 //
-// ⚠ **Four fields.** ⚠ **Never a knock, ⚠ never a token, ⚠ never a name.**
+// ⚠ **Four fields, ⚠ and one number** (`docs/adr/0023`, `docs/adr/0031`).
+//   ⚠ **Never a knock, ⚠ never a token, ⚠ never a name.**
 import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
 import { openWait, roomIdFromWaitPath } from "./knock/wait.ts";
+import { LEDGER_NAME } from "./ledger-object.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
 import { createRoomStore, ROOM_IDLE_MS, type Room } from "./room/store.ts";
@@ -32,6 +34,28 @@ import { createSessions, type Sessions } from "./signaling/session.ts";
 
 /** ⚠ **The one key.** ⚠ **One room per object, ⚠ so there is nothing to key by.** */
 const KEY = "room";
+
+/**
+ * ⚠⚠ **The fifth thing this object writes** (`docs/adr/0031`; ⚠ `docs/adr/0023` wrote four).
+ *
+ * ⚠ **One number: ⚠ how many milliseconds this room has been held by at least one socket,
+ * ⚠ in total, ⚠ across every span.** ⚠ **It is nobody's information** — ⚠ **the room does not
+ * know who signed in and must not learn** (`src/quota/ledger.ts` holds the mark instead).
+ * ⚠ **Its own key rather than a field on `Room`**: ⚠ **`Room` is platform-free, ⚠ and how long a
+ * Durable Object was held is not something Node's room has any use for.**
+ */
+const USED_KEY = "usedMs";
+
+/**
+ * ⚠ **How often a room says how long it has been held** (`docs/adr/0031`).
+ *
+ * ⚠ **Not on every heartbeat.** ⚠ **The heartbeat is 20 s** (`src/signaling/session.ts`),
+ * ⚠ **and a cap measured in hours does not need to be told three times a minute** — ⚠ **each
+ * telling wakes the ledger, ⚠ and the ADR's own overhead estimate is 1,200 wakes a day.**
+ * ⚠ **The last one is never throttled**: ⚠ **a span that is over is reported whatever the clock
+ * says.**
+ */
+const TELL_THE_LEDGER_EVERY_MS = 60_000;
 
 /**
  * ⚠⚠ **Which room this object is** (`docs/adr/0022`).
@@ -104,6 +128,18 @@ export type RoomState = {
 export type RoomEnv = {
   readonly JOIN_TOKEN_SECRET?: string;
   readonly PUBLIC_BASE_URL?: string;
+  /**
+   * ⚠⚠ **The day's budget** (`docs/adr/0031`). ⚠ **Optional here on purpose.**
+   *
+   * ⚠ **A room reports how long it has been held; ⚠ it never asks whether it may exist.**
+   * ⚠ **That decision was made before this object was addressed** (`src/worker.ts`).
+   * ⚠ **Absent means nobody is counting** — ⚠ **which is the configuration with no sign-in, ⚠ and
+   * `docs/SPEC.md` says which claim holds where.**
+   */
+  readonly LEDGER?: {
+    idFromName(name: string): unknown;
+    get(id: unknown): { fetch(request: Request): Promise<Response> };
+  };
 };
 
 export class RoomObject {
@@ -122,6 +158,10 @@ export class RoomObject {
   private waiters = new Map<unknown, () => void>();
   /** ⚠ **The id this object is holding.** ⚠ Learned from the Worker, ⚠ never from a caller. */
   private roomId: string | null = null;
+  /** ⚠ **Spans that are finished.** ⚠ Read back from storage on every wake (`docs/adr/0031`). */
+  private usedMs = 0;
+  /** ⚠ **When the ledger was last told.** ⚠ This wake only; ⚠ a fresh object simply tells again. */
+  private toldAt = 0;
 
   constructor(state: RoomState, env: RoomEnv) {
     this.state = state;
@@ -178,7 +218,23 @@ export class RoomObject {
         //   ⚠ means the room ages from the last one that landed.
         void this.persist(null, ctx.store.get(id) ?? null);
       },
+      // ⚠⚠ **How long this room has been held** (`docs/adr/0031`).
+      //   ⚠ **A total, ⚠ never a difference** — ⚠ **the ledger adds `total − last`, ⚠ so a
+      //   ⚠ repeat adds nothing and a room that came back does not start again from zero.**
+      usedSoFar: (id, spanMs, stillHolding) => {
+        if (stillHolding) {
+          void this.tellTheLedger(id, this.usedMs + spanMs, false, true);
+          return;
+        }
+        // ⚠ The span is over. ⚠ Added in memory first, ⚠ so anything that reads it next —
+        //   ⚠ including the room ending a moment later — ⚠ sees the finished total.
+        this.usedMs += spanMs;
+        void this.state.storage.put(USED_KEY, this.usedMs);
+        void this.tellTheLedger(id, this.usedMs, false, false);
+      },
     });
+
+    this.usedMs = (await this.state.storage.get<number>(USED_KEY)) ?? 0;
 
     // ⚠⚠ **Rebuild the door from the sockets standing at it** (`docs/adr/0028`).
     //
@@ -190,6 +246,40 @@ export class RoomObject {
 
     this.ctx = ctx;
     return ctx;
+  }
+
+  /**
+   * ⚠⚠ **Say how long this room has been held, ⚠ and whether it is over** (`docs/adr/0031`).
+   *
+   * ⚠ **Never awaited by anything a person is waiting on.** ⚠ **A ledger that is slow must not
+   * make a call slow** — ⚠ **and a report that does not land is not a room that stops.**
+   * ⚠ **The decision this room may exist was made before it was addressed** (`src/worker.ts`);
+   * ⚠ **this is only counting, ⚠ and counting late is not counting twice.**
+   */
+  private async tellTheLedger(
+    roomId: string,
+    totalMs: number,
+    isOver: boolean,
+    throttled: boolean,
+  ): Promise<void> {
+    const ledger = this.env.LEDGER;
+    if (ledger === undefined) return;
+    const at = Date.now();
+    if (throttled && at - this.toldAt < TELL_THE_LEDGER_EVERY_MS) return;
+    this.toldAt = at;
+    try {
+      await ledger.get(ledger.idFromName(LEDGER_NAME)).fetch(
+        new Request("https://kagima.invalid/ledger", {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          body: JSON.stringify({ ask: "used", roomId, totalMs, over: isOver }),
+        }),
+      );
+    } catch (error) {
+      // ⚠ Counted, ⚠ so a report that never landed is not indistinguishable from one that was
+      //   ⚠ never sent (`.claude/rules/evidence.md`). ⚠ Says the room, ⚠ and nothing about anyone.
+      logger.info("a room could not tell the day's budget", { roomId, why: String(error) });
+    }
   }
 
   /**
@@ -285,7 +375,15 @@ export class RoomObject {
   private async persist(before: Room | null, after: Room | null): Promise<void> {
     if (after === null) {
       // ⚠⚠ The room is over. ⚠ Holding what it was is how a record starts (`docs/adr/0023`).
-      if (before !== null) await this.state.storage.delete(KEY);
+      if (before !== null) {
+        await this.state.storage.delete(KEY);
+        await this.state.storage.delete(USED_KEY);
+        // ⚠⚠ **The last word** (`docs/adr/0031`). ⚠ **Its row goes, ⚠ so the cap on how many are
+        //   ⚠ open comes back down.** ⚠ **The sockets were closed first, ⚠ so their span is
+        //   ⚠ already in `usedMs`** (`src/server.ts` closes the hub before the store).
+        await this.tellTheLedger(before.id, this.usedMs, true, false);
+        this.usedMs = 0;
+      }
       return;
     }
     if (before !== null && before.lastSeenAt === after.lastSeenAt) return;
@@ -338,6 +436,15 @@ export class RoomObject {
     this.ctx?.hub.closeRoom(held.id, CLOSE_ROOM_CLOSED, "this room was left open and has expired");
     this.ctx?.store.close(held.id);
     await this.state.storage.delete(KEY);
+    // ⚠⚠ **The backstop** (`docs/adr/0031`). ⚠ **A room whose object went away without a last
+    //   ⚠ word still ends here** — ⚠ **so its row cannot hold a slot until the day turns.**
+    // ⚠ **The larger of the two.** ⚠ **`alarm()` can run on a wake where nothing else did, ⚠ so
+    //   ⚠ memory may hold 0 while storage holds the total** — ⚠ **and a span that closed a moment
+    //   ⚠ ago is in memory before its write has landed.**
+    const usedMs = Math.max(this.usedMs, (await this.state.storage.get<number>(USED_KEY)) ?? 0);
+    await this.state.storage.delete(USED_KEY);
+    await this.tellTheLedger(held.id, usedMs, true, false);
+    this.usedMs = 0;
     await this.state.storage.deleteAlarm();
 
     // ⚠ Says the room is over, ⚠ and says nothing about who was in it
