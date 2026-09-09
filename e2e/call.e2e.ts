@@ -212,6 +212,32 @@ const decideAtTheDoor = async (host: Page, allow: boolean): Promise<void> => {
   await host.click(allow ? "#admit" : "#deny");
 };
 
+/**
+ * ⚠ **画面共有を、⚠ 選択画面なしで始める。**
+ *
+ * ⚠ **`getDisplayMedia` は 人が選ぶものであり、⚠ 検査から押せない。** ⚠ **so 差し替える。**
+ * ⚠ **差し替えたのは 出どころだけで、⚠ そのあとの `replaceTrack` も 交渉も 本物である。**
+ */
+const putAScreenIntoTheCall = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    (
+      navigator.mediaDevices as unknown as { getDisplayMedia: () => Promise<MediaStream> }
+    ).getDisplayMedia = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+      // ⚠ 動いていること。⚠ 静止画だと frames が増えず、⚠ 届いたことを見分けられない。
+      setInterval(() => {
+        ctx.fillStyle = `hsl(${Date.now() % 360} 90% 50%)`;
+        ctx.fillRect(0, 0, 320, 240);
+      }, 50);
+      return (canvas as unknown as { captureStream: (n: number) => MediaStream }).captureStream(15);
+    };
+  });
+  await page.click("#share");
+};
+
 const framesDecoded = (page: Page): Promise<number> =>
   page.evaluate(async () => {
     const call = (globalThis as unknown as { kagimaCall?: { pc: RTCPeerConnection } }).kagimaCall;
@@ -1050,23 +1076,7 @@ test(titleOf("same-screen"), async () => {
   );
   assert.ok(faceBefore > 0, "the face never arrived, so nothing can be said about the screen");
 
-  await host.page.evaluate(() => {
-    (
-      navigator.mediaDevices as unknown as { getDisplayMedia: () => Promise<MediaStream> }
-    ).getDisplayMedia = async () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 320;
-      canvas.height = 240;
-      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-      // ⚠ 動いていること。⚠ 静止画だと frames が増えず、⚠ 届いたことを見分けられない。
-      setInterval(() => {
-        ctx.fillStyle = `hsl(${Date.now() % 360} 90% 50%)`;
-        ctx.fillRect(0, 0, 320, 240);
-      }, 50);
-      return (canvas as unknown as { captureStream: (n: number) => MediaStream }).captureStream(15);
-    };
-  });
-  await host.page.click("#share");
+  await putAScreenIntoTheCall(host.page);
   console.log("  observed: the host put a screen into the call");
 
   // ⚠⚠ **証拠。** ⚠ **受け側の 2 本目の video に 幅が出るのは、⚠ frames が届いたときだけである。**
@@ -1124,6 +1134,93 @@ test(titleOf("same-screen"), async () => {
     { timeout: 30_000 },
   );
   console.log("  observed: sharing again put it back on the other side");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
+test(titleOf("over-here"), async () => {
+  // ⚠⚠ **`docs/adr/0033` 決定 3。** ⚠ **座標は 我々を通らない** — ⚠ **`RTCDataChannel` である。**
+  //   ⚠ **so このケースが見るのは「届いた」ではなく、⚠ **同じ場所に落ちた** ことである。**
+  // ⚠ **画素ではなく 割合で送る**(⚠ 両側の要素の大きさは違う)。⚠ **だから 割合で確かめる。**
+  //
+  // ⚠⚠ **面を取り違えると、⚠ 相手の顔の上に 共有画面のポインタが出る。**
+  //   ⚠ **so 面ごとに 1 回ずつ見る: ⚠ 共有画面と、⚠ カメラ映像**(Owner 決定 2026-09-09)。
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
+  await waitForPicture(guest.page, "the guest");
+
+  await putAScreenIntoTheCall(host.page);
+  await guest.page.waitForFunction(
+    () => {
+      const shared = document.getElementById("shared") as HTMLVideoElement | null;
+      return shared !== null && !shared.hidden && shared.videoWidth > 0;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  /** ⚠ 押した場所ではなく、⚠ その要素の どのあたりかを渡す。 */
+  const pointAt = async (id: string, x: number, y: number): Promise<void> => {
+    const box = await guest.page.locator(`#${id}`).boundingBox();
+    assert.ok(box !== null, `the guest has no ${id} to point at`);
+    await guest.page.mouse.move(box.x + box.width * x, box.y + box.height * y);
+  };
+
+  /** ⚠ その要素の どのあたりに 点が落ちたか。⚠ 画素で比べない。 */
+  const dotOn = (page: Page, id: string): Promise<{ x: number; y: number }> =>
+    page.evaluate((picture) => {
+      const dot = document.getElementById(`dot-${picture}`) as HTMLElement;
+      const shown = document.getElementById(picture) as HTMLElement;
+      return {
+        x: Number.parseFloat(dot.style.left) / shown.clientWidth,
+        y: Number.parseFloat(dot.style.top) / shown.clientHeight,
+      };
+    }, id);
+
+  const waitForDot = (page: Page, id: string, shown: boolean): Promise<unknown> =>
+    page.waitForFunction(
+      (want) => document.getElementById(`dot-${want.id}`)?.hidden === !want.shown,
+      { id, shown },
+      { timeout: 30_000 },
+    );
+
+  // ⚠⚠ **共有画面の上で。** ⚠ **見ている側が指し、⚠ 出している側の 自分の共有画面に出る。**
+  await pointAt("shared", 0.25, 0.5);
+  await waitForDot(host.page, "shared-mine", true);
+  const onScreen = await dotOn(host.page, "shared-mine");
+  assert.ok(
+    Math.abs(onScreen.x - 0.25) < 0.03 && Math.abs(onScreen.y - 0.5) < 0.03,
+    `the dot landed at ${JSON.stringify(onScreen)}, and 0.25 / 0.5 was pointed at`,
+  );
+  console.log(
+    "  observed: ここ on the shared screen landed on the same spot for the one showing it",
+  );
+
+  // ⚠ 面を間違えていないこと。⚠ 顔の上には 出ていない。
+  const alsoOnFace = await host.page.evaluate(
+    () => document.getElementById("dot-local")?.hidden !== false,
+  );
+  assert.equal(alsoOnFace, true, "the same point also landed on the face");
+
+  // ⚠ 指を離したことは 言う ― ⚠ 消えないと、⚠ 指していない場所を指し続ける。
+  await guest.page.mouse.move(1, 1);
+  await waitForDot(host.page, "shared-mine", false);
+  console.log("  observed: taking the finger away took the dot away");
+
+  // ⚠⚠ **カメラ映像の上でも。** ⚠ **決定 1 で「スマホはカメラを向けて見せる」と決めた以上、
+  //   ⚠ 見せている側がスマホなら 指す先は カメラ映像である**(Owner 決定 2026-09-09)。
+  await pointAt("remote", 0.75, 0.25);
+  await waitForDot(host.page, "local", true);
+  const onFace = await dotOn(host.page, "local");
+  assert.ok(
+    Math.abs(onFace.x - 0.75) < 0.03 && Math.abs(onFace.y - 0.25) < 0.03,
+    `the dot landed at ${JSON.stringify(onFace)}, and 0.75 / 0.25 was pointed at`,
+  );
+  console.log("  observed: ここ on the camera picture landed on the same spot too");
 
   await host.context.close();
   await guest.context.close();

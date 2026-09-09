@@ -56,6 +56,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a screen put into the call arriving on the other side as a second video, beside the face",
   },
   {
+    name: "over-here",
+    sees: "one side saying ここ on a picture, and the dot landing on the same spot of the same picture on the other side",
+  },
+  {
     name: "hands-off",
     sees: "the camera going off stopping the track, mute leaving it running, and both saying so on the other side",
   },

@@ -16,6 +16,15 @@
 //   ⚠ strength of a state name.**
 
 import { NOTICE_CHANNEL, readNotice, type SideState, writeNotice } from "../call/notice.ts";
+import {
+  flipPoint,
+  isFresh,
+  type Point,
+  type PointAt,
+  POINTER_CHANNEL,
+  readPoint,
+  writePoint,
+} from "../call/pointer.ts";
 import { driveRestart, onIncomingOffer, restartDelaysFor } from "../call/restart.ts";
 
 /**
@@ -123,6 +132,27 @@ export type Call = {
    * ⚠ **Called once with the state as it is now, ⚠ then again on every change.**
    */
   onPeerState(handler: (state: SideState) => void): void;
+  /**
+   * ⚠⚠ **What this side is showing, ⚠ shown back to it** (`docs/adr/0033` 決定 3).
+   *
+   * ⚠ **The side that is sharing does not otherwise see the shared screen inside kagima** —
+   * ⚠ **and then the other person's "ここ" has no picture to land on** (Owner 決定 2026-09-09).
+   */
+  readonly myShareStream: MediaStream;
+  /**
+   * ⚠ **Say where this side is pointing** (`docs/adr/0033` 決定 3).
+   *
+   * ⚠ **`x` and `y` are fractions of the picture, ⚠ never pixels** — ⚠ **the two screens are
+   * different sizes.** ⚠ **`at` names the picture from this side's point of view; ⚠ the other
+   * side reads it from its own.**
+   * ⚠ **`"nowhere"` is the finger leaving, ⚠ and it is sent rather than left to be guessed.**
+   */
+  point(at: PointAt, x: number, y: number): void;
+  /**
+   * ⚠ **Where the other side is pointing, ⚠ in this side's own terms.**
+   * ⚠ **Called on every move, ⚠ and once with `"nowhere"` to start.**
+   */
+  onPeerPoint(handler: (point: Point) => void): void;
   /** ⚠ **The offerer starts negotiation.** ⚠ Both sides answering, or neither, is a deadlock. */
   start(): Promise<void>;
   state(): CallState;
@@ -319,14 +349,40 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
     if (notices?.readyState !== "open") return;
     notices.send(writeNotice(state));
   };
+  // ⚠⚠ **"ここ" gets its own channel** (`docs/adr/0033` 決定 3, `src/call/pointer.ts`).
+  //   ⚠ **Unordered, ⚠ so one lost packet cannot hold the next position behind it** — ⚠ **a
+  //   ⚠ pointer that catches up late has already been overtaken by the hand.**
+  //   ⚠ **Reliable all the same: ⚠ "the finger left" must not be the message that goes missing.**
+  let pointer: RTCDataChannel | null = null;
+  const pointHandlers: ((point: Point) => void)[] = [];
+  let seenPoint = 0;
+  let sentPoints = 0;
+  const wirePointer = (channel: RTCDataChannel): void => {
+    channel.addEventListener("message", (event) => {
+      const said = readPoint(event.data);
+      // ⚠ It came from the other browser. ⚠ Anything may arrive; ⚠ nothing here trusts a shape.
+      if (said === null || !isFresh(seenPoint, said)) return;
+      seenPoint = said.n;
+      // ⚠ Read into this side's own terms once, here, ⚠ so no page has to do the flip itself.
+      const here = flipPoint(said);
+      for (const handler of pointHandlers) handler(here);
+    });
+  };
   if (options.isOfferer) {
     notices = pc.createDataChannel(NOTICE_CHANNEL);
     wireNotices(notices);
+    pointer = pc.createDataChannel(POINTER_CHANNEL, { ordered: false });
+    wirePointer(pointer);
   }
   pc.addEventListener("datachannel", (event) => {
-    if (event.channel.label !== NOTICE_CHANNEL) return;
-    notices = event.channel;
-    wireNotices(notices);
+    if (event.channel.label === NOTICE_CHANNEL) {
+      notices = event.channel;
+      wireNotices(notices);
+      return;
+    }
+    if (event.channel.label !== POINTER_CHANNEL) return;
+    pointer = event.channel;
+    wirePointer(pointer);
   });
 
   pc.addEventListener("track", (event) => {
@@ -566,6 +622,20 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
     onPeerState(handler) {
       peerHandlers.push(handler);
       handler(peerState());
+    },
+
+    myShareStream: shareStream,
+
+    point(at, x, y) {
+      if (pointer?.readyState !== "open") return;
+      sentPoints += 1;
+      pointer.send(writePoint({ at, x, y, n: sentPoints }));
+    },
+
+    onPeerPoint(handler) {
+      pointHandlers.push(handler);
+      // ⚠ Nobody is pointing until somebody does. ⚠ Said, rather than left as an absent call.
+      handler({ at: "nowhere", x: 0, y: 0, n: 0 });
     },
 
     hangUp() {
