@@ -16,7 +16,13 @@
   button { font: inherit; padding: .5rem .9rem; border-radius: .3rem; border: 1px solid #999;
            background: #fff; cursor: pointer; margin-top: 1rem; }
   .hint { color: #555; font-size: .9rem; }
-  video { width: 100%; max-width: 16rem; background: #222; border-radius: .3rem; }
+  video { width: 100%; max-width: 16rem; background: #222; border-radius: .3rem; display: block; }
+  /* ⚠ 「ここ」を映像の上に置くための入れもの (docs/adr/0033 決定 3)。 */
+  .pic { position: relative; display: inline-block; width: 100%; max-width: 16rem; }
+  .pic:has(video[hidden]) { display: none; }
+  .dot { position: absolute; width: .9rem; height: .9rem; margin: -.45rem 0 0 -.45rem;
+         border-radius: 50%; background: #e33; border: 2px solid #fff;
+         box-shadow: 0 0 .2rem rgba(0,0,0,.6); pointer-events: none; }
 </style>
 
 <h1>kagima</h1>
@@ -49,9 +55,11 @@
 
 <section id="after" hidden>
   <p id="status">つないでいます。</p>
-  <video id="local" autoplay muted playsinline></video>
+  <span class="pic"><video id="local" autoplay muted playsinline></video
+    ><span class="dot" id="dot-local" hidden></span></span>
   <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
-  <video id="remote" autoplay playsinline></video>
+  <span class="pic"><video id="remote" autoplay playsinline></video
+    ><span class="dot" id="dot-remote" hidden></span></span>
   <!-- ⚠ 相手がカメラやマイクを切っていることは、⚠ 事実として言う (`CLAUDE.md` § 4-1)。 -->
   <p class="hint" id="peer-state" role="status"></p>
 
@@ -61,7 +69,17 @@
     ⚠ 出せない端末にはボタンを出さない。⚠ user-agent は読まない: ⚠ 機能が在るかで決める。
   -->
   <!-- biome-ignore lint/a11y/useMediaCaption: same reason as above -->
-  <video id="shared" autoplay playsinline hidden></video>
+  <span class="pic"><video id="shared" autoplay playsinline hidden></video
+    ><span class="dot" id="dot-shared" hidden></span></span>
+
+  <!--
+    ⚠⚠ **出している側にも 自分の共有画面を出す** (`docs/adr/0033` 決定 3, Owner 決定 2026-09-09)。
+    ⚠ でないと、⚠ 相手の「ここ」が乗る面が こちらに無い。
+    ⚠ 画面全体を共有すると 入れ子に映る ― ⚠ 承知の上の代償である。
+  -->
+  <!-- biome-ignore lint/a11y/useMediaCaption: same reason as above -->
+  <span class="pic"><video id="shared-mine" autoplay muted playsinline hidden></video
+    ><span class="dot" id="dot-shared-mine" hidden></span></span>
 
   <!--
     ⚠⚠ **手を離す** (`docs/adr/0033` 決定 4, `docs/PRODUCT.md` § 3)。
@@ -95,6 +113,7 @@
 <script type="module">
   import { classifyMediaError, createCall } from "/client/call.js";
   import { peerWords } from "/call/notice.js";
+  import { wirePointing } from "/client/pointing.js";
   import { canShare, SHARE_UNAVAILABLE } from "/client/share.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { forgetHidden, watchDiscards } from "/client/discarded.js";
@@ -293,6 +312,8 @@
         $("share").textContent = state.showing ? "共有をやめる" : "画面を共有する";
         // ⚠ カメラを切ると track は止まる。⚠ 止まった track を映しておくと、⚠ 最後の絵が残る。
         $("local").hidden = !state.camera;
+        // ⚠ 自分の共有画面は、⚠ 出しているあいだだけ出す。
+        $("shared-mine").hidden = !state.showing;
       });
       $("microphone").addEventListener("click", () => {
         call.setMicrophone(!mine.microphone);
@@ -313,6 +334,9 @@
 
       // ⚠ 相手が出しているものは、⚠ 顔とは別の要素に出す。⚠ 片方がもう片方を隠さない。
       $("shared").srcObject = call.remoteShareStream;
+      $("shared-mine").srcObject = call.myShareStream;
+      // ⚠⚠ 「ここ」(`docs/adr/0033` 決定 3)。⚠ 相対座標だけが、⚠ 我々を通らずに 相手へ行く。
+      wirePointing(call);
       // ⚠⚠ 出ているかどうかは、⚠ track が有るかではなく ⚠ frames が来ているかで決める。
       //   ⚠ 2 本目は通話が始まった時点で開いており、⚠ 誰も出していない間も track は在る。
       // ⚠ カメラとマイクは 相手が言ったことしか分からない ― ⚠ メディアからは読めない。

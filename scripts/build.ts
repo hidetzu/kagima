@@ -37,6 +37,8 @@ const SOURCES = [
   "src/status/status.ts",
   "src/diagnostics/report.ts",
   "src/call/notice.ts",
+  "src/call/pointer.ts",
+  "src/client/pointing.ts",
   "src/call/restart.ts",
   "src/client/share.ts",
   "src/client/discarded.ts",
