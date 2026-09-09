@@ -1029,6 +1029,106 @@ test(titleOf("heartbeat"), async () => {
   await guest.context.close();
 });
 
+test(titleOf("same-screen"), async () => {
+  // ⚠⚠ **`docs/PRODUCT.md` § 1 の本体** (`docs/adr/0033`):
+  //   ⚠ **「顔を見ながら話し、⚠ 同じ画面を見て」** — ⚠ **so 両方が同時に届かなければならない。**
+  //
+  // ⚠ **`getDisplayMedia` は headless の Chromium では選択画面を出せない。**
+  //   ⚠ **so それだけを差し替える** — ⚠ **canvas から作った動く映像を返す。**
+  // ⚠⚠ **これが言えること: ⚠ 2 本目の transceiver が 端から端まで frames を運び、⚠ 受け側が
+  //   ⚠ 顔と 別の要素に振り分けること。**
+  // ⚠⚠ **言えないこと: ⚠ ブラウザ自身の選択画面について 何も。**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
+
+  // ⚠ 顔が届いていること。⚠ 共有はこのあとで、⚠ 顔を置き換えないことが主張である。
+  const faceBefore = await guest.page.evaluate(
+    () => (document.getElementById("remote") as HTMLVideoElement).videoWidth,
+  );
+  assert.ok(faceBefore > 0, "the face never arrived, so nothing can be said about the screen");
+
+  await host.page.evaluate(() => {
+    (
+      navigator.mediaDevices as unknown as { getDisplayMedia: () => Promise<MediaStream> }
+    ).getDisplayMedia = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+      // ⚠ 動いていること。⚠ 静止画だと frames が増えず、⚠ 届いたことを見分けられない。
+      setInterval(() => {
+        ctx.fillStyle = `hsl(${Date.now() % 360} 90% 50%)`;
+        ctx.fillRect(0, 0, 320, 240);
+      }, 50);
+      return (canvas as unknown as { captureStream: (n: number) => MediaStream }).captureStream(15);
+    };
+  });
+  await host.page.click("#share");
+  console.log("  observed: the host put a screen into the call");
+
+  // ⚠⚠ **証拠。** ⚠ **受け側の 2 本目の video に 幅が出るのは、⚠ frames が届いたときだけである。**
+  await guest.page.waitForFunction(
+    () => {
+      const shared = document.getElementById("shared") as HTMLVideoElement | null;
+      return shared !== null && !shared.hidden && shared.videoWidth > 0;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  const sharedWidth = await guest.page.evaluate(
+    () => (document.getElementById("shared") as HTMLVideoElement).videoWidth,
+  );
+  console.log(`  observed: the shared screen arrived, ${sharedWidth}px wide`);
+
+  // ⚠ ボタンの文字は、⚠ いま出しているかを言う (`CLAUDE.md` § 4)。
+  assert.equal(await text(host.page, "share"), "共有をやめる");
+
+  // ⚠⚠ **顔は消えていない。** ⚠ **`replaceTrack` で顔を差し替える形なら、⚠ ここで 0 になる。**
+  const faceAfter = await guest.page.evaluate(
+    () => (document.getElementById("remote") as HTMLVideoElement).videoWidth,
+  );
+  assert.ok(faceAfter > 0, `the face was replaced by the screen (${faceBefore} -> ${faceAfter})`);
+  console.log(`  observed: the face is still there, ${faceAfter}px wide`);
+
+  // ⚠ 共有をやめると、⚠ track は止まる ― ⚠ 隠すだけではない (`.claude/rules/security.md` § 5)。
+  await host.page.click("#share");
+  const stopped = await host.page.evaluate(
+    () =>
+      (globalThis as unknown as { kagimaCall: { sharing: () => boolean } }).kagimaCall.sharing() ===
+      false,
+  );
+  assert.equal(stopped, true, "the screen is still being shared after stopping");
+  assert.equal(await text(host.page, "share"), "画面を共有する");
+  console.log("  observed: stopping the share stopped the track, and the button says so");
+
+  // ⚠⚠ **向こうでも消える。** ⚠ **`replaceTrack(null)` は受け側の track を消さない** — ⚠ **`muted` に
+  //   ⚠ 戻すだけである。** ⚠ **「track が在るか」で出し入れしていると、⚠ 止めたあとも黒い箱が残る。**
+  await guest.page.waitForFunction(
+    () => (document.getElementById("shared") as HTMLVideoElement).hidden,
+    undefined,
+    { timeout: 30_000 },
+  );
+  console.log("  observed: the shared screen went away on the other side too");
+
+  // ⚠⚠ **もう一度出せる。** ⚠ **「やめた」を言いっぱなしにすると、⚠ 相手の側は 二度と出さない。**
+  await host.page.click("#share");
+  await guest.page.waitForFunction(
+    () => {
+      const shared = document.getElementById("shared") as HTMLVideoElement | null;
+      return shared !== null && !shared.hidden && shared.videoWidth > 0;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  console.log("  observed: sharing again put it back on the other side");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
 test(titleOf("the-guest-comes-back"), async () => {
   // ⚠⚠ **Measured 2026-09-06** (kagima#98): ⚠ **`wrangler deploy` replaced the Durable Object and
   //   ⚠ every open WebSocket closed.** ⚠ **The room survives** (`docs/adr/0023`, `0025`)

@@ -55,6 +55,16 @@
   <video id="local" autoplay muted playsinline></video>
   <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
   <video id="remote" autoplay playsinline></video>
+
+  <!--
+    ⚠⚠ **同じものを見る** (`docs/adr/0033`, `docs/PRODUCT.md` § 1)。
+    ⚠ 顔とは別の要素である ― ⚠ ひとつにまとめると、片方がもう片方を隠す。
+    ⚠ 出せない端末にはボタンを出さない。⚠ user-agent は読まない: ⚠ 機能が在るかで決める。
+  -->
+  <!-- biome-ignore lint/a11y/useMediaCaption: same reason as above -->
+  <video id="shared" autoplay playsinline hidden></video>
+  <p><button id="share" type="button" hidden>画面を共有する</button></p>
+  <p class="hint" id="share-hint"></p>
   <p><button id="close" type="button">ルームを閉じる</button></p>
 <!--
   ⚠ For the field test (docs/FIELD-TEST.md), not for the product.
@@ -76,6 +86,7 @@
 
 <script type="module">
   import { classifyMediaError, createCall } from "/client/call.js";
+  import { canShare, SHARE_UNAVAILABLE } from "/client/share.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
   import { connectReconnecting } from "/client/reconnect.js";
@@ -268,6 +279,43 @@
       $("local").srcObject = call.localStream;
       $("remote").srcObject = call.remoteStream;
       globalThis.kagimaCall = call;
+
+      // ⚠⚠ **同じものを見る** (`docs/adr/0033`)。
+      //
+      // ⚠ **出せる端末だけにボタンを出す。** ⚠ **`getDisplayMedia` が在るかで決め、
+      //   ⚠ user-agent は読まない** — ⚠ **端末の名前で機能を推測するのは、⚠ 推測を測定として
+      //   ⚠ 扱うことである** (`.claude/rules/evidence.md`)。
+      // ⚠ **出せない端末には、⚠ 何ができるかを言う** (`CLAUDE.md` § 4-1)。
+      if (canShare(navigator.mediaDevices)) {
+        $("share").hidden = false;
+        $("share").addEventListener("click", async () => {
+          if (call.sharing()) {
+            call.stopSharing();
+            return;
+          }
+          try {
+            await call.startSharing();
+          } catch {
+            // ⚠ ブラウザの選択画面で「やめる」を押した。⚠ 失敗ではないので、⚠ 何も言わない。
+          }
+        });
+        // ⚠⚠ ボタンの文字は、⚠ ページがしたことではなく ⚠ いま出しているかから決める。
+        //   ⚠ ブラウザ自身の共有バーで止められると、⚠ ページは何も押されていない。
+        call.onSharing((sharing) => {
+          $("share").textContent = sharing ? "共有をやめる" : "画面を共有する";
+        });
+      } else {
+        $("share-hint").textContent = SHARE_UNAVAILABLE;
+      }
+
+      // ⚠ 相手が出しているものは、⚠ 顔とは別の要素に出す。⚠ 片方がもう片方を隠さない。
+      const shared = $("shared");
+      shared.srcObject = call.remoteShareStream;
+      // ⚠⚠ 出ているかどうかは、⚠ track が有るかではなく ⚠ frames が来ているかで決める。
+      //   ⚠ 2 本目は通話が始まった時点で開いており、⚠ 誰も出していない間も track は在る。
+      call.onShared((showing) => {
+        shared.hidden = !showing;
+      });
 
 
       // ⚠ The field-test instrument. ⚠ It reads; ⚠ it changes nothing about the call.

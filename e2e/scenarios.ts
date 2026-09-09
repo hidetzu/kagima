@@ -52,6 +52,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a Host whose page the browser threw away getting back into its own room",
   },
   {
+    name: "same-screen",
+    sees: "a screen put into the call arriving on the other side as a second video, beside the face",
+  },
+  {
     name: "the-guest-comes-back",
     sees: "a Guest whose socket dropped coming back on its own, so a deploy is a blip and not an ending",
   },
