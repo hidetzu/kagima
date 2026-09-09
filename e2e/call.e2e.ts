@@ -1129,6 +1129,117 @@ test(titleOf("same-screen"), async () => {
   await guest.context.close();
 });
 
+test(titleOf("hands-off"), async () => {
+  // ⚠⚠ **`docs/adr/0033` 決定 4 は、⚠ カメラと mute を わざと違う扱いにしている。**
+  //   ⚠ **カメラを切るのは track を止めること** (`.claude/rules/security.md` § 5) — ⚠ **ランプが
+  //   ⚠ 消えるのは 利用者に見える唯一の事実である。** ⚠ **mute は `enabled = false` であって、
+  //   ⚠ track は生きたままである** — ⚠ **止めると 戻すのに 取り直しが要る。**
+  // ⚠⚠ **so このケースは「切れた」ことではなく、⚠ 切り方が 2 つとも 意図どおりであることを見る。**
+  //
+  // ⚠ **そして どちらも 相手の画面に出る。** ⚠ **メディアからは読めない**(⚠ 実測 2026-09-09:
+  //   ⚠ `replaceTrack(null)` で 受け側の track は live のまま)— ⚠ **相手が言うしかない。**
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+  await decideAtTheDoor(host.page, true);
+  await waitForFrames(guest.page, "the guest");
+  await waitForPicture(guest.page, "the guest");
+
+  // ⚠ 止まったことを見るために、⚠ 止める前に track を掴んでおく。
+  //   ⚠ 切ったあとは stream から外れるので、⚠ あとからでは 読めない。
+  await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } }).kagimaCall;
+    (globalThis as unknown as { faceTrack: MediaStreamTrack }).faceTrack =
+      call.localStream.getVideoTracks()[0] as MediaStreamTrack;
+  });
+
+  await host.page.click("#camera");
+  // ⚠ 押した直後ではない。⚠ カメラを手放すのは非同期であり、⚠ 待つのが 観測の仕方である。
+  await host.page.waitForFunction(
+    () => document.getElementById("camera")?.textContent === "カメラを入れる",
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  // ⚠⚠ **止めた。** ⚠ **隠しただけなら `live` のままである。**
+  const faceState = await host.page.evaluate(
+    () => (globalThis as unknown as { faceTrack: MediaStreamTrack }).faceTrack.readyState,
+  );
+  assert.equal(faceState, "ended", "the camera was hidden and not stopped");
+  console.log("  observed: turning the camera off stopped the track");
+
+  await guest.page.waitForFunction(
+    () => (document.getElementById("remote") as HTMLVideoElement).hidden,
+    undefined,
+    { timeout: 30_000 },
+  );
+  assert.equal(await text(guest.page, "peer-state"), "相手はカメラを切っています。");
+  console.log("  observed: the other side was told, and says it as a fact");
+
+  // ⚠⚠ **戻る。** ⚠ **`#remote` が出ることは 相手の言い分でしかないので、⚠ frames が また
+  //   ⚠ 増えることまで見る** (`.claude/skills/verify/SKILL.md` § 3)。
+  const beforeBack = await framesDecoded(guest.page);
+  await host.page.click("#camera");
+  await guest.page.waitForFunction(
+    () => (document.getElementById("remote") as HTMLVideoElement).hidden === false,
+    undefined,
+    { timeout: 30_000 },
+  );
+  for (let i = 0; ; i++) {
+    if ((await framesDecoded(guest.page)) > beforeBack) break;
+    assert.ok(i < 100, "the camera came back on and no new frames arrived");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(await text(guest.page, "peer-state"), "");
+  // ⚠ 手元の画も戻る。⚠ track を手放しているので、⚠ 取り直したものが 要素に載る必要がある。
+  await host.page.waitForFunction(
+    () => {
+      const local = document.getElementById("local") as HTMLVideoElement;
+      return !local.hidden && local.videoWidth > 0;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  console.log("  observed: turning it back on put frames back on both sides");
+
+  // ⚠⚠ **mute は 止めない。** ⚠ **ここが 決定 4 の分かれ目である。**
+  await host.page.click("#microphone");
+  await host.page.waitForFunction(
+    () => document.getElementById("microphone")?.textContent === "マイクを入れる",
+    undefined,
+    { timeout: 30_000 },
+  );
+  const audio = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } }).kagimaCall;
+    const track = call.localStream.getAudioTracks()[0] as MediaStreamTrack;
+    return { enabled: track.enabled, readyState: track.readyState };
+  });
+  assert.deepEqual(audio, { enabled: false, readyState: "live" });
+  console.log("  observed: mute left the track running and stopped it going out");
+
+  await guest.page.waitForFunction(
+    () => document.getElementById("peer-state")?.textContent === "相手はマイクを切っています。",
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await host.page.click("#microphone");
+  await guest.page.waitForFunction(
+    () => document.getElementById("peer-state")?.textContent === "",
+    undefined,
+    { timeout: 30_000 },
+  );
+  const back = await host.page.evaluate(() => {
+    const call = (globalThis as unknown as { kagimaCall: { localStream: MediaStream } }).kagimaCall;
+    return (call.localStream.getAudioTracks()[0] as MediaStreamTrack).enabled;
+  });
+  assert.equal(back, true);
+  console.log("  observed: unmuting was enough — nothing had to be asked for again");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
 test(titleOf("the-guest-comes-back"), async () => {
   // ⚠⚠ **Measured 2026-09-06** (kagima#98): ⚠ **`wrangler deploy` replaced the Durable Object and
   //   ⚠ every open WebSocket closed.** ⚠ **The room survives** (`docs/adr/0023`, `0025`)

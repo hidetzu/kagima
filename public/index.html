@@ -55,6 +55,8 @@
   <video id="local" autoplay muted playsinline></video>
   <!-- biome-ignore lint/a11y/useMediaCaption: a live stream has no caption track, and making one would mean transcribing the call (docs/adr/0001 forbids it) -->
   <video id="remote" autoplay playsinline></video>
+  <!-- ⚠ 相手がカメラやマイクを切っていることは、⚠ 事実として言う (`CLAUDE.md` § 4-1)。 -->
+  <p class="hint" id="peer-state" role="status"></p>
 
   <!--
     ⚠⚠ **同じものを見る** (`docs/adr/0033`, `docs/PRODUCT.md` § 1)。
@@ -63,8 +65,19 @@
   -->
   <!-- biome-ignore lint/a11y/useMediaCaption: same reason as above -->
   <video id="shared" autoplay playsinline hidden></video>
-  <p><button id="share" type="button" hidden>画面を共有する</button></p>
+
+  <!--
+    ⚠⚠ **手を離す** (`docs/adr/0033` 決定 4, `docs/PRODUCT.md` § 3)。
+    ⚠ カメラを切るのは track を止めること ― ⚠ ランプが消える。⚠ mute は enabled = false。
+    ⚠ 文字は「いまどうなっているか」から出す。⚠ ページが最後に押したことからは出さない。
+  -->
+  <p>
+    <button id="microphone" type="button">マイクを切る</button>
+    <button id="camera" type="button">カメラを切る</button>
+    <button id="share" type="button" hidden>画面を共有する</button>
+  </p>
   <p class="hint" id="share-hint"></p>
+  <p class="hint" id="camera-hint" role="status"></p>
   <p><button id="close" type="button">ルームを閉じる</button></p>
 <!--
   ⚠ For the field test (docs/FIELD-TEST.md), not for the product.
@@ -86,6 +99,7 @@
 
 <script type="module">
   import { classifyMediaError, createCall } from "/client/call.js";
+  import { peerWords } from "/call/notice.js";
   import { canShare, SHARE_UNAVAILABLE } from "/client/share.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
@@ -299,22 +313,48 @@
             // ⚠ ブラウザの選択画面で「やめる」を押した。⚠ 失敗ではないので、⚠ 何も言わない。
           }
         });
-        // ⚠⚠ ボタンの文字は、⚠ ページがしたことではなく ⚠ いま出しているかから決める。
-        //   ⚠ ブラウザ自身の共有バーで止められると、⚠ ページは何も押されていない。
-        call.onSharing((sharing) => {
-          $("share").textContent = sharing ? "共有をやめる" : "画面を共有する";
-        });
       } else {
         $("share-hint").textContent = SHARE_UNAVAILABLE;
       }
 
+      // ⚠⚠ **いま自分が何を出しているか** (`docs/adr/0033` 決定 4)。
+      //   ⚠ **ボタンの文字は、⚠ ページがしたことではなく ⚠ ここから決める。**
+      //   ⚠ **ブラウザ自身の共有バーで止められると、⚠ ページは何も押されていない。**
+      let mine = null;
+      call.onMyState((state) => {
+        mine = state;
+        $("microphone").textContent = state.microphone ? "マイクを切る" : "マイクを入れる";
+        $("camera").textContent = state.camera ? "カメラを切る" : "カメラを入れる";
+        $("share").textContent = state.showing ? "共有をやめる" : "画面を共有する";
+        // ⚠ カメラを切ると track は止まる。⚠ 止まった track を映しておくと、⚠ 最後の絵が残る。
+        $("local").hidden = !state.camera;
+      });
+      $("microphone").addEventListener("click", () => {
+        call.setMicrophone(!mine.microphone);
+      });
+      $("camera").addEventListener("click", async () => {
+        $("camera-hint").textContent = "";
+        try {
+          await call.setCamera(!mine.camera);
+        } catch (error) {
+          // ⚠ 切ったときに track を手放しているので、⚠ 入れ直すには もう一度もらう必要がある。
+          //   ⚠ 断られることがある ― ⚠ できることを言う (`CLAUDE.md` § 4-1)。
+          $("camera-hint").textContent =
+            classifyMediaError(error) === "denied"
+              ? "カメラを許可すると、また映せます。許可してから、もう一度お試しください。"
+              : "カメラを使える状態にしてから、もう一度お試しください。";
+        }
+      });
+
       // ⚠ 相手が出しているものは、⚠ 顔とは別の要素に出す。⚠ 片方がもう片方を隠さない。
-      const shared = $("shared");
-      shared.srcObject = call.remoteShareStream;
+      $("shared").srcObject = call.remoteShareStream;
       // ⚠⚠ 出ているかどうかは、⚠ track が有るかではなく ⚠ frames が来ているかで決める。
       //   ⚠ 2 本目は通話が始まった時点で開いており、⚠ 誰も出していない間も track は在る。
-      call.onShared((showing) => {
-        shared.hidden = !showing;
+      // ⚠ カメラとマイクは 相手が言ったことしか分からない ― ⚠ メディアからは読めない。
+      call.onPeerState((state) => {
+        $("shared").hidden = !state.showing;
+        $("remote").hidden = !state.camera;
+        $("peer-state").textContent = peerWords(state);
       });
 
 

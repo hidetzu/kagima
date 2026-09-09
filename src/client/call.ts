@@ -15,7 +15,7 @@
 // ⚠ **So this exposes what a check needs to read frames**, ⚠ **and never reports success on the
 //   ⚠ strength of a state name.**
 
-import { NOTICE_CHANNEL, type Notice, readNotice, writeNotice } from "../call/notice.ts";
+import { NOTICE_CHANNEL, readNotice, type SideState, writeNotice } from "../call/notice.ts";
 import { driveRestart, onIncomingOffer, restartDelaysFor } from "../call/restart.ts";
 
 /**
@@ -87,26 +87,42 @@ export type Call = {
   stopSharing(): void;
   sharing(): boolean;
   /**
-   * ⚠⚠ **Whether the other side's screen is carrying frames right now** (`docs/adr/0033`).
+   * ⚠ **Turn the camera off, ⚠ or on again** (`docs/adr/0033` 決定 4).
    *
-   * ⚠ **Not "is there a track".** ⚠ **The second m= section is open from the moment the call is
-   * built, ⚠ so a track is there the whole time and says nothing.**
-   *
-   * ⚠ **Starting and stopping are read from two different places, ⚠ and that is not tidiness:**
-   * ⚠ **`unmute` — the W3C's own word for media arriving — ⚠ says a share started;**
-   * ⚠ **nothing in the media path says one ended** (`src/call/notice.ts`), ⚠ **so the other side
-   * has to say so.**
-   * ⚠ **Called once with the state as it is now, ⚠ then again on every change.**
+   * ⚠ **Off stops the track** (`.claude/rules/security.md` § 5) — ⚠ **a hidden `<video>` with a
+   * live track is a camera that is still on, ⚠ and the tally light is the only thing the person
+   * can see.** ⚠ **So on again has to ask for the camera again, ⚠ and can be refused.**
    */
-  onShared(handler: (showing: boolean) => void): void;
+  setCamera(on: boolean): Promise<void>;
   /**
-   * ⚠ **Whether this side is showing its own screen right now.**
+   * ⚠ **Mute, ⚠ or unmute** (`docs/adr/0033` 決定 4).
+   *
+   * ⚠ **`enabled = false`, ⚠ NOT a stopped track** — ⚠ **nothing leaves, ⚠ and coming back does
+   * not need the microphone asked for again.** ⚠ **This is the one place the two differ on
+   * purpose**: ⚠ **there is no lamp for a microphone, ⚠ and mute gets pressed often.**
+   */
+  setMicrophone(on: boolean): void;
+  /**
+   * ⚠ **What this side is putting into the call right now.**
    *
    * ⚠ **The browser's own "stop sharing" bar ends a share without the page being asked**, ⚠ **so a
    * button labelled from what the page last did goes stale.** ⚠ **Called once with the state as it
    * is now, ⚠ then again on every change, ⚠ whoever caused it.**
    */
-  onSharing(handler: (sharing: boolean) => void): void;
+  onMyState(handler: (state: SideState) => void): void;
+  /**
+   * ⚠⚠ **What the other side is putting into the call right now** (`docs/adr/0033`).
+   *
+   * ⚠ **`showing` is not "is there a track".** ⚠ **The second m= section is open from the moment
+   * the call is built, ⚠ so a track is there the whole time and says nothing.** ⚠ **A share is
+   * showing when the other side says so AND frames are arriving** — ⚠ **`unmute` is the W3C's own
+   * word for the second half.**
+   * ⚠ **`camera` and `microphone` are what the other side said, ⚠ and nothing else can know them.**
+   * ⚠ **Before it has said anything, ⚠ everything reads as on** — ⚠ **that is what a call starts
+   * as, ⚠ and "it has not said" is not "it said no"** (`.claude/rules/evidence.md`).
+   * ⚠ **Called once with the state as it is now, ⚠ then again on every change.**
+   */
+  onPeerState(handler: (state: SideState) => void): void;
   /** ⚠ **The offerer starts negotiation.** ⚠ Both sides answering, or neither, is a deadlock. */
   start(): Promise<void>;
   state(): CallState;
@@ -121,6 +137,13 @@ export type CallOptions = {
   readonly iceServers?: RTCIceServer[];
   /** ⚠ Injected so a check can run without a camera. ⚠ The default is the real one. */
   readonly getMedia?: () => Promise<MediaStream>;
+  /**
+   * ⚠ **Asked for again when the camera comes back on** (`docs/adr/0033` 決定 4).
+   * ⚠ **Separate from `getMedia` because it must not ask for the microphone a second time** —
+   * ⚠ **the microphone was never given up, ⚠ and asking again would be a second permission
+   * prompt for something already granted.**
+   */
+  readonly getCamera?: () => Promise<MediaStream>;
   /**
    * ⚠⚠ **Whether an offer sent right now would actually leave this page** (kagima#89).
    *
@@ -148,6 +171,10 @@ export const defaultGetMedia = (): Promise<MediaStream> =>
  */
 const defaultGetDisplay = (): Promise<MediaStream> =>
   navigator.mediaDevices.getDisplayMedia({ video: true });
+
+/** ⚠ **The camera on its own**, ⚠ for turning it back on (`docs/adr/0033` 決定 4). */
+const defaultGetCamera = (): Promise<MediaStream> =>
+  navigator.mediaDevices.getUserMedia({ video: true });
 
 /**
  * ⚠ **Why permission failure is separated from everything else.**
@@ -218,35 +245,57 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
   const remoteShareStream = new MediaStream();
   const shareStream = new MediaStream();
 
-  const sharingHandlers: ((sharing: boolean) => void)[] = [];
-  const sharingNow = (): boolean => shareStream.getVideoTracks().length > 0;
-  const tellSharing = (): void => {
-    const sharing = sharingNow();
-    for (const handler of sharingHandlers) handler(sharing);
+  /** ⚠ **The face's own video sender.** ⚠ **`replaceTrack` on it never renegotiates.** */
+  const faceVideoSender = (): RTCRtpSender | undefined => {
+    for (const transceiver of faceTransceivers) {
+      if (transceiver.receiver.track?.kind === "video") return transceiver.sender;
+    }
+    return undefined;
   };
 
-  const sharedHandlers: ((showing: boolean) => void)[] = [];
+  const sharingNow = (): boolean => shareStream.getVideoTracks().length > 0;
+  // ⚠ **`live` and not merely present.** ⚠ **Camera off stops the track** (`docs/adr/0033` 決定 4),
+  //   ⚠ **and a stopped track that is still in the stream would read as a camera still on.**
+  const cameraOn = (): boolean => localStream.getVideoTracks().some((t) => t.readyState === "live");
+  // ⚠ **`enabled`, ⚠ not `readyState`.** ⚠ **Mute is deliberately not a stopped track.**
+  const microphoneOn = (): boolean => localStream.getAudioTracks().some((t) => t.enabled);
+  const myState = (): SideState => ({
+    showing: sharingNow(),
+    camera: cameraOn(),
+    microphone: microphoneOn(),
+  });
+
   /**
-   * ⚠⚠ **What the other side last said about its own screen.** ⚠ `null` until it has said anything.
+   * ⚠⚠ **What the other side last said it was doing.** ⚠ `null` until it has said anything.
    *
    * ⚠ **Measured on 2026-09-09, Chromium: ⚠ `replaceTrack(null)` on the sending side does NOT
    * ⚠ mute the receiving track.** ⚠ **The `<video>` froze on the last frame and stayed there for
-   * ⚠ the 30 s the check waited.** ⚠ **So "they stopped showing" cannot be read off the media —
+   * ⚠ the 30 s the check waited.** ⚠ **So "they stopped" cannot be read off the media —
    * ⚠ it has to be said.**
    */
-  let toldShowing: boolean | null = null;
-  const showingShared = (): boolean =>
-    (toldShowing ?? true) &&
+  let told: SideState | null = null;
+  const framesOnShare = (): boolean =>
     remoteShareStream.getVideoTracks().some((t) => !t.muted && t.readyState === "live");
-  const tellShared = (): void => {
-    const showing = showingShared();
-    for (const handler of sharedHandlers) handler(showing);
+  const peerState = (): SideState => ({
+    // ⚠ **Both halves.** ⚠ **"They pressed the button" and "frames are here" are different facts,
+    //   ⚠ and a page that showed the first would show an empty box.**
+    showing: (told?.showing ?? true) && framesOnShare(),
+    camera: told?.camera ?? true,
+    microphone: told?.microphone ?? true,
+  });
+
+  const myHandlers: ((state: SideState) => void)[] = [];
+  const peerHandlers: ((state: SideState) => void)[] = [];
+  const tellPeerState = (): void => {
+    const state = peerState();
+    for (const handler of peerHandlers) handler(state);
   };
 
-  // ⚠⚠ **"I am showing my screen now" goes browser to browser, ⚠ never through our server**
-  //   (`docs/adr/0033`, `CLAUDE.md` § 3: ⚠ **the control plane carries who may join, ⚠ and never
-  //   ⚠ what they say**). ⚠ **Sending it over the signalling socket would hand kagima's own server
-  //   ⚠ a new fact about the call it has no business holding.**
+  // ⚠⚠ **What each side is putting into the call goes browser to browser, ⚠ never through our
+  //   ⚠ server** (`docs/adr/0033`, `CLAUDE.md` § 3: ⚠ **the control plane carries who may join,
+  //   ⚠ and never what they say**). ⚠ **Sending it over the signalling socket would hand kagima's
+  //   ⚠ own server a running account of when each person showed a screen, ⚠ turned a camera off,
+  //   ⚠ or muted — ⚠ facts it has no business holding.**
   // ⚠ **Only the offerer creates the channel** — ⚠ **the answerer is handed the same one, ⚠ which
   //   ⚠ is the one shape that needs no second negotiation.**
   let notices: RTCDataChannel | null = null;
@@ -257,13 +306,18 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
       //   ⚠ `RTCDataChannel` is ordered and reliable, ⚠ so arrival order is send order.
       const said = readNotice(event.data);
       if (said === null) return;
-      toldShowing = said.showing;
-      tellShared();
+      told = said;
+      tellPeerState();
     });
+    // ⚠ **Say where this side stands the moment there is a way to.** ⚠ **Otherwise a side that
+    //   ⚠ muted before the channel opened stays "on" on the other screen until it presses again.**
+    channel.addEventListener("open", () => announce());
   };
-  const say = (notice: Notice): void => {
+  const announce = (): void => {
+    const state = myState();
+    for (const handler of myHandlers) handler(state);
     if (notices?.readyState !== "open") return;
-    notices.send(writeNotice(notice));
+    notices.send(writeNotice(state));
   };
   if (options.isOfferer) {
     notices = pc.createDataChannel(NOTICE_CHANNEL);
@@ -284,9 +338,9 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
       // ⚠ `addtrack` does not fire for a track a script adds — ⚠ the event belongs to the browser
       //   ⚠ adding one. ⚠ So the pages are told here, ⚠ where it actually happened.
       for (const name of ["unmute", "mute", "ended"]) {
-        event.track.addEventListener(name, tellShared);
+        event.track.addEventListener(name, tellPeerState);
       }
-      tellShared();
+      tellPeerState();
       return;
     }
     for (const track of event.streams[0]?.getTracks() ?? [event.track]) {
@@ -446,14 +500,12 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
       video.addEventListener("ended", () => {
         for (const track of shareStream.getTracks()) shareStream.removeTrack(track);
         void shareTransceiver()?.sender.replaceTrack(null);
-        say({ showing: false });
-        tellSharing();
+        announce();
       });
       shareStream.addTrack(video);
       // ⚠ Negotiated already, ⚠ or not at all. ⚠ Nothing here starts a negotiation.
       await shareTransceiver()?.sender.replaceTrack(video);
-      say({ showing: true });
-      tellSharing();
+      announce();
     },
 
     stopSharing() {
@@ -466,22 +518,54 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
       void shareTransceiver()?.sender.replaceTrack(null);
       // ⚠⚠ **The other side is told.** ⚠ **Nothing in the media path says a share ended, ⚠ so
       //   ⚠ without this their `<video>` keeps the last frame of a screen that is no longer shared.**
-      say({ showing: false });
-      tellSharing();
+      announce();
     },
 
     sharing() {
       return sharingNow();
     },
 
-    onShared(handler) {
-      sharedHandlers.push(handler);
-      handler(showingShared());
+    async setCamera(on) {
+      if (on === cameraOn()) return;
+      if (!on) {
+        // ⚠⚠ **Stopped, ⚠ not detached** (`.claude/rules/security.md` § 5).
+        //   ⚠ **The tally light is the only thing the person can see, ⚠ and it must go out.**
+        // ⚠ **Taken out of `localStream` too**: ⚠ **the local preview holds whatever is in the
+        //   ⚠ stream, ⚠ and a stopped track left in it freezes on the last frame.**
+        for (const track of localStream.getVideoTracks()) {
+          track.stop();
+          localStream.removeTrack(track);
+        }
+        await faceVideoSender()?.replaceTrack(null);
+        announce();
+        return;
+      }
+      // ⚠ **Asked for again, ⚠ because it was given up.** ⚠ **This can be refused, ⚠ and the
+      //   ⚠ refusal is the caller's to word** (`CLAUDE.md` § 4-1).
+      const fresh = await (options.getCamera ?? defaultGetCamera)();
+      const [video] = fresh.getVideoTracks();
+      if (video === undefined) return;
+      localStream.addTrack(video);
+      // ⚠ Already negotiated. ⚠ Nothing here starts a negotiation.
+      await faceVideoSender()?.replaceTrack(video);
+      announce();
     },
 
-    onSharing(handler) {
-      sharingHandlers.push(handler);
-      handler(sharingNow());
+    setMicrophone(on) {
+      // ⚠⚠ **`enabled`, ⚠ not `stop()`** (`docs/adr/0033` 決定 4). ⚠ **Nothing leaves while it is
+      //   ⚠ false, ⚠ and coming back does not ask for the microphone again.**
+      for (const track of localStream.getAudioTracks()) track.enabled = on;
+      announce();
+    },
+
+    onMyState(handler) {
+      myHandlers.push(handler);
+      handler(myState());
+    },
+
+    onPeerState(handler) {
+      peerHandlers.push(handler);
+      handler(peerState());
     },
 
     hangUp() {
