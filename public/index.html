@@ -31,6 +31,11 @@
   <p>合言葉で、ひとときだけ開くプライベート空間をつくります。</p>
   <p class="hint">アカウントは要りません。閉じれば何も残りません。</p>
   <button id="create" type="button">ルームをつくる</button>
+  <!--
+    ⚠⚠ **作れなかったとき** (`docs/adr/0031`)。⚠ 文言は 2 つで、⚠ どちらも 次の一手を言う。
+    ⚠ Guest には出ない ― ⚠ 止まるのは 作成だけである。
+  -->
+  <p class="hint" id="cannot-open" role="status"></p>
 </section>
 
 <section id="after" hidden>
@@ -122,6 +127,7 @@
   import { canShare, SHARE_UNAVAILABLE } from "/client/share.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
+  import { WORDING } from "/quota/ledger.js";
   import { connectReconnecting } from "/client/reconnect.js";
   import { forget, recall, remember } from "/client/remember.js";
   import { cameBack, hostStatus, outranks } from "/status/status.js";
@@ -467,7 +473,15 @@
   // ⚠⚠ **Made now.** ⚠ **Written down before anything can go wrong with the socket** —
   //   ⚠ **a room that exists and is not remembered is a room its own Host cannot get back to.**
   $("create").addEventListener("click", async () => {
-    room = await createRoom();
+    // ⚠⚠ **作れないことがある** (`docs/adr/0031`)。⚠ **その日の分を使い切ったか、⚠ いま混んでいるか。**
+    //   ⚠ **文言は 1 か所にある** (`/quota/ledger.js`) ― ⚠ **扉の断り方と同じ形である。**
+    const made = await createRoom();
+    if ("refused" in made) {
+      $("cannot-open").textContent = WORDING[made.refused];
+      return;
+    }
+    $("cannot-open").textContent = "";
+    room = made.room;
     remember(room);
     await openTheRoom();
   });

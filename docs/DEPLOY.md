@@ -74,6 +74,22 @@ npx wrangler deploy
 ⚠ Paid 化は 実測が上限へ近づいてから
 ```
 
+### ⚠⚠ 2 つめの Durable Object が増えた(⚠ 2026-09-09)
+
+⚠ **[`adr/0031`](adr/0031-give-the-issuer-a-daily-budget-because-the-issuer-is-a-continuing-subject.md)
+の台帳である。** ⚠ **`wrangler.toml` の binding は `LEDGER`、⚠ migration の tag は `v2`。**
+⚠ **`npx wrangler deploy` が そのまま適用する** — ⚠ **手で流すものは無い。**
+
+⚠ **ログに出る 2 行が、⚠ 枠が効いたことを言う:**
+
+```text
+a room was not opened   { why: "spent" | "busy" }   ⚠ 断った。⚠ 誰も、⚠ どの部屋かも言わない
+the day's budget could not be reached               ⚠⚠ 台帳に届かず 断った(fail closed)
+```
+
+⚠⚠ **2 行目が続けて出るなら、⚠ 誰もルームを作れていない。**
+⚠ **上限に達したのではなく、⚠ 台帳に届いていない** — ⚠ **`why` を見る。**
+
 ## ⚠⚠ 出すと、⚠ 通話中の socket が全部切れる
 
 ⚠ **実測 2026-09-06**([kagima#98](https://github.com/hidetzu/kagima/issues/98)):

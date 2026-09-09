@@ -9,6 +9,8 @@
 // ⚠ **So the URL carries only "you may knock here".** ⚠ **A leaked URL lets somebody knock; ⚠ it
 //   ⚠ does not let them in.**
 
+import type { Refusal } from "../quota/ledger.ts";
+
 export type CreatedRoom = {
   readonly roomId: string;
   readonly shareUrl: string;
@@ -26,10 +28,25 @@ export type CreatedRoom = {
   readonly hostKey: string;
 };
 
-export const createRoom = async (origin: string = location.origin): Promise<CreatedRoom> => {
+/**
+ * ⚠⚠ **A room, ⚠ or why there is not one** (`docs/adr/0031`).
+ *
+ * ⚠ **Two outcomes and no third.** ⚠ **Anything else throws** — ⚠ **"the day's budget said no"
+ * and "something went wrong" are different, ⚠ and the reader's next move depends on which**
+ * (`CLAUDE.md` § 4-1).
+ */
+export type RoomOrRefusal = { readonly room: CreatedRoom } | { readonly refused: Refusal };
+
+export const createRoom = async (origin: string = location.origin): Promise<RoomOrRefusal> => {
   const res = await fetch(new URL("/api/rooms", origin), { method: "POST" });
+  if (res.status === 429) {
+    const said = (await res.json().catch(() => ({}))) as { refused?: unknown };
+    // ⚠ A reason we do not know falls to "later" — ⚠ it is the answer that cannot be untrue.
+    //   ⚠ Telling somebody they have used their day up when they have not changes what they do.
+    return { refused: said.refused === "spent" ? "spent" : "busy" };
+  }
   if (!res.ok) throw new Error("the room could not be made");
-  return (await res.json()) as CreatedRoom;
+  return { room: (await res.json()) as CreatedRoom };
 };
 
 /**

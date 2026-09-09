@@ -18,11 +18,17 @@
 //   (`CLAUDE.md` § 4-1).
 import { servedHeaders, servedPath } from "./assets.ts";
 import { handleSignIn } from "./auth/routes.ts";
+import { cookieFrom, readSession, SESSION_COOKIE } from "./auth/session.ts";
+import { logger } from "./log.ts";
 import { isGated, isSignIn, mayPass } from "./gate.ts";
+import { LEDGER_NAME } from "./ledger-object.ts";
+import { hostMark } from "./quota/host-mark.ts";
+import { type Refusal, refusalFrom } from "./quota/ledger.ts";
 import { MAX_ID_ATTEMPTS } from "./room/create-room.ts";
 import { generateRoomId } from "./room/room-id.ts";
 import { ROOM_HEADER } from "./room-object.ts";
 
+export { LedgerObject as Ledger } from "./ledger-object.ts";
 export { RoomObject as Room } from "./room-object.ts";
 
 export type Env = {
@@ -35,6 +41,16 @@ export type Env = {
    * ⚠ **Two calls.**
    */
   readonly ROOM: {
+    idFromName(name: string): unknown;
+    get(id: unknown): { fetch(request: Request): Promise<Response> };
+  };
+  /**
+   * ⚠⚠ **One object for the whole service** (`docs/adr/0031`). ⚠ Declared in `wrangler.toml`.
+   *
+   * ⚠ **The day's budget.** ⚠ **A Durable Object because it runs one call at a time, ⚠ and a
+   * budget that is not atomic is not a budget** (`src/ledger-object.ts` says the rest).
+   */
+  readonly LEDGER: {
     idFromName(name: string): unknown;
     get(id: unknown): { fetch(request: Request): Promise<Response> };
   };
@@ -83,8 +99,84 @@ const gateSecret = (env: Env): string | undefined =>
     ? env.JOIN_TOKEN_SECRET
     : undefined;
 
+/**
+ * ⚠ **The mark for whoever is signed in here**, ⚠ or `null` when nobody is.
+ *
+ * ⚠ **Read from the session this deployment already issued** (`docs/adr/0030`) — ⚠ **the same
+ * cookie the gate read a moment ago, ⚠ and the same secret.**
+ */
+const markOf = async (
+  cookie: string | null,
+  secret: string,
+  at: number,
+): Promise<string | null> => {
+  const session = await readSession(cookieFrom(cookie, SESSION_COOKIE), secret, at);
+  return session === null ? null : await hostMark(session.email, secret);
+};
+
+/**
+ * ⚠⚠ **Why a room could not be made.** ⚠ **A code, ⚠ not a sentence.**
+ *
+ * ⚠ **The words live in one place and the page renders them** (`src/quota/ledger.ts`) — ⚠ **the
+ * same shape the door already uses** (`src/client/guest.ts`).
+ * ⚠ **Never shown to a Guest**: ⚠ **only making a room is stopped** (`docs/adr/0031`).
+ */
+const refusedToOpen = (refused: Refusal): Response =>
+  new Response(JSON.stringify({ refused }), {
+    status: 429,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+
 const roomOf = (pathname: string): string | null =>
   /^\/api\/rooms\/([^/]+)(\/|$)/.exec(pathname)?.[1] ?? null;
+
+/**
+ * ⚠⚠ **Ask the day's budget** (`docs/adr/0031`).
+ *
+ * ⚠ **The URL is a name this object reads and nothing else routes on** — ⚠ **nobody outside can
+ * reach it.**
+ */
+const askTheLedger = (env: Env, body: unknown): Promise<Response> =>
+  env.LEDGER.get(env.LEDGER.idFromName(LEDGER_NAME)).fetch(
+    new Request("https://kagima.invalid/ledger", {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(body),
+    }),
+  );
+
+/**
+ * ⚠⚠ **Take a room out of the budget, ⚠ atomically** (`docs/adr/0031`).
+ *
+ * ⚠ **Checking and recording are one call.** ⚠ **Two calls would let two creates both pass the
+ * check** — ⚠ **and the cap on how many are open is what bounds the overshoot.**
+ * ⚠⚠ **Unreachable is a refusal** (Owner 決定 2026-09-08: ⚠ **fail closed**). ⚠ **A window where
+ * the cap does not apply is a window in which the whole day can be spent.**
+ */
+const claimARoom = async (env: Env, host: string, roomId: string): Promise<Refusal | null> => {
+  let heard: { ok: boolean; said: unknown } | null = null;
+  try {
+    const answer = await askTheLedger(env, { ask: "open", host, roomId });
+    heard = { ok: answer.ok, said: await answer.json() };
+  } catch (error) {
+    // ⚠ Counted, ⚠ so "the ledger could not be reached" is not indistinguishable from a request
+    //   ⚠ that never arrived (`.claude/rules/evidence.md`). ⚠ Names nothing about who or where.
+    logger.info("the day's budget could not be reached", { why: String(error) });
+  }
+  // ⚠ What that means is one function, ⚠ and it fails closed (`src/quota/ledger.ts`).
+  return refusalFrom(heard);
+};
+
+/** ⚠ **The id was already a live room.** ⚠ **Nothing was spent on this claim; ⚠ hand it back.** */
+const giveBackARoom = async (env: Env, roomId: string): Promise<void> => {
+  try {
+    await askTheLedger(env, { ask: "give-back", roomId });
+  } catch (error) {
+    // ⚠ Not fatal: ⚠ the row holds one room's worth of the cap until the day turns, ⚠ and the
+    //   ⚠ caller is about to try another id. ⚠ Said so it can be counted.
+    logger.info("a room claim could not be handed back", { why: String(error) });
+  }
+};
 
 /**
  * ⚠⚠ **Hand a request to one room's object.**
@@ -185,11 +277,39 @@ export default {
     //   ⚠ than overwrites, ⚠ so a name that is already a live room comes back refused and we try
     //   ⚠ another** (`src/room/create-room.ts`).
     if (url.pathname === "/api/rooms" && request.method === "POST") {
+      // ⚠⚠ **Whose day this comes out of** (`docs/adr/0031`).
+      //
+      // ⚠ **The budget exists because the side that issues a room is a continuing subject**
+      //   (`docs/adr/0030`, `docs/DISCOVERY.md` § 9 の 仮説 D). ⚠⚠ **So where there is no
+      //   ⚠ sign-in there is no subject, ⚠ and nothing to give a budget to** — ⚠ **and there is
+      //   ⚠ no gate either, ⚠ which is the same configuration** (`gateSecret`).
+      // ⚠ **That configuration is `wrangler dev --local` with nothing set.** ⚠ **A deploy always
+      //   ⚠ has both** (`docs/DEPLOY.md`), ⚠ **and `docs/SPEC.md` says which claim holds where.**
+      const secret = gateSecret(env);
+      const mark =
+        secret === undefined
+          ? null
+          : await markOf(request.headers.get("cookie"), secret, Date.now());
+      if (secret !== undefined && mark === null) {
+        // ⚠ The gate is on, ⚠ so a session was read a moment ago and this cannot happen.
+        //   ⚠ It is ours if it does — ⚠ and it fails closed rather than making a free room.
+        logger.info("a room was asked for with no subject to charge it to");
+        return refusedToOpen("busy");
+      }
+
       for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-        const answer = await askTheRoom(env, generateRoomId(), request);
+        const roomId = generateRoomId();
+        if (mark !== null) {
+          const refused = await claimARoom(env, mark, roomId);
+          // ⚠ Not retried. ⚠ Another id would meet the same budget, ⚠ and a loop against a cap
+          //   ⚠ is just the cap being asked eight times.
+          if (refused !== null) return refusedToOpen(refused);
+        }
+        const answer = await askTheRoom(env, roomId, request);
         // ⚠ 503 is what `handle` answers when the id was taken (`src/server.ts`).
         //   ⚠ It says nothing about which id, ⚠ and there is nothing here to leak.
         if (answer.status !== 503) return answer;
+        if (mark !== null) await giveBackARoom(env, roomId);
       }
       // ⚠ Says what happened, ⚠ and names nothing that was tried.
       return new Response(

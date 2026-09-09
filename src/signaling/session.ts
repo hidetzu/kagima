@@ -49,6 +49,17 @@ export type SessionOptions = {
    * rather than like us** (kagima#11).
    */
   readonly touch?: (roomId: string) => void;
+  /**
+   * ⚠⚠ **How long this room has been held by at least one socket, ⚠ this time** (`docs/adr/0031`).
+   *
+   * ⚠ **The room's own wall-clock, ⚠ not the sum of its sockets** — ⚠ **two people for thirty
+   * minutes is thirty minutes** (`docs/adr/0022`). ⚠ **so a reconnect and a re-join cannot count
+   * twice: ⚠ the unit already says so.**
+   * ⚠ **Called on the heartbeat with `stillHolding`, ⚠ and once more with `false` when the last
+   * socket goes** — ⚠ **that last call is the one that closes the span.**
+   * ⚠ **Absent means nobody is counting** (⚠ Node has no ledger — ⚠ `src/worker.ts` says why).
+   */
+  readonly usedSoFar?: (roomId: string, socketOpenMs: number, stillHolding: boolean) => void;
   readonly now?: () => number;
   readonly heartbeatMs?: number;
 };
@@ -172,6 +183,10 @@ export const createSessions = (options: SessionOptions): Sessions => {
       missed += 1;
       // ⚠ Still here. ⚠ The room's idle clock is pushed back by the same beat that proves it.
       options.touch?.(roomId);
+      // ⚠ And the same beat says how long this room has been held (`docs/adr/0031`).
+      //   ⚠ On the beat, ⚠ because a room that is never closed still costs.
+      const since = roomOpenedAt.get(roomId);
+      if (since !== undefined) options.usedSoFar?.(roomId, Math.round(now() - since), true);
       pingNumber += 1;
       socket.send(pingLine(pingNumber));
     }, heartbeatMs);
@@ -295,12 +310,16 @@ export const createSessions = (options: SessionOptions): Sessions => {
           const from = roomOpenedAt.get(roomId);
           roomOpenedAt.delete(roomId);
           if (from !== undefined) {
+            const socketOpenMs = Math.round(now() - from);
             logger.info("a room stopped holding sockets", {
               roomId,
               // ⚠ Named for exactly what it is: ⚠ wall-clock with at least one socket open.
               //   ⚠ ⚠ Not "the duration charged" — ⚠ see the note where this starts.
-              socketOpenMs: Math.round(now() - from),
+              socketOpenMs,
             });
+            // ⚠⚠ **The span is closed** (`docs/adr/0031`). ⚠ **Said last, ⚠ so whatever counts it
+            //   ⚠ can add this span to the room's running total and stop.**
+            options.usedSoFar?.(roomId, socketOpenMs, false);
           }
         }
       },
