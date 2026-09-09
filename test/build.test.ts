@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { build } from "../scripts/build.ts";
 import { isServedPath } from "../src/assets.ts";
+import { reachableFrom } from "./reachable.ts";
 import { codeOf } from "./source-text.ts";
 
 const read = (path: string): string => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -58,7 +59,7 @@ test("⚠ nothing the browser is served is read out of src/", () => {
   }
 });
 
-test("⚠⚠ every module the pages import is one the build writes and the server serves", () => {
+test("⚠⚠ every module the pages import is one the build writes and the server serves", async () => {
   // ⚠⚠ **This is the drift a build step buys.** ⚠ **The pages ask for `/client/guest.js`; ⚠ the
   //   ⚠ build writes `dist/client/guest.js`; ⚠ the route table maps one to the other.**
   // ⚠ **Three lists, ⚠ and nothing but this makes them agree.**
@@ -67,10 +68,12 @@ test("⚠⚠ every module the pages import is one the build writes and the serve
   const written = new Set(build().map((f) => f.replace(/^dist\//, "/")));
 
   let checked = 0;
+  const directly = new Set<string>();
   for (const page of ["public/index.html", "public/room.html"]) {
     const html = read(page);
     for (const match of html.matchAll(/from\s+"(\/[^"]+)"/g)) {
       const specifier = match[1] ?? "";
+      directly.add(specifier);
       checked++;
       assert.ok(
         written.has(specifier),
@@ -84,5 +87,23 @@ test("⚠⚠ every module the pages import is one the build writes and the serve
   }
   // ⚠ Never assert zero imports and call it a pass (`.claude/rules/evidence.md`).
   assert.ok(checked > 0, "no imports found in the pages — ⚠ this check has gone stale");
-  console.log(`  observed: ${checked} imports across 2 pages, all built and all served`);
+
+  // ⚠⚠ **And what those modules load in turn** (`CLAUDE.md` § 9: ⚠ **a wall about what a file
+  //   ⚠ *does* must follow what it *loads*** — ⚠ **the same gap, ⚠ in a different wall**).
+  // ⚠ **A page's own import list is the shallow half.** ⚠ **`src/client/call.ts` importing
+  //   ⚠ `../call/notice.ts` is invisible to it, ⚠ and a module the build never writes is a 404 the
+  //   ⚠ browser reports as nothing at all** — ⚠ **the page simply never runs, ⚠ and the failure
+  //   ⚠ surfaces somewhere unrelated.** ⚠ **Measured 2026-09-09: ⚠ it surfaced as a 15 s timeout
+  //   ⚠ waiting for the room's URL, ⚠ four steps away from the missing file.**
+  const entries = [...directly].map((specifier) => `src${specifier.replace(/\.js$/, ".ts")}`);
+  for (const file of await reachableFrom(entries)) {
+    const specifier = `/${file.replace(/^src\//, "").replace(/\.ts$/, ".js")}`;
+    checked++;
+    assert.ok(written.has(specifier), `${file} is loaded by a page, and the build never writes it`);
+    assert.ok(
+      isServedPath(specifier),
+      `${file} is loaded by a page, and the server never serves it`,
+    );
+  }
+  console.log(`  observed: ${checked} modules reachable from 2 pages, all built and all served`);
 });
