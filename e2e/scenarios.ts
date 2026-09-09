@@ -56,6 +56,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "a screen put into the call arriving on the other side as a second video, beside the face",
   },
   {
+    name: "hands-off",
+    sees: "the camera going off stopping the track, mute leaving it running, and both saying so on the other side",
+  },
+  {
     name: "the-guest-comes-back",
     sees: "a Guest whose socket dropped coming back on its own, so a deploy is a blip and not an ending",
   },
