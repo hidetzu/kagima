@@ -71,7 +71,9 @@ test("⚠⚠ every module the pages import is one the build writes and the serve
   const directly = new Set<string>();
   for (const page of ["public/index.html", "public/room.html"]) {
     const html = read(page);
-    for (const match of html.matchAll(/from\s+"(\/[^"]+)"/g)) {
+    // ⚠⚠ **`<link rel="stylesheet">` も同じ 3 つのリストに乗る** ― ⚠ **配られなければ
+    //   ⚠ ページは 素の HTML になり、⚠ しかもブラウザは何も言わない。**
+    for (const match of html.matchAll(/(?:from\s+"|href=")(\/[^"]+)"/g)) {
       const specifier = match[1] ?? "";
       directly.add(specifier);
       checked++;

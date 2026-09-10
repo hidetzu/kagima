@@ -64,7 +64,7 @@ const rewriteImports = (code: string): string =>
  * Assets binding serves one directory, ⚠ and everything the browser loads has to be in it.**
  * ⚠ **Node still reads `public/` directly** — ⚠ **the route map says so** (`src/assets.ts`).
  */
-const PAGES = ["public/index.html", "public/room.html"];
+const PAGES = ["public/index.html", "public/room.html", "public/style.css"];
 
 export const build = (): readonly string[] => {
   rmSync(OUT, { recursive: true, force: true });

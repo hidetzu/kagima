@@ -7,23 +7,7 @@
   ⚠ never told it.
 -->
 <meta name="referrer" content="no-referrer" />
-<style>
-  body { font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 34rem; padding: 1.5rem; }
-  h1 { font-size: 1.4rem; }
-  label { display: block; margin: 1rem 0 .3rem; }
-  input { font: inherit; padding: .5rem; width: 100%; box-sizing: border-box;
-          border: 1px solid #999; border-radius: .3rem; }
-  button { font: inherit; padding: .5rem .9rem; border-radius: .3rem; border: 1px solid #999;
-           background: #fff; cursor: pointer; margin-top: 1rem; }
-  .hint { color: #555; font-size: .9rem; }
-  video { width: 100%; max-width: 16rem; background: #222; border-radius: .3rem; display: block; }
-  /* ⚠ 「ここ」を映像の上に置くための入れもの (docs/adr/0033 決定 3)。 */
-  .pic { position: relative; display: inline-block; width: 100%; max-width: 16rem; }
-  .pic:has(video[hidden]) { display: none; }
-  .dot { position: absolute; width: .9rem; height: .9rem; margin: -.45rem 0 0 -.45rem;
-         border-radius: 50%; background: #e33; border: 2px solid #fff;
-         box-shadow: 0 0 .2rem rgba(0,0,0,.6); pointer-events: none; }
-</style>
+<link rel="stylesheet" href="/style.css" />
 
 <h1>kagima</h1>
 
@@ -431,6 +415,10 @@
       $("remote").addEventListener("loadeddata", () => {
         // ⚠ `render` decides, and `ending` outranks this.
         connected = true;
+        // ⚠⚠ **扉が開いた** (Owner 決定 2026-09-11)。⚠ **ここから先は 部屋の中である。**
+        //   ⚠ **合図は「相手の映像が実際に出た」こと** ― ⚠ **`connectionState` ではない。**
+        //   ⚠ **明るさが変わることが、⚠ 入ったことの合図になる** (`public/style.css`)。
+        document.body.dataset.where = "room";
         render();
       });
 

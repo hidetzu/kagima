@@ -24,6 +24,7 @@ export type Served = { readonly file: string; readonly type: string };
 const SERVED: ReadonlyMap<string, { readonly file: string; readonly type: string }> = new Map([
   ["/", { file: "public/index.html", type: "text/html; charset=utf-8" }],
   ["/index.html", { file: "public/index.html", type: "text/html; charset=utf-8" }],
+  ["/style.css", { file: "public/style.css", type: "text/css; charset=utf-8" }],
   ["/client/host.js", { file: "dist/client/host.js", type: "text/javascript; charset=utf-8" }],
   ["/client/guest.js", { file: "dist/client/guest.js", type: "text/javascript; charset=utf-8" }],
   [
