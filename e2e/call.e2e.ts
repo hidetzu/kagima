@@ -17,6 +17,7 @@ import { createConnection, createServer as createTcpServer, type Socket } from "
 import { after, test } from "node:test";
 import { type Browser, chromium, type Page } from "playwright";
 import { startServer } from "../src/node-server.ts";
+import { POINT_LINGERS_MS } from "../src/client/pointing.ts";
 import { titleOf } from "./scenarios.ts";
 
 // ⚠ **One server per case, on its own port.**
@@ -1217,18 +1218,51 @@ test(titleOf("over-here"), async () => {
   );
   assert.equal(alsoOnFace, true, "the same point also landed on the face");
 
-  // ⚠ 指を離したことは 言う ― ⚠ 消えないと、⚠ 指していない場所を指し続ける。
+  // ⚠⚠ **指を離しても、⚠ しばらく残る** (⚠ Owner 決定 2026-09-11, `POINT_LINGERS_MS`)。
+  //   ⚠ **指は 押しているあいだしか存在しない。** ⚠ **すぐ消すと、⚠ 相手が顔を上げる前に
+  //   ⚠ 「ここ」が終わっている。**
+  // ⚠ **測って確かめる ― ⚠ 「まだ出ている」を 1 回読むだけでは、⚠ 通知が届いていないだけの
+  //   ⚠ ときにも通ってしまう** (`.claude/skills/change-review/SKILL.md` § 4)。
+  const letGoAt = Date.now();
   await guest.page.mouse.move(1, 1);
   await waitForDot(host.page, "shared-mine", false);
-  console.log("  observed: taking the finger away took the dot away");
+  const lingered = Date.now() - letGoAt;
+  assert.ok(
+    lingered >= POINT_LINGERS_MS - 500,
+    `the dot went after ${lingered}ms, and it is meant to stay about ${POINT_LINGERS_MS}ms`,
+  );
+  console.log(`  observed: the dot stayed ${lingered}ms after the finger went, and then went`);
 
-  // ⚠⚠ **指では、⚠ 押しているあいだしか 出ない** (⚠ 実測 2026-09-11、⚠ Chromium)。
+  // ⚠⚠ **触れただけで 出る** (⚠ 実測 2026-09-11、⚠ 実機、⚠ Owner の報告)。
   //
   // ⚠ **`touchscreen.tap` が出すのは `pointerdown` / `pointerup` / `pointerout` / `pointerleave`
-  //   ⚠ の 4 つで、⚠ `pointermove` は 1 つも出ない。**
-  // ⚠ **so 滑らせない tap は、⚠ 点を出して 同じ動作のうちに 消す。**
-  // ⚠⚠ **指を離したあと 点を残すかどうかは 見せ方であり、⚠ Owner のものである** — ⚠ **決まるまで
-  //   ⚠ ここでは主張しない。** ⚠ **`docs/adr/0033` に 測ったことだけ書いてある。**
+  //   ⚠ の 4 つで、⚠ `pointermove` は 1 つも出ない。** ⚠ **マウスは 押さずに動くので、⚠ この
+  //   ⚠ 不具合は マウスでは 出なかった** — ⚠ **検査が 指を使っていなかったから 見えなかった。**
+  // ⚠ **so ここは 指で触る。** ⚠ **滑らせない。**
+  const spot = await guest.page.locator("#shared").boundingBox();
+  assert.ok(spot !== null, "the guest has no shared screen to touch");
+  await guest.page.touchscreen.tap(spot.x + spot.width * 0.5, spot.y + spot.height * 0.75);
+  await waitForDot(host.page, "shared-mine", true);
+  const tapped = await dotOn(host.page, "shared-mine");
+  assert.ok(
+    Math.abs(tapped.x - 0.5) < 0.03 && Math.abs(tapped.y - 0.75) < 0.03,
+    `a tap landed at ${JSON.stringify(tapped)}, and 0.5 / 0.75 was touched`,
+  );
+  console.log("  observed: a tap that never slid was still ここ");
+
+  // ⚠⚠ **指しなおしたら、⚠ さっきの「手放す」は 起きない**
+  //   (`.claude/skills/change-review/SKILL.md` § 4: ⚠ **条件が変わったのに 仕掛けたままの timer**)。
+  // ⚠ **マウスが 縁を跨ぐたびに起きる並びである。** ⚠ **消し忘れると、⚠ いま指している点が
+  //   ⚠ 3 秒後に 勝手に消える。**
+  await guest.page.mouse.move(1, 1);
+  await pointAt("shared", 0.4, 0.6);
+  await waitForDot(host.page, "shared-mine", true);
+  await new Promise((r) => setTimeout(r, POINT_LINGERS_MS + 700));
+  const stillThere = await host.page.evaluate(
+    () => document.getElementById("dot-shared-mine")?.hidden === false,
+  );
+  assert.equal(stillThere, true, "pointing again did not call off the earlier letting-go");
+  console.log("  observed: pointing again called off the letting-go that was already armed");
 
   // ⚠⚠ **カメラ映像の上でも。** ⚠ **決定 1 で「スマホはカメラを向けて見せる」と決めた以上、
   //   ⚠ 見せている側がスマホなら 指す先は カメラ映像である**(Owner 決定 2026-09-09)。

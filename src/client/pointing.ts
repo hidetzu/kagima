@@ -41,6 +41,20 @@ const byId = (id: string): HTMLElement | null => document.getElementById(id);
 /** ⚠ **A border can put the finger a pixel outside its own box.** ⚠ **That is not nonsense.** */
 const within = (fraction: number): number => Math.min(1, Math.max(0, fraction));
 
+/**
+ * ⚠⚠ **How long the spot stays after the finger goes** (⚠ Owner 決定 2026-09-11).
+ *
+ * ⚠ **A finger only exists while it is pressed** (⚠ 実測 2026-09-11: ⚠ a tap produces no
+ * `pointermove` at all). ⚠ **So without this, ⚠ "ここ" on a phone is gone before the other person
+ * has looked up** — ⚠ **and what it is for is exactly that moment.**
+ *
+ * ⚠ **A few seconds, ⚠ and then nothing.** ⚠ **Leaving it there until the next touch would be a
+ * mark rather than a pointer**, ⚠ **and `docs/PRODUCT.md` § 3 keeps a whiteboard out of v0.1.0.**
+ * ⚠ **The same rule for a mouse**: ⚠ **one behaviour is one thing to explain, ⚠ and the promise
+ * is the same either way — ⚠ where somebody pointed stays for a moment.**
+ */
+export const POINT_LINGERS_MS = 3_000;
+
 export const wirePointing = (call: Pointing): void => {
   call.onPeerPoint((point) => {
     for (const id of Object.values(PICTURE)) {
@@ -81,9 +95,18 @@ export const wirePointing = (call: Pointing): void => {
     // ⚠ **On a mouse this never showed: ⚠ hovering moves the pointer without pressing anything.**
     // ⚠ **Sent straight away rather than queued for the next frame**: ⚠ **this is the moment the
     //   ⚠ person meant, ⚠ and there is nothing yet for it to overtake.**
+    // ⚠ **Pointing again cancels the letting-go that was already scheduled.**
+    let letGo: ReturnType<typeof setTimeout> | null = null;
+    const stillPointing = (): void => {
+      if (letGo === null) return;
+      clearTimeout(letGo);
+      letGo = null;
+    };
+
     picture.addEventListener("pointerdown", (event) => {
       const where = whereIn(event);
       if (where === null) return;
+      stillPointing();
       queued = where;
       call.point(at, where.x, where.y);
     });
@@ -91,6 +114,7 @@ export const wirePointing = (call: Pointing): void => {
     picture.addEventListener("pointermove", (event) => {
       const where = whereIn(event);
       if (where === null) return;
+      stillPointing();
       queued = where;
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
@@ -100,10 +124,16 @@ export const wirePointing = (call: Pointing): void => {
     });
     // ⚠ **The finger leaving is said** — ⚠ **it is not the absence of a message**
     //   (`.claude/rules/evidence.md`: ⚠ nothing arrived ≠ it was not sent).
+    // ⚠⚠ **Said late, ⚠ on purpose** (`POINT_LINGERS_MS`, ⚠ Owner 決定 2026-09-11).
+    //   ⚠ **The spot is what the other person has to look at, ⚠ and they have not looked yet.**
     for (const name of ["pointerleave", "pointercancel"]) {
       picture.addEventListener(name, () => {
         queued = null;
-        call.point("nowhere", 0, 0);
+        stillPointing();
+        letGo = setTimeout(() => {
+          letGo = null;
+          call.point("nowhere", 0, 0);
+        }, POINT_LINGERS_MS);
       });
     }
   }
