@@ -302,6 +302,14 @@ test(titleOf("frames"), async () => {
   //   ⚠ The wall against it becoming an element is on the display side, and this is that wall.
   const NAME = "アン<b>x</b>";
   const guest = await openGuest(b, host.shareUrl, NAME);
+
+  // ⚠⚠ **扉が開くまでは 廊下である** (Owner 決定 2026-09-11, `public/style.css`)。
+  //   ⚠ **招かれた側が 最初に見るのは 明るい画面であって、⚠ 暗い部屋ではない。**
+  const where = (page: Page): Promise<string> =>
+    page.evaluate(() => document.body.dataset["where"] ?? "hall");
+  assert.equal(await where(guest.page), "hall", "the guest was in the room before being let in");
+  assert.equal(await where(host.page), "hall", "the host was in the room before anybody arrived");
+
   await decideAtTheDoor(host.page, true);
 
   const hostFrames = await waitForFrames(host.page, "the host");
@@ -321,6 +329,16 @@ test(titleOf("frames"), async () => {
   );
   const told = await text(host.page, "status");
   console.log(`  observed: the host was told "${told}"`);
+
+  // ⚠⚠ **相手が映ったら 部屋の中である。** ⚠ **合図は 映像であって `connectionState` ではない**
+  //   ― ⚠ **繋がったと言いながら 何も映らない状態で 暗くしたら、⚠ それは嘘である。**
+  await host.page.waitForFunction(() => document.body.dataset["where"] === "room", undefined, {
+    timeout: 15_000,
+  });
+  await guest.page.waitForFunction(() => document.body.dataset["where"] === "room", undefined, {
+    timeout: 15_000,
+  });
+  console.log("  observed: both sides went from the hall into the room when the picture arrived");
 
   // ⚠⚠ Shown, not interpreted. ⚠ The name is in the text and there is no element made from it.
   const becameMarkup = await host.page.evaluate(

@@ -1,0 +1,334 @@
+/*
+  ⚠⚠ **廊下と部屋** (Owner 決定 2026-09-11)。
+
+  ⚠ **入口は明るい廊下、⚠ 扉を通ったら暗い部屋。** ⚠ **切り替わるのは、⚠ 相手の映像が
+    ⚠ 実際に出た瞬間である** ― ⚠ **「扉が開いた」が そのまま 明るさの変化になる。**
+  ⚠ **合図は `<body data-where="room">` ひとつ。** ⚠ **色も、⚠ ボタンの形も、⚠ 映像の大きさも、
+    ⚠ すべて そこから出る** ― ⚠ **2 つの見た目を 2 か所に書かない。**
+
+  ⚠ **2 ページで 1 枚。** ⚠ **`public/index.html` と `public/room.html` は
+    ⚠ 同じ通話画面を持っており、⚠ 見た目を両方に書くと 片方が古くなる**
+    (`CLAUDE.md` § 3)。
+
+  ⚠⚠ **フォントを外から読まない。** ⚠ **`CLAUDE.md` § 3 は「実行時にネットワークへ出る依存」を
+    ⚠ ADR 無しに入れることを禁じている。** ⚠ **so 端末に在れば丸ゴシックを使い、⚠ 無ければ
+    ⚠ その端末の標準に落ちる** ― ⚠ **読み込みは 一度も発生しない。**
+*/
+
+:root {
+  /* ── 廊下 ── */
+  --bg: #ffffff;
+  --ink: #101114;
+  --note: #54596a;
+  --field: #f2f4fa;
+  --edge: #dde3f3;
+  --rule: #e6e9f2;
+  --primary: #0f3cc9;
+  --on-primary: #ffffff;
+  --quiet-edge: #c9cdd8;
+  --quiet-ink: #54596a;
+  --video-bg: #e8ebf3;
+  --video-ink: #7a8098;
+
+  --brand-size: 1.05rem;
+  --brand-ink: var(--primary);
+  --h-size: 1.35rem;
+  --body-size: 16px;
+  --line: 1.8;
+
+  --btn-radius: 8px;
+  --btn-pad: 0.8rem 1rem;
+  --btn-weight: 700;
+  --btn-size: 1.02rem;
+  --btn-border: 2px;
+
+  --face-max: 22rem;
+  --share-max: 22rem;
+
+  /* ⚠ 「ここ」の赤。⚠ 廊下でも部屋でも 同じ 1 色である。 */
+  --here: #e2382a;
+
+  color-scheme: light;
+}
+
+/* ── 部屋 ─────────────────────────────────────────────────
+   ⚠ 扉が開いたら ここに入る。⚠ 見るものは 共有された画面であって、
+   ⚠ 周りではない ― ⚠ so 周りを暗くし、⚠ 顔を小さくする。 */
+body[data-where="room"] {
+  --bg: #0d0f12;
+  --ink: #edeff2;
+  --note: #8a929f;
+  --field: #14181e;
+  --edge: #2c333d;
+  --rule: #23282f;
+  --on-primary: #ffffff;
+  --quiet-edge: #2c333d;
+  --quiet-ink: #a8b1bd;
+  --video-bg: #1b1f26;
+  --video-ink: #6d7684;
+
+  --brand-size: 0.72rem;
+  --brand-ink: #6d7684;
+  --h-size: 1.05rem;
+  --body-size: 15px;
+  --line: 1.65;
+
+  --btn-radius: 999px;
+  --btn-pad: 0.5rem 0.95rem;
+  --btn-weight: 500;
+  --btn-size: 0.88rem;
+  --btn-border: 1px;
+
+  --face-max: 9.5rem;
+  --share-max: 34rem;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 40rem;
+  padding: 1.5rem 1.25rem 3rem;
+  background: var(--bg);
+  color: var(--ink);
+  /* ⚠ 端末に在る丸ゴシックを使い、⚠ 無ければ標準に落ちる。⚠ 外へは取りに行かない。 */
+  font-family:
+    "Hiragino Maru Gothic ProN", "Zen Maru Gothic", "Hiragino Sans", system-ui, sans-serif;
+  font-size: var(--body-size);
+  line-height: var(--line);
+  /* ⚠ 扉が開く瞬間だから、⚠ 色だけは滑らかに変える。⚠ 動くのはここだけである。 */
+  transition:
+    background-color 0.4s ease,
+    color 0.4s ease;
+}
+
+h1 {
+  font-size: var(--brand-size);
+  color: var(--brand-ink);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0 0 1.25rem;
+}
+body[data-where="room"] h1 {
+  letter-spacing: 0.3em;
+  font-weight: 500;
+}
+
+h2 {
+  font-size: var(--h-size);
+  line-height: 1.5;
+  margin: 0 0 0.6rem;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+.hint {
+  color: var(--note);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+
+/* ── 押すもの ────────────────────────────────────────────
+   ⚠ 廊下では 幅いっぱいの 1 手。⚠ 部屋では 小さく丸い。 */
+button {
+  appearance: none;
+  font: inherit;
+  font-size: var(--btn-size);
+  font-weight: var(--btn-weight);
+  cursor: pointer;
+  text-align: center;
+  padding: var(--btn-pad);
+  border-radius: var(--btn-radius);
+  border: var(--btn-border) solid var(--primary);
+  color: var(--primary);
+  background: none;
+}
+body[data-where="room"] button {
+  border-color: var(--edge);
+  color: var(--quiet-ink);
+  background: var(--field);
+}
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+body[data-where="room"] button:focus-visible {
+  outline-color: var(--ink);
+}
+
+/* ⚠ 押してほしい 1 つ。⚠ 塗る。 */
+#create,
+#enter-button,
+#admit {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+
+/* ⚠ 取り消し・やめる。⚠ 押してほしくはないが、⚠ 隠しもしない。 */
+#give-up,
+#deny,
+#close {
+  border-color: var(--quiet-edge);
+  color: var(--quiet-ink);
+  background: none;
+}
+
+/* ⚠ ボタンの並び。⚠ 廊下は縦に積み、⚠ 部屋は横に置く。 */
+p:has(> button),
+#door > .row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+body:not([data-where="room"]) p:has(> button) {
+  flex-direction: column;
+}
+body:not([data-where="room"]) #door > .row > button {
+  flex: 1;
+}
+body[data-where="room"] p:has(> button) > button {
+  flex: 0 0 auto;
+}
+
+/* ── 入力 ── */
+label {
+  display: block;
+  margin: 1rem 0 0.35rem;
+  font-weight: 700;
+}
+input {
+  font: inherit;
+  padding: 0.75rem 0.8rem;
+  width: 100%;
+  border: 2px solid var(--edge);
+  border-radius: var(--btn-radius);
+  background: var(--field);
+  color: var(--ink);
+}
+input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ── 渡すもの ── */
+.field {
+  margin: 1.25rem 0;
+}
+.value {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  word-break: break-all;
+  background: var(--field);
+  border: 2px solid var(--edge);
+  padding: 0.7rem 0.75rem;
+  border-radius: var(--btn-radius);
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* ── 扉 ──────────────────────────────────────────────────
+   ⚠ ここは 1 秒で押される。⚠ so 廊下では いちばん大きく、
+   ⚠ 「入れる」だけを 塗る (⚠ 実測 2026-09-11: ⚠ 赤い塗りは
+   ⚠ 「止める」に読まれた)。 */
+#door {
+  background: var(--field);
+  border: 2px solid var(--primary);
+  border-radius: 10px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+body[data-where="room"] #door {
+  border-width: 1px;
+  border-color: var(--primary);
+}
+#door-who {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+/* ── 見るもの ────────────────────────────────────────────
+   ⚠ 部屋では 共有された画面が主役、⚠ 顔は脇である。 */
+video {
+  width: 100%;
+  background: var(--video-bg);
+  border-radius: 8px;
+  display: block;
+}
+.pic {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: var(--face-max);
+  vertical-align: top;
+  margin: 0 0.35rem 0.5rem 0;
+}
+.pic:has(#shared),
+.pic:has(#shared-mine) {
+  max-width: var(--share-max);
+  display: block;
+  margin-right: 0;
+}
+/* ⚠ 出ていない映像は、⚠ 入れものごと消す。⚠ 空の枠は「壊れている」に見える。 */
+.pic:has(video[hidden]) {
+  display: none;
+}
+
+/* ⚠ 「ここ」。⚠ 廊下でも部屋でも 同じ赤である。 */
+.dot {
+  position: absolute;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: -0.45rem 0 0 -0.45rem;
+  border-radius: 50%;
+  background: var(--here);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0.2rem rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#status,
+#peer-state {
+  color: var(--note);
+}
+#status {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+/* ── 実証実験用。⚠ 製品のためのものではない。 ── */
+details {
+  margin-top: 2rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.75rem;
+}
+summary {
+  cursor: pointer;
+  color: var(--note);
+  font-size: 0.85rem;
+}
+pre {
+  font-size: 0.72rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--field);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.7rem;
+  overflow-x: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none;
+  }
+}
