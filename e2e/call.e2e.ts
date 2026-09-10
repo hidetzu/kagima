@@ -303,12 +303,21 @@ test(titleOf("frames"), async () => {
   const NAME = "アン<b>x</b>";
   const guest = await openGuest(b, host.shareUrl, NAME);
 
-  // ⚠⚠ **扉が開くまでは 廊下である** (Owner 決定 2026-09-11, `public/style.css`)。
-  //   ⚠ **招かれた側が 最初に見るのは 明るい画面であって、⚠ 暗い部屋ではない。**
+  // ⚠⚠ **入口と 通話中で 変わるのは 大きさと形だけである** (Owner 決定 2026-09-11)。
+  //   ⚠ **一度は 明るい入口から 暗い通話へ 色を変える形にした。** ⚠ **実機で見て
+  //   ⚠ 「つながってから色が変わるのは びっくりする」と Owner が判断し、⚠ 差し戻した**
+  //   (`docs/adr/0034`)。
   const where = (page: Page): Promise<string> =>
     page.evaluate(() => document.body.dataset["where"] ?? "hall");
+  const ground = (page: Page): Promise<string> =>
+    page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
   assert.equal(await where(guest.page), "hall", "the guest was in the room before being let in");
   assert.equal(await where(host.page), "hall", "the host was in the room before anybody arrived");
+  const groundBefore = {
+    host: await ground(host.page),
+    guest: await ground(guest.page),
+  };
 
   await decideAtTheDoor(host.page, true);
 
@@ -330,15 +339,26 @@ test(titleOf("frames"), async () => {
   const told = await text(host.page, "status");
   console.log(`  observed: the host was told "${told}"`);
 
-  // ⚠⚠ **相手が映ったら 部屋の中である。** ⚠ **合図は 映像であって `connectionState` ではない**
-  //   ― ⚠ **繋がったと言いながら 何も映らない状態で 暗くしたら、⚠ それは嘘である。**
+  // ⚠⚠ **相手が映ったら 通話中の形になる。** ⚠ **合図は 映像であって `connectionState` では
+  //   ⚠ ない** ― ⚠ **繋がったと言いながら 何も映らない状態は 実在する** (`docs/adr/0034`)。
   await host.page.waitForFunction(() => document.body.dataset["where"] === "room", undefined, {
     timeout: 15_000,
   });
   await guest.page.waitForFunction(() => document.body.dataset["where"] === "room", undefined, {
     timeout: 15_000,
   });
-  console.log("  observed: both sides went from the hall into the room when the picture arrived");
+
+  // ⚠⚠ **そして 色は 1 つも動いていない** (Owner 決定 2026-09-11)。
+  //   ⚠ **これが いちばん戻りやすいところである** ― ⚠ **`data-where` で 1 行 色を足せば、
+  //   ⚠ 「つながった瞬間に画面が変わる」が そのまま帰ってくる。**
+  assert.deepEqual(
+    { host: await ground(host.page), guest: await ground(guest.page) },
+    groundBefore,
+    "the ground changed colour when the call started",
+  );
+  console.log(
+    `  observed: the shape changed and the ground did not (${groundBefore.host} throughout)`,
+  );
 
   // ⚠⚠ Shown, not interpreted. ⚠ The name is in the text and there is no element made from it.
   const becameMarkup = await host.page.evaluate(
