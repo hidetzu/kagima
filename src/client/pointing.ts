@@ -65,13 +65,33 @@ export const wirePointing = (call: Pointing): void => {
     //   ⚠ every extra send is bandwidth spent on a position that was already replaced.**
     let queued: { x: number; y: number } | null = null;
     let frame = 0;
-    picture.addEventListener("pointermove", (event) => {
+    const whereIn = (event: PointerEvent): { x: number; y: number } | null => {
       const box = picture.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0) return;
-      queued = {
+      if (box.width === 0 || box.height === 0) return null;
+      return {
         x: within((event.clientX - box.left) / box.width),
         y: within((event.clientY - box.top) / box.height),
       };
+    };
+
+    // ⚠⚠ **Landing counts** (⚠ 実測 2026-09-11、⚠ 実機、⚠ Owner の報告).
+    //
+    // ⚠ **A finger only produces `pointermove` while it is down** — ⚠ **so a tap that does not
+    //   ⚠ slide produced nothing at all, ⚠ and the person had to move before anything appeared.**
+    // ⚠ **On a mouse this never showed: ⚠ hovering moves the pointer without pressing anything.**
+    // ⚠ **Sent straight away rather than queued for the next frame**: ⚠ **this is the moment the
+    //   ⚠ person meant, ⚠ and there is nothing yet for it to overtake.**
+    picture.addEventListener("pointerdown", (event) => {
+      const where = whereIn(event);
+      if (where === null) return;
+      queued = where;
+      call.point(at, where.x, where.y);
+    });
+
+    picture.addEventListener("pointermove", (event) => {
+      const where = whereIn(event);
+      if (where === null) return;
+      queued = where;
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;

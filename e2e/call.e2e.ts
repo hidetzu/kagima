@@ -178,8 +178,18 @@ const atobNode = (payload: string): string => Buffer.from(payload, "base64url").
  * ⚠ **There is nothing to type but a name.** ⚠ **The wall is the Host's decision.**
  * ⚠ **This does NOT wait to be let in** — ⚠ **that is the Host's move, and each case makes it.**
  */
-const openGuest = async (b: Browser, shareUrl: string, nickname = "ゲスト") => {
-  const context = await b.newContext({ permissions: ["camera", "microphone"] });
+const openGuest = async (
+  b: Browser,
+  shareUrl: string,
+  nickname = "ゲスト",
+  // ⚠ **A finger rather than a mouse.** ⚠ **kagima's Guest is often a phone**
+  //   (`docs/PRODUCT.md` § 3), ⚠ **and the two produce different events entirely.**
+  like: { readonly touch?: boolean } = {},
+) => {
+  const context = await b.newContext({
+    permissions: ["camera", "microphone"],
+    hasTouch: like.touch === true,
+  });
   // ⚠⚠ **Counts every time the camera is reached for** (`docs/PRODUCT.md` § 5).
   //   ⚠ **`kagimaCall` is set after a call succeeds, ⚠ so it cannot show that the camera was
   //   ⚠ asked for and refused.** ⚠ **A mutation that reached for it while waiting walked past a
@@ -1148,7 +1158,8 @@ test(titleOf("over-here"), async () => {
   //   ⚠ **so 面ごとに 1 回ずつ見る: ⚠ 共有画面と、⚠ カメラ映像**(Owner 決定 2026-09-09)。
   const { browser: b, base } = await ready();
   const host = await openHost(b, base);
-  const guest = await openGuest(b, host.shareUrl, "アン");
+  // ⚠⚠ **With a finger** (⚠ 実測 2026-09-11、⚠ 実機). ⚠ **A mouse hovers; ⚠ a finger does not.**
+  const guest = await openGuest(b, host.shareUrl, "アン", { touch: true });
   await decideAtTheDoor(host.page, true);
   await waitForFrames(guest.page, "the guest");
   await waitForPicture(guest.page, "the guest");
@@ -1210,6 +1221,14 @@ test(titleOf("over-here"), async () => {
   await guest.page.mouse.move(1, 1);
   await waitForDot(host.page, "shared-mine", false);
   console.log("  observed: taking the finger away took the dot away");
+
+  // ⚠⚠ **指では、⚠ 押しているあいだしか 出ない** (⚠ 実測 2026-09-11、⚠ Chromium)。
+  //
+  // ⚠ **`touchscreen.tap` が出すのは `pointerdown` / `pointerup` / `pointerout` / `pointerleave`
+  //   ⚠ の 4 つで、⚠ `pointermove` は 1 つも出ない。**
+  // ⚠ **so 滑らせない tap は、⚠ 点を出して 同じ動作のうちに 消す。**
+  // ⚠⚠ **指を離したあと 点を残すかどうかは 見せ方であり、⚠ Owner のものである** — ⚠ **決まるまで
+  //   ⚠ ここでは主張しない。** ⚠ **`docs/adr/0033` に 測ったことだけ書いてある。**
 
   // ⚠⚠ **カメラ映像の上でも。** ⚠ **決定 1 で「スマホはカメラを向けて見せる」と決めた以上、
   //   ⚠ 見せている側がスマホなら 指す先は カメラ映像である**(Owner 決定 2026-09-09)。
