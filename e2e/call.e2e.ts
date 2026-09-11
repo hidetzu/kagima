@@ -932,6 +932,97 @@ test(titleOf("field-test-mode-is-gone"), async () => {
   }
 });
 
+test(titleOf("one-knock-once"), async () => {
+  // ⚠⚠ **実機 2026-09-12** (Owner の報告): ⚠ **「入れる」を押して 相手が入ったあとも、
+  //   ⚠ 「◯◯ さんがノックしています」が 出たままだった。**
+  //
+  // ⚠ **サーバは Host の socket がつながるたびに 待っている人を全員 announce し直す**
+  //   (`src/signaling/session.ts`) ― ⚠ **socket が離れているあいだのノックを取りこぼさない
+  //   ⚠ ためであり、⚠ それ自体は正しい。**
+  // ⚠⚠ **ページが それを積んでいたので、⚠ 1 回の再接続で 同じ人が 2 人になった。**
+  //   ⚠ **「入れる」で 1 つ減らしても もう 1 つ残り、⚠ 入ったあとも 扉に立ち続ける。**
+  const { browser: b } = await ready();
+  const { base, cutEverythingOpen } = await behindAProxy();
+
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "アン");
+
+  // ⚠ 決めない。⚠ 立たせたまま、⚠ socket を切る。
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === false,
+    undefined,
+    {
+      timeout: 20_000,
+    },
+  );
+  assert.equal(await text(host.page, "door-who"), "アン さんがノックしています");
+
+  cutEverythingOpen();
+  console.log("  observed: every open socket was cut while somebody was at the door");
+
+  // ⚠⚠ **落ちているあいだに押しても、⚠ その人は 扉に立ったままである** (⚠ 実機 2026-09-12)。
+  //   ⚠ **`send` が どこにも届かないのに 扉から消していたので、⚠ Host の画面からは
+  //   ⚠ 居なくなり、⚠ 当人は 待ち続けた。**
+  await host.page.click("#admit");
+  assert.equal(
+    await host.page.evaluate(() => document.getElementById("door")?.hidden),
+    false,
+    "the person left the door while the decision could not leave the page",
+  );
+  console.log("  observed: pressing while the socket was down did not take the person away");
+
+  // ⚠⚠ **socket が戻ったことは 診断パネルで見る。** ⚠ **扉は ずっと出ているので、
+  //   ⚠ 扉を待っても 何も待ったことにならない** ― ⚠ **待っていないものを 待ったことにしない。**
+  await host.page.click("#diagnostics > summary");
+  await host.page.waitForFunction(
+    () =>
+      (document.getElementById("diagnostics-text")?.textContent ?? "").includes("socket -> open"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  // ⚠ 戻ると、⚠ サーバは 同じノックを もう一度 announce する。⚠ 扉は 出たままでよい。
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+
+  // ⚠⚠ **一度 決めたら、⚠ 扉は閉じる。** ⚠ **2 回届いた お知らせは、⚠ 2 人ではない。**
+  await decideAtTheDoor(host.page, true);
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === true,
+    undefined,
+    {
+      timeout: 20_000,
+    },
+  );
+  console.log("  observed: one decision closed the door, however many times it was announced");
+
+  for (let i = 0; i < 30; i++) {
+    const seen = await guest.page.evaluate(() => ({
+      call: (globalThis as unknown as { kagimaCall?: unknown }).kagimaCall !== undefined,
+      before: document.getElementById("before")?.hidden,
+      waiting: document.getElementById("waiting")?.hidden,
+      after: document.getElementById("after")?.hidden,
+      error: document.getElementById("error")?.textContent ?? "",
+    }));
+    console.log(`  DEBUG guest ${i}: ${JSON.stringify(seen)}`);
+    if (i === 5 || i === 20) {
+      console.log(
+        `  DEBUG ws: ${JSON.stringify(await guest.page.evaluate(() => (globalThis as unknown as { wsLog: string[] }).wsLog))}`,
+      );
+    }
+    if (seen.call) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  // ⚠ そして その人は 実際に入っている ― ⚠ 扉が閉じただけではない。
+  await waitForFrames(guest.page, "the guest");
+  console.log("  observed: and the person at that door actually came in");
+
+  await host.context.close();
+  await guest.context.close();
+});
+
 test(titleOf("third-person"), async () => {
   // ⚠⚠ **v0.1.0 is two people** (`docs/PRODUCT.md` § 4 — ⚠ **多人数会議 is a non-goal**).
   //
