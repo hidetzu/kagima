@@ -257,8 +257,11 @@ video {
   vertical-align: top;
   margin: 0 0.35rem 0.5rem 0;
 }
-.pic:has(#shared),
-.pic:has(#shared-mine) {
+/* ⚠⚠ **クラスで選ぶ。⚠ id では選ばない** (⚠ 実機 2026-09-12)。
+   ⚠ **`:has(#shared)` は id を含むぶん詳細度が跳ね上がり、⚠ 下の
+   ⚠ 「出ていないものは消す」を 押し潰していた** ― ⚠ **共有していないのに
+   ⚠ 空の灰色の枠が 2 つ、⚠ ずっと出たままだった。** */
+.pic.wide {
   max-width: var(--share-max);
   display: block;
   margin-right: 0;
@@ -271,10 +274,7 @@ video {
 /* ⚠⚠ **顔が縮むのは、⚠ 共有が始まったときだけ** (Owner 決定 2026-09-11)。
    ⚠ **つながった瞬間ではない** ― ⚠ **そこで何かが動く理由は無い。**
    ⚠ **主役が 共有物に移った、⚠ そのときだけ 顔が脇に寄る。** */
-body:has(#shared:not([hidden])) .pic:has(#local),
-body:has(#shared:not([hidden])) .pic:has(#remote),
-body:has(#shared-mine:not([hidden])) .pic:has(#local),
-body:has(#shared-mine:not([hidden])) .pic:has(#remote) {
+body:has(.wide > video:not([hidden])) .pic:not(.wide) {
   max-width: 9.5rem;
 }
 

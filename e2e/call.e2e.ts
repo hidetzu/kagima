@@ -338,6 +338,19 @@ test(titleOf("frames"), async () => {
   );
   const told = await text(host.page, "status");
   console.log(`  observed: the host was told "${told}"`);
+  // ⚠⚠ **共有していないのに 空の枠を出さない** (⚠ 実機 2026-09-12)。
+  //   ⚠ **`hidden` は正しく立っていたのに、⚠ `.pic:has(#shared)` が id を含むぶん
+  //   ⚠ 詳細度で勝ち、⚠ 「出ていないものは消す」を 押し潰していた。**
+  //   ⚠ **灰色の枠が 2 つ、⚠ 通話のあいだじゅう 出たままだった。**
+  const empties = await host.page.evaluate(() =>
+    ["shared", "shared-mine"].filter((id) => {
+      const v = document.getElementById(id) as HTMLVideoElement;
+      const pic = v.closest(".pic") as HTMLElement;
+      return v.hidden && getComputedStyle(pic).display !== "none";
+    }),
+  );
+  assert.deepEqual(empties, [], "an empty video box was left on screen");
+  console.log("  observed: nothing is shared, and no empty box is on screen");
 
   // ⚠⚠ **相手が映ったら 通話中の形になる。** ⚠ **合図は 映像であって `connectionState` では
   //   ⚠ ない** ― ⚠ **繋がったと言いながら 何も映らない状態は 実在する** (`docs/adr/0034`)。
@@ -1628,6 +1641,17 @@ test(titleOf("guest-comes-back-to-a-thrown-away-page"), async () => {
     true,
     "the Guest was shown the door's form on the way back into a room it was already in",
   );
+
+  // ⚠⚠ **そして Host の画面は「つながりました」に戻る** (⚠ 実機 2026-09-12)。
+  //   ⚠ **`peer-left` で `connected` を false にしたきり、⚠ 誰も true に戻していなかった。**
+  //   ⚠ **`loadeddata` は 戻ってきた相手のために もう一度 発火しない** ― ⚠ **映像は出たまま
+  //   ⚠ なのに、⚠ 画面は「入りました。つないでいます。」と言い続けた。**
+  await host.page.waitForFunction(
+    () => (document.getElementById("status")?.textContent ?? "").includes("つながりました"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  console.log(`  observed: the host is told "${await text(host.page, "status")}" again`);
 
   // ⚠⚠ **Nobody presses anything.** ⚠ **This is the whole case** (`docs/adr/0029`).
   const backFrames = await waitForFrames(guest.page, "the guest, after coming back");
