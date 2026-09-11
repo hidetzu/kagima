@@ -40,6 +40,16 @@ const fakeSocket = () => {
   };
 };
 
+/**
+ * ⚠⚠ **「相手が来た」は 数に入れない** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **`peer-here` は サーバが 部屋に居る人へ出す合図であり、⚠ 誰が何を言ったかとは別の話である。**
+ * ⚠ **so 中身についての主張は これを外して数える** — ⚠ **外すのは この 1 種類だけであり、
+ * ⚠ 「何も漏れていない」という主張は 弱まっていない。**
+ */
+const words = (sent: readonly string[]): string[] =>
+  sent.filter((line) => !line.includes('"type":"peer-here"'));
+
 test("⚠ a third connection is hung up on, ⚠ and the room keeps the two it has", () => {
   const hub = createHub();
   const sessions = createSessions({ hub, secret: "s" });
@@ -67,7 +77,7 @@ test("⚠⚠ a binary frame is hung up on without its content being read", () =>
   a.binary();
 
   assert.deepEqual(a.closes, [{ code: CLOSE_BAD_MESSAGE, reason: "signalling is text" }]);
-  assert.deepEqual(a.sent, [], "something was said back about a binary frame");
+  assert.deepEqual(words(a.sent), [], "something was said back about a binary frame");
 });
 
 test("⚠ a message that does not parse is refused to its sender and to nobody else", () => {
@@ -80,9 +90,9 @@ test("⚠ a message that does not parse is refused to its sender and to nobody e
 
   a.text("{not json");
 
-  assert.equal(a.sent.length, 1);
-  assert.match(a.sent[0] ?? "", /"type":"refused"/);
-  assert.deepEqual(b.sent, [], "the other participant was told about a malformed message");
+  assert.equal(words(a.sent).length, 1);
+  assert.match(words(a.sent)[0] ?? "", /"type":"refused"/);
+  assert.deepEqual(words(b.sent), [], "the other participant was told about a malformed message");
 });
 
 test("⚠⚠ the heartbeat gives up on a silent socket, and says silent rather than left", () => {
@@ -112,10 +122,10 @@ test("⚠⚠ the heartbeat gives up on a silent socket, and says silent rather t
     // ⚠ Answered every time: ⚠ it stays open however many beats pass.
     for (let i = 0; i < MISSED_PONGS_ALLOWED + 3; i++) {
       beat();
-      a.pong(a.sent[a.sent.length - 1] as string);
+      a.pong(a.sent[words(a.sent).length - 1] as string);
     }
     assert.deepEqual(a.closes, [], "a socket that answered was hung up on");
-    assert.ok(a.sent.length > MISSED_PONGS_ALLOWED, "no pings were sent");
+    assert.ok(words(a.sent).length > MISSED_PONGS_ALLOWED, "no pings were sent");
     assert.ok(touched.length > 0, "the room's idle clock was never pushed back");
 
     // ⚠ Then stops answering.
@@ -137,7 +147,7 @@ test("⚠ a participant leaving tells whoever is still there, and does not end t
 
   a.end();
 
-  assert.deepEqual(b.sent, [JSON.stringify({ type: "peer-left" })]);
+  assert.deepEqual(words(b.sent), [JSON.stringify({ type: "peer-left" })]);
   assert.deepEqual(b.closes, [], "the remaining participant was hung up on");
   assert.equal(hub.peerCount(ROOM), 1);
 });
@@ -220,7 +230,7 @@ test("⚠⚠ the close of a socket a reconnect replaced is not announced as some
   sessions.open(guestOld.socket, ROOM, "s-guest");
   sessions.open(guestNew.socket, ROOM, "s-guest");
 
-  const before = host.sent.length;
+  const before = words(host.sent).length;
   guestOld.end();
 
   const said = host.sent.slice(before);
@@ -231,11 +241,49 @@ test("⚠⚠ the close of a socket a reconnect replaced is not announced as some
   );
 
   // ⚠ And the real thing still works: ⚠ the connection that is actually there, leaving, is told.
-  const nowAt = host.sent.length;
+  const nowAt = words(host.sent).length;
   guestNew.end();
   assert.deepEqual(
     host.sent.slice(nowAt).filter((line) => line.includes("peer-left")),
     [JSON.stringify({ type: "peer-left" })],
     "somebody actually leaving was not announced",
+  );
+});
+
+test("⚠⚠ 後から来た人がいることを、⚠ 先に居た人に言う", () => {
+  // ⚠⚠ **`peer-left` の裏返し** (⚠ Owner 決定 2026-09-12)。
+  //   ⚠ **これが無いあいだ、⚠ Guest の画面は「相手の接続が切れました」のまま残った** —
+  //   ⚠ **Host が戻ったことを Guest に伝える合図が 1 つも無かったからである**(⚠ 実機 2026-09-12)。
+  const hub = createHub();
+  const sessions = createSessions({ hub, secret: "s" });
+  const first = fakeSocket();
+  sessions.open(first.socket, ROOM, "s1");
+
+  // ⚠ まだ誰も来ていない。⚠ 自分の到着を 自分に言わない。
+  assert.deepEqual(
+    first.sent.filter((l) => l.includes("peer-here")),
+    [],
+    "a peer was told about its own arrival",
+  );
+
+  const second = fakeSocket();
+  sessions.open(second.socket, ROOM, "s2");
+
+  assert.deepEqual(
+    first.sent.filter((l) => l.includes("peer-here")),
+    ['{"type":"peer-here"}'],
+    "the one who was already there was not told somebody arrived",
+  );
+  // ⚠ 来た本人には 言わない ― ⚠ 自分が来たことは 自分が知っている。
+  assert.deepEqual(
+    second.sent.filter((l) => l.includes("peer-here")),
+    [],
+    "the arrival was echoed to whoever arrived",
+  );
+  // ⚠⚠ 誰が来たかは 言わない。⚠ 名前は 本人が `hello` で名乗る。
+  assert.deepEqual(
+    first.sent.filter((l) => l.includes("peer-here") && l.includes("nickname")),
+    [],
+    "the arrival carried who it was",
   );
 });

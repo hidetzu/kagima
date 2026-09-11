@@ -9,6 +9,7 @@
 //   ⚠ by explaining the difference in words the server refused to give.**
 
 import {
+  KNOCK_GRACE_MS,
   KNOCK_PROTOCOL_PREFIX,
   type KnockEnding,
   parseKnockEnding,
@@ -124,11 +125,26 @@ export const waitForDecision = (
   knockId: string,
   onEnding: (ending: KnockEnding) => void,
   origin: string = location.origin,
+  /**
+   * ⚠⚠ **このノックは もう誰も知らない** (⚠ Owner 決定 2026-09-12)。
+   *
+   * ⚠ **サーバは `KNOCK_GRACE_MS` のあいだ 誰も見ていないノックを 扉から降ろす**
+   * (`src/knock/knocks.ts`)。⚠ **so そのあいだ socket を失っていたら、⚠ 待ち続けても
+   * 何も来ない** — ⚠ **永久に黙ったまま待つことになる。**
+   *
+   * ⚠⚠ **サーバに訊かない。** ⚠ **「そのノックは知らない」と答えさせると、⚠ 存在しない部屋の
+   * ノックだけが早く答えることになり、⚠ 部屋の有無が漏れる**
+   * (`.claude/rules/security.md` § 3)。
+   * ⚠ **so 自分が どれだけ切れていたかを 自分で測る。** ⚠ **両端が同じ定数を見る。**
+   */
+  onStale: () => void = () => {},
 ): (() => void) => {
   let stopped = false;
   let attempt = 0;
   let socket: WebSocket | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** ⚠ **いつ 待機 socket を失ったか。** ⚠ `null` = ⚠ いま繋がっている。 */
+  let lostAt: number | null = null;
 
   const again = (): void => {
     if (stopped) return;
@@ -153,6 +169,14 @@ export const waitForDecision = (
     // ⚠ It opened, ⚠ so the next failure starts the backoff from the top rather than the bottom.
     ws.addEventListener("open", () => {
       attempt = 0;
+      // ⚠⚠ **猶予を越えていたら、⚠ このノックは もうサーバに無い。** ⚠ **黙って待たない。**
+      if (lostAt !== null && Date.now() - lostAt > KNOCK_GRACE_MS) {
+        stopped = true;
+        ws.close();
+        onStale();
+        return;
+      }
+      lostAt = null;
     });
     ws.addEventListener("message", (event: MessageEvent) => {
       const ending = parseKnockEnding(String(event.data));
@@ -163,6 +187,8 @@ export const waitForDecision = (
     });
     ws.addEventListener("close", () => {
       socket = null;
+      // ⚠ 最初に失った時刻を残す。⚠ 何度落ちても、⚠ 測るのは「最後に見られてから」である。
+      if (lostAt === null) lostAt = Date.now();
       again();
     });
     // ⚠ `close` follows an error, ⚠ so the coming back happens in one place and not two.

@@ -116,6 +116,16 @@ export const createSessions = (options: SessionOptions): Sessions => {
     //   ⚠ mentioned again from here on (`docs/adr/0004`).
     logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
 
+    // ⚠⚠ **「相手が来た」を言う** (⚠ Owner 決定 2026-09-12)。
+    //
+    // ⚠ **`peer-left` の裏返しであり、⚠ それだけである。** ⚠ **中身は無い ―  誰が来たかは
+    //   ⚠ 言わない**(⚠ 名前は本人が `hello` で名乗る。⚠ Host には名前が無い)。
+    // ⚠⚠ **これが無いあいだ、⚠ Guest の画面は「相手の接続が切れました」のまま残っていた** —
+    //   ⚠ **Host が戻ったことを Guest に伝える合図が 1 つも無かったからである**(⚠ 実機 2026-09-12)。
+    // ⚠ **`relay` は 送り主を外して 残りに配る** — ⚠ **ここで欲しいのは まさにそれである**
+    //   (`CLAUDE.md` § 3: ⚠ **同じ問いに 2 つの実装を置かない**)。
+    options.hub.relay(roomId, peer.id, JSON.stringify({ type: "peer-here" }));
+
     // ⚠⚠ **Who is still at the door** (kagima#70).
     //
     // ⚠ **A knock is announced once, ⚠ to whoever is listening at that moment**
@@ -183,6 +193,13 @@ export const createSessions = (options: SessionOptions): Sessions => {
       missed += 1;
       // ⚠ Still here. ⚠ The room's idle clock is pushed back by the same beat that proves it.
       options.touch?.(roomId);
+      // ⚠⚠ **誰も待っていないノックを 扉から降ろす** (⚠ Owner 決定 2026-09-12)。
+      //   ⚠ **`docs/adr/0028`: ⚠ 扉に立っている人は 開いている待機 socket である。**
+      //   ⚠ **同じ鼓動に乗せる** — ⚠ **新しい timer を足さずに、⚠ 両方の土台で同じに動く。**
+      //   ⚠ **Host が居るときにしか鳴らないが、⚠ 伝える相手も そのときしか居ない。**
+      for (const gone of options.knocks?.sweep(roomId, now()) ?? []) {
+        options.hub.announceToHost(roomId, JSON.stringify({ type: "knock-gone", knockId: gone }));
+      }
       // ⚠ And the same beat says how long this room has been held (`docs/adr/0031`).
       //   ⚠ On the beat, ⚠ because a room that is never closed still costs.
       const since = roomOpenedAt.get(roomId);

@@ -45,6 +45,11 @@ export type SignalMessage =
   // ⚠ Sent by the server, not by a peer. ⚠ It says the other side's socket went away —
   //   ⚠ which is not the room ending, and the pages keep the two apart.
   | { type: "peer-left" }
+  // ⚠⚠ **Its inverse** (⚠ Owner 決定 2026-09-12). ⚠ **Somebody is in the room again.**
+  //   ⚠ **Carries nothing: ⚠ a name is the person's own to give** (`hello`), ⚠ **and a Host has none.**
+  | { type: "peer-here" }
+  // ⚠ **Sent to a Host only.** ⚠ **Somebody stopped standing at the door** (`src/knock/knocks.ts`).
+  | { type: "knock-gone"; knockId: string }
   | { type: "bye" };
 
 export type Transport = {
@@ -466,6 +471,8 @@ export const createCall = async (options: CallOptions): Promise<Call> => {
       }
       case "hello":
       case "peer-left":
+      case "peer-here":
+      case "knock-gone":
       case "bye":
         // ⚠ Not this module's business. ⚠ The page listens for `hello` itself; ⚠ the call carries
         //   ⚠ media and negotiation, and nothing about who anyone is.

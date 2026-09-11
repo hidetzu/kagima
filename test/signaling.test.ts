@@ -24,6 +24,16 @@ import { issueJoinToken } from "../src/token/join-token.ts";
 
 // ── what may cross ──────────────────────────────────────────────────────────
 
+/**
+ * ⚠⚠ **「相手が来た」は 数に入れない** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **`peer-here` は サーバが 部屋に居る人へ出す合図であり、⚠ 誰が何を言ったかとは別の話である。**
+ * ⚠ **so 中身についての主張は これを外して数える** — ⚠ **外すのは この 1 種類だけであり、
+ * ⚠ 「何も漏れていない」という主張は 弱まっていない。**
+ */
+const words = (sent: readonly string[]): string[] =>
+  sent.filter((line) => !line.includes('"type":"peer-here"'));
+
 test("an offer, an answer, a candidate and a bye are understood", async () => {
   assert.equal(parseClientMessage(JSON.stringify({ type: "offer", sdp: "v=0" })).ok, true);
   assert.equal(parseClientMessage(JSON.stringify({ type: "answer", sdp: "v=0" })).ok, true);
@@ -102,9 +112,9 @@ test("a message reaches the other peer in the room, and nobody else", async () =
   hub.join("room-b", elsewhere.peer);
 
   assert.equal(hub.relay("room-a", 1, "hello"), "relayed");
-  assert.deepEqual(b.sent, ["hello"]);
-  assert.deepEqual(a.sent, [], "it was echoed back to the sender");
-  assert.deepEqual(elsewhere.sent, [], "⚠ it reached another room");
+  assert.deepEqual(words(b.sent), ["hello"]);
+  assert.deepEqual(words(a.sent), [], "it was echoed back to the sender");
+  assert.deepEqual(words(elsewhere.sent), [], "⚠ it reached another room");
 });
 
 test("a message with nobody else there is not an error", async () => {
@@ -149,7 +159,7 @@ test("⚠⚠ a message from a replaced connection is dropped, not relayed", asyn
 
   // ⚠ Now deliver from the OLD peer. ⚠ Order inverted on purpose.
   assert.equal(hub.relay("room-a", guestOld.peer.id, "late answer"), "stale");
-  assert.deepEqual(host.sent, [], "⚠ a stale message reached the host");
+  assert.deepEqual(words(host.sent), [], "⚠ a stale message reached the host");
 });
 
 test("⚠⚠ the close of a replaced socket is not somebody leaving", async () => {

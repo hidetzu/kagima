@@ -68,6 +68,13 @@ export type Knock = {
   state: KnockState;
   /** ⚠ **Set only when admitted.** ⚠ The Host's decision is what it is exchanged for. */
   granted?: Granted;
+  /**
+   * ⚠⚠ **いつから 誰も このノックを見ていないか。** ⚠ `null` = ⚠ いま見られている。
+   *
+   * ⚠ **待機 socket が閉じた瞬間である**(⚠ 作られてから一度も来なければ 作られた時刻)。
+   * ⚠ **`KNOCK_GRACE_MS` を過ぎたら、⚠ その人は もう扉の前に立っていない** (`sweep`)。
+   */
+  aloneSince: number | null;
 };
 
 /** ⚠ **Why a knock was not taken.** ⚠ For counting only** — ⚠ never reaches a caller. */
@@ -77,7 +84,7 @@ export type KnockRejection = "no-such-room" | "too-many-waiting" | "too-many-wat
 //   (`../signaling/protocol.ts`). ⚠ **Re-exported here so a call site that means "the door's
 //   ⚠ answer" keeps reading like one** — ⚠ **one definition, ⚠ two names for the same thing.**
 export type { KnockEnding } from "../signaling/protocol.ts";
-import type { KnockEnding } from "../signaling/protocol.ts";
+import { KNOCK_GRACE_MS, type KnockEnding } from "../signaling/protocol.ts";
 
 /** ⚠ **Told once, ⚠ and then never again.** */
 export type KnockWatcher = (ending: KnockEnding) => void;
@@ -177,6 +184,13 @@ export type Knocks = {
   decide(roomId: string, id: string, admit: boolean, granted: Granted | null): void;
   /** ⚠ **Everyone still at the door, oldest first.** ⚠ For the Host's own screen. */
   waiting(roomId: string): ReadonlyArray<{ id: string; nickname: string; at: number }>;
+  /**
+   * ⚠⚠ **誰も待っていないノックを 落とし、⚠ 落としたものを言う** (⚠ Owner 決定 2026-09-12)。
+   *
+   * ⚠ **戻り値は Host の扉から消すためのものであり、⚠ 数えるためではない。**
+   * ⚠ **待機 socket が閉じてから `KNOCK_GRACE_MS` 経ったものだけ。**
+   */
+  sweep(roomId: string, at: number): string[];
   /** ⚠ **The room ended.** ⚠ Everyone waiting is told the same one word. */
   endRoom(roomId: string): void;
 };
@@ -185,6 +199,9 @@ export type KnocksOptions = {
   readonly newId: () => string;
   readonly maxWaiting?: number;
   readonly maxWatching?: number;
+  /** ⚠ **いつ 誰も見なくなったかを 書き留めるための時計。** ⚠ Injected so a check can step past it. */
+  readonly now?: () => number;
+  readonly graceMs?: number;
   /** ⚠ **Which rooms exist.** ⚠ Injected so this file never reaches into the store. */
   readonly roomExists: (roomId: string) => boolean;
 };
@@ -192,6 +209,8 @@ export type KnocksOptions = {
 export const createKnocks = (options: KnocksOptions): Knocks => {
   const maxWaiting = options.maxWaiting ?? MAX_WAITING;
   const maxWatching = options.maxWatching ?? MAX_WATCHING;
+  const now = options.now ?? Date.now;
+  const graceMs = options.graceMs ?? KNOCK_GRACE_MS;
   const rooms = new Map<string, Map<string, Knock>>();
   // ⚠ Per room, ⚠ so the cap is per room. ⚠ A watcher holds its own id rather than being keyed
   //   ⚠ by it: ⚠ two sockets may watch one knock, ⚠ and an unknown id must be storable too.
@@ -232,7 +251,9 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       const here = of(roomId);
       const stillWaiting = [...here.values()].filter((k) => k.state === "waiting").length;
       if (stillWaiting >= maxWaiting) return { id, refused: "too-many-waiting" };
-      here.set(id, { nickname, at, state: "waiting" });
+      // ⚠ 作られた瞬間から 誰も見ていない。⚠ 待機 socket は このあと来る ―
+      //   ⚠ 来なければ、⚠ その人は 扉の前に立っていない。
+      here.set(id, { nickname, at, state: "waiting", aloneSince: at });
       return { id, refused: null };
     },
 
@@ -265,9 +286,16 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       }
       const w = { id, notify };
       here.add(w);
+      // ⚠ 見られている。⚠ この人は 扉の前に立っている。
+      if (found !== undefined) found.aloneSince = null;
       return {
         stop: () => {
           here.delete(w);
+          const knock = rooms.get(roomId)?.get(id);
+          if (knock === undefined || knock.state !== "waiting") return;
+          // ⚠ まだ別の socket が 同じノックを見ているなら、⚠ その人は立ったままである。
+          if ([...here].some((other) => other.id === id)) return;
+          knock.aloneSince = now();
         },
         refused: null,
       };
@@ -280,7 +308,7 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
       if (here.has(id)) return { refused: null };
       const stillWaiting = [...here.values()].filter((k) => k.state === "waiting").length;
       if (stillWaiting >= maxWaiting) return { refused: "too-many-waiting" };
-      here.set(id, { nickname, at, state: "waiting" });
+      here.set(id, { nickname, at, state: "waiting", aloneSince: at });
       return { refused: null };
     },
 
@@ -303,6 +331,23 @@ export const createKnocks = (options: KnocksOptions): Knocks => {
         .filter(([, k]) => k.state === "waiting")
         .map(([id, k]) => ({ id, nickname: k.nickname, at: k.at }))
         .sort((a, b) => a.at - b.at);
+    },
+
+    sweep(roomId, at) {
+      // ⚠⚠ **誰も見ていないまま 猶予を過ぎたノックは、⚠ 扉から降りる。**
+      //   ⚠ **`docs/adr/0028`: ⚠ 扉に立っている人は 開いている待機 socket である。**
+      // ⚠ **消すのであって、⚠ 「断った」ことにはしない** — ⚠ **誰も決めていないからである。**
+      //   ⚠ **戻ってきた人には 新しいノックからやり直してもらう**(`src/client/guest.ts`)。
+      const here = rooms.get(roomId);
+      if (here === undefined) return [];
+      const gone: string[] = [];
+      for (const [id, k] of here) {
+        if (k.state !== "waiting" || k.aloneSince === null) continue;
+        if (at - k.aloneSince < graceMs) continue;
+        here.delete(id);
+        gone.push(id);
+      }
+      return gone;
     },
 
     endRoom(roomId) {
