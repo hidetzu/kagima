@@ -232,6 +232,15 @@
           showDoor();
           return;
         }
+        // ⚠⚠ **その人は もう扉の前に立っていない** (⚠ Owner 決定 2026-09-12)。
+        //   ⚠ **待機 socket が閉じて 猶予を過ぎた** (`src/knock/knocks.ts`)。
+        //   ⚠ **断ったのではない ― ⚠ 誰も決めていない。** ⚠ **so 何も言わずに 扉から降ろす。**
+        if (message.type === "knock-gone") {
+          const at = atTheDoor.findIndex((waiting) => waiting.knockId === message.knockId);
+          if (at !== -1) atTheDoor.splice(at, 1);
+          showDoor();
+          return;
+        }
         if (message.type === "hello") {
           guestName = message.nickname;
           // ⚠⚠ **Somebody arriving is what "peer-left" recovers from** (`docs/adr/0029`).

@@ -945,6 +945,64 @@ test(titleOf("field-test-mode-is-gone"), async () => {
   }
 });
 
+test(titleOf("one-person-one-knock"), async () => {
+  // ⚠⚠ **実機 2026-09-12** (Owner の報告): ⚠ **つながっているのに 同じ名前が
+  //   ⚠ 「ノックしています」と「つながりました」の両方に出ていた。**
+  //
+  // ⚠ **待っているあいだに 読み込み直すと、⚠ 前のノックが サーバに残ったまま
+  //   ⚠ 新しいノックが立つ** — ⚠ **Host の扉に 同じ人が 二人になる。**
+  // ⚠ **so 読み込み直しても 同じノックに戻る** (⚠ Owner 決定 2026-09-12)。
+  const { browser: b, base } = await ready();
+  const host = await openHost(b, base);
+  const guest = await openGuest(b, host.shareUrl, "ひで");
+
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === false,
+    undefined,
+    { timeout: 20_000 },
+  );
+  assert.equal(await text(host.page, "door-who"), "ひで さんがノックしています");
+
+  // ⚠⚠ **ノックが 相手に届き切ってから 読み込み直す。**
+  //   ⚠ **扉は POST の応答より先に出る** ― ⚠ **扉を見ただけで reload すると、⚠ 飛んでいる
+  //   ⚠ 最中の POST を落とすことになり、⚠ 何も測っていない**(⚠ 実測 2026-09-12)。
+  await guest.page.waitForFunction(
+    () => document.getElementById("waiting")?.hidden === false,
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  // ⚠ 決められないまま、⚠ 待っている人が 読み込み直す。
+  await guest.page.reload({ waitUntil: "domcontentloaded" });
+  await guest.page.waitForFunction(
+    () => document.getElementById("waiting")?.hidden === false,
+    undefined,
+    { timeout: 20_000 },
+  );
+  console.log("  observed: the waiting page was reloaded, and came back waiting");
+
+  // ⚠⚠ **一度 入れれば、⚠ 扉は空になる。** ⚠ **二人になっていれば ここで 1 人残る。**
+  await decideAtTheDoor(host.page, true);
+  await host.page.waitForFunction(
+    () => document.getElementById("door")?.hidden === true,
+    undefined,
+    { timeout: 20_000 },
+  );
+  await waitForFrames(guest.page, "the guest");
+  console.log("  observed: one decision let that person in and left nobody at the door");
+
+  // ⚠ そして 扉は 空のままである ― ⚠ 入ったあとに もう一度 出てこない。
+  await new Promise((r) => setTimeout(r, 1_000));
+  assert.equal(
+    await host.page.evaluate(() => document.getElementById("door")?.hidden),
+    true,
+    "somebody was still knocking after they had come in",
+  );
+
+  await host.context.close();
+  await guest.context.close();
+});
+
 test(titleOf("one-knock-once"), async () => {
   // ⚠⚠ **実機 2026-09-12** (Owner の報告): ⚠ **「入れる」を押して 相手が入ったあとも、
   //   ⚠ 「◯◯ さんがノックしています」が 出たままだった。**
@@ -1011,23 +1069,6 @@ test(titleOf("one-knock-once"), async () => {
   );
   console.log("  observed: one decision closed the door, however many times it was announced");
 
-  for (let i = 0; i < 30; i++) {
-    const seen = await guest.page.evaluate(() => ({
-      call: (globalThis as unknown as { kagimaCall?: unknown }).kagimaCall !== undefined,
-      before: document.getElementById("before")?.hidden,
-      waiting: document.getElementById("waiting")?.hidden,
-      after: document.getElementById("after")?.hidden,
-      error: document.getElementById("error")?.textContent ?? "",
-    }));
-    console.log(`  DEBUG guest ${i}: ${JSON.stringify(seen)}`);
-    if (i === 5 || i === 20) {
-      console.log(
-        `  DEBUG ws: ${JSON.stringify(await guest.page.evaluate(() => (globalThis as unknown as { wsLog: string[] }).wsLog))}`,
-      );
-    }
-    if (seen.call) break;
-    await new Promise((r) => setTimeout(r, 1000));
-  }
   // ⚠ そして その人は 実際に入っている ― ⚠ 扉が閉じただけではない。
   await waitForFrames(guest.page, "the guest");
   console.log("  observed: and the person at that door actually came in");

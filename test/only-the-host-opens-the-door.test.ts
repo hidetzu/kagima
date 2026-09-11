@@ -84,22 +84,32 @@ const aRoom = (who: "host+guest" | "guest" | "empty" = "host+guest") => {
   return { room, ctx, hub, knocks, host, guest, knock, sessions };
 };
 
+/**
+ * ⚠⚠ **「相手が来た」は 数に入れない** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **`peer-here` は サーバが 部屋に居る人へ出す合図であり、⚠ 誰が何を言ったかとは別の話である。**
+ * ⚠ **so 中身についての主張は これを外して数える** — ⚠ **外すのは この 1 種類だけであり、
+ * ⚠ 「何も漏れていない」という主張は 弱まっていない。**
+ */
+const words = (sent: readonly string[]): string[] =>
+  sent.filter((line) => !line.includes('"type":"peer-here"'));
+
 test("⚠⚠ a knock is told to the Host and to nobody else", async () => {
   const { host, guest, knock } = aRoom();
 
   await knock("さんにんめ");
 
-  assert.equal(host.sent.length, 1, "the Host was not told somebody is at the door");
-  assert.match(host.sent[0] ?? "", /"type":"knock"/);
+  assert.equal(words(host.sent).length, 1, "the Host was not told somebody is at the door");
+  assert.match(words(host.sent)[0] ?? "", /"type":"knock"/);
   // ⚠⚠ The claim. ⚠ Not "the Guest's page ignores it" — ⚠ that is a different, weaker claim.
-  assert.deepEqual(guest.sent, [], "the knock reached a Guest's socket");
+  assert.deepEqual(words(guest.sent), [], "the knock reached a Guest's socket");
 });
 
 test("⚠⚠ a Guest cannot open the door, and is not told that it tried", async () => {
   const { guest, host, knock, knocks, room } = aRoom();
 
   await knock("さんにんめ");
-  const knockId = JSON.parse(host.sent[0] as string).knockId as string;
+  const knockId = JSON.parse(words(host.sent)[0] as string).knockId as string;
 
   // ⚠ The Guest is handed the id here, ⚠ which is more than it can get on its own now.
   //   ⚠ The wall must hold even then — ⚠ "it does not know the id" is not a wall.
@@ -112,14 +122,14 @@ test("⚠⚠ a Guest cannot open the door, and is not told that it tried", async
 
   // ⚠⚠ Silence, ⚠ not a refusal. ⚠ Answering would say that this knockId is a real one
   //   (`.claude/rules/security.md` § 3).
-  assert.deepEqual(guest.sent, [], "the Guest was told something about its admit");
+  assert.deepEqual(words(guest.sent), [], "the Guest was told something about its admit");
 });
 
 test("⚠ the Host can open the door, and what it mints actually opens it", async () => {
   const { host, knock, knocks, room } = aRoom();
 
   await knock("さんにんめ");
-  const knockId = JSON.parse(host.sent[0] as string).knockId as string;
+  const knockId = JSON.parse(words(host.sent)[0] as string).knockId as string;
 
   host.say(JSON.stringify({ type: "admit", knockId, allow: true }));
   await new Promise((r) => setTimeout(r, 20));
@@ -249,7 +259,7 @@ test("⚠ the token creation hands back is a Guest's, and cannot open the door",
 
   // ⚠ And it behaves as one where it counts.
   await knock("よにんめ");
-  const knockId = JSON.parse(host.sent[0] as string).knockId as string;
+  const knockId = JSON.parse(words(host.sent)[0] as string).knockId as string;
   const impostor = fakeSocket();
   sessions.open(impostor.socket, room.id, "s-impostor", verdict.ok ? verdict.role : "guest");
   impostor.say(JSON.stringify({ type: "admit", knockId, allow: true }));

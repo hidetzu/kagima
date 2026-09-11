@@ -48,6 +48,16 @@ const KEY = "kagima.room";
  */
 const GUEST_KEY = "kagima.guest";
 
+/**
+ * ⚠⚠ **まだ決められていないノック** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **ページを読み込み直しても 同じノックに戻るためだけに在る** — ⚠ **戻らないと、⚠ 同じ人が
+ * Host の扉に 二人になる**(⚠ 実機 2026-09-12)。
+ * ⚠ **決まった時点で捨てる。** ⚠ **`lostAt` は ページが去った時刻であり、⚠ 猶予を越えていれば
+ * 新しいノックからやり直す** (`src/signaling/protocol.ts` の `KNOCK_GRACE_MS`)。
+ */
+const KNOCK_KEY = "kagima.knock";
+
 /** ⚠ **The whole of what is written down.** ⚠ **Two strings.** */
 export type RememberedRoom = {
   readonly roomId: string;
@@ -192,3 +202,37 @@ export const recallRejoin = (): RememberedRejoin | null => {
  * ⚠ **Holding a dead mark is how one becomes a pile** — ⚠ **the same reason `forget` exists.**
  */
 export const forgetRejoin = (): void => drop(GUEST_KEY);
+
+/** ⚠ **待っているノック。** ⚠ **決まるまでのあいだだけ 置かれる。** */
+export type RememberedKnock = {
+  readonly roomId: string;
+  readonly knockId: string;
+  readonly nickname: string;
+  /** ⚠ **ページが去った時刻。** ⚠ **一度も去っていなければ `null`。** */
+  readonly lostAt: number | null;
+};
+
+export const rememberKnock = (knock: RememberedKnock): void =>
+  write(KNOCK_KEY, {
+    roomId: knock.roomId,
+    knockId: knock.knockId,
+    nickname: knock.nickname,
+    // ⚠⚠ 空文字は書かない。⚠ `readFields` は「我々が書いた形ではない」として
+    //   ⚠ 記録ごと捨てる ― ⚠ 覚えた端から消えることになる(⚠ 実測 2026-09-12)。
+    lostAt: String(knock.lostAt ?? 0),
+  });
+
+export const recallKnock = (): RememberedKnock | null => {
+  const held = readFields(KNOCK_KEY, ["roomId", "knockId", "nickname", "lostAt"]);
+  if (held === null) return null;
+  const lostAt = Number(held["lostAt"]);
+  return {
+    roomId: held["roomId"] as string,
+    knockId: held["knockId"] as string,
+    nickname: held["nickname"] as string,
+    // ⚠ 読めない値は「去った時刻を知らない」ことにする ― ⚠ 安全な側に倒す。
+    lostAt: Number.isSafeInteger(lostAt) && lostAt > 0 ? lostAt : null,
+  };
+};
+
+export const forgetKnock = (): void => drop(KNOCK_KEY);

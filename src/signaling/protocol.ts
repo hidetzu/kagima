@@ -111,3 +111,17 @@ export const CLOSE_BAD_MESSAGE = 4003;
 export const CLOSE_SILENT = 4004;
 /** ⚠ **The host ended the room.** ⚠ Not an error, and the wording the guest sees says so. */
 export const CLOSE_ROOM_CLOSED = 4005;
+
+/**
+ * ⚠⚠ **誰も待っていないノックを、⚠ いつ 扉から降ろすか** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **`docs/adr/0028` は「扉に立っている人 = 開いている待機 socket」と書いている。**
+ * ⚠ **実装はそうなっていなかった** — ⚠ **socket が閉じてもノックは残り、⚠ ルームが終わるまで
+ * Host の扉に立ち続けた**(⚠ 実機 2026-09-12)。
+ *
+ * ⚠⚠ **だが socket は 再接続の途中でも 一時的に消える。** ⚠ **待機側の retry は
+ * 最大 8 秒**(`src/client/guest.ts`)。⚠ **so そこに余白を置いた値である。**
+ * ⚠⚠ **30 秒は 測った値ではない。⚠ 選んだ値である**
+ * ([`../../.claude/rules/evidence.md`](../../.claude/rules/evidence.md))。
+ */
+export const KNOCK_GRACE_MS = 30_000;

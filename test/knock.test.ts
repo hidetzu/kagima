@@ -185,3 +185,86 @@ test("⚠⚠ a room ending does not send the people at its door back to waiting"
   // ⚠ And it stays that way. ⚠ A later read must not drift back.
   assert.equal(k.read("room-a", a.id).state, "over");
 });
+
+/** ⚠ 1 つの部屋。⚠ 形だけ本物に合わせてある。 */
+const ROOM = "abcdefghij123456";
+
+// ⚠⚠ **扉に立っている人は、⚠ 開いている待機 socket である** (`docs/adr/0028`)。
+//   ⚠ **実装はそうなっていなかった** — ⚠ **socket が閉じてもノックは残り、⚠ ルームが終わるまで
+//   ⚠ Host の扉に立ち続けた**(⚠ 実機 2026-09-12)。
+
+test("⚠⚠ 誰も見ていないノックは、⚠ 猶予を過ぎたら 扉から降りる", () => {
+  let at = 1_000;
+  const knocks = createKnocks({
+    newId: () => "k1",
+    roomExists: () => true,
+    now: () => at,
+    graceMs: 100,
+  });
+  const { id } = knocks.knock(ROOM, "アン", at);
+
+  // ⚠ まだ猶予の内。⚠ 来るかもしれない人を 先に降ろさない。
+  at = 1_050;
+  assert.deepEqual(knocks.sweep(ROOM, at), []);
+  assert.equal(knocks.waiting(ROOM).length, 1);
+
+  at = 1_200;
+  assert.deepEqual(knocks.sweep(ROOM, at), [id]);
+  assert.equal(knocks.waiting(ROOM).length, 0, "the person was still at the door");
+});
+
+test("⚠ 見られているあいだは、⚠ どれだけ経っても 降りない", () => {
+  let at = 1_000;
+  const knocks = createKnocks({
+    newId: () => "k1",
+    roomExists: () => true,
+    now: () => at,
+    graceMs: 100,
+  });
+  const { id } = knocks.knock(ROOM, "アン", at);
+  knocks.watch(ROOM, id, () => {});
+
+  at = 99_000;
+  assert.deepEqual(knocks.sweep(ROOM, at), [], "somebody standing at the door was sent away");
+});
+
+test("⚠⚠ 一度離れても、⚠ 猶予の内に戻れば 立ったままである", () => {
+  let at = 1_000;
+  const knocks = createKnocks({
+    newId: () => "k1",
+    roomExists: () => true,
+    now: () => at,
+    graceMs: 100,
+  });
+  const { id } = knocks.knock(ROOM, "アン", at);
+  const watching = knocks.watch(ROOM, id, () => {});
+
+  at = 1_010;
+  watching.stop();
+  at = 1_050;
+  knocks.watch(ROOM, id, () => {});
+
+  at = 1_120;
+  assert.deepEqual(knocks.sweep(ROOM, at), [], "coming back inside the grace still lost the place");
+});
+
+test("⚠ 決まったノックは 掃かない ― ⚠ 決めたことを 取り消さない", () => {
+  let at = 1_000;
+  const knocks = createKnocks({
+    newId: () => "k1",
+    roomExists: () => true,
+    now: () => at,
+    graceMs: 100,
+  });
+  const { id } = knocks.knock(ROOM, "アン", at);
+  knocks.decide(ROOM, id, true, { token: "t", rejoin: "r" });
+
+  at = 99_000;
+  assert.deepEqual(knocks.sweep(ROOM, at), []);
+  // ⚠ 遅れて来た待機 socket は、⚠ 決まったことを ちゃんと受け取る。
+  let told = null;
+  knocks.watch(ROOM, id, (ending) => {
+    told = ending;
+  });
+  assert.deepEqual(told, { state: "admitted", token: "t", rejoin: "r" });
+});

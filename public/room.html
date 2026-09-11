@@ -102,9 +102,17 @@
   import { createDiagnostics } from "/client/diagnostics.js";
   import { forgetHidden, watchDiscards } from "/client/discarded.js";
   import { knock, rejoin, roomIdFromPath, waitForDecision, WORDING } from "/client/guest.js";
-  import { forgetRejoin, recallRejoin, rememberRejoin } from "/client/remember.js";
+  import {
+    forgetKnock,
+    forgetRejoin,
+    recallKnock,
+    recallRejoin,
+    rememberKnock,
+    rememberRejoin,
+  } from "/client/remember.js";
+  import { KNOCK_GRACE_MS } from "/signaling/protocol.js";
   import { connectReconnecting } from "/client/reconnect.js";
-  import { guestStatus, outranks } from "/status/status.js";
+  import { cameBack, guestStatus, outranks } from "/status/status.js";
 
   const $ = (id) => document.getElementById(id);
   const roomId = roomIdFromPath(location.pathname);
@@ -240,6 +248,16 @@
       });
 
       transport.onMessage((message) => {
+        // ⚠⚠ **相手が戻ってきた** (⚠ Owner 決定 2026-09-12)。
+        //   ⚠ **これが無いあいだ、⚠ この画面は「相手の接続が切れました」のまま残った** —
+        //   ⚠ **Host が戻ったことを こちらに伝える合図が 1 つも無かったからである。**
+        //   ⚠ **映像が出ているかは 要素に訊く** ― ⚠ **`connectionState` ではない。**
+        if (message.type === "peer-here") {
+          ending = cameBack(ending);
+          if ($("remote").videoWidth > 0) connected = true;
+          render();
+          return;
+        }
         if (message.type !== "peer-left") return;
         // ⚠ Recoverable, and worded as such. ⚠ "切断されました" would read as a fault.
         ending = outranks(ending, "peer-left");
@@ -444,6 +462,91 @@
     }
   };
 
+  /** ⚠ 待つのをやめる。⚠ 画面を 最初の姿に戻すだけである。 */
+  const giveUp = () => {
+    $("waiting").hidden = true;
+    $("before").hidden = false;
+    $("enter-button").disabled = false;
+  };
+
+  /**
+   * ⚠⚠ **扉の前で待つ。⚠ 猶予を越えて切れていたら、⚠ 新しいノックからやり直す**
+   * (⚠ Owner 決定 2026-09-12)。
+   *
+   * ⚠ **サーバは 誰も見ていないノックを `KNOCK_GRACE_MS` で降ろす**(`src/knock/knocks.ts`)。
+   * ⚠ **降りたノックを watch し続けると、⚠ 何も来ないまま 永久に黙って待つことになる。**
+   * ⚠ **サーバには訊かない** — ⚠ **訊けるようにすると、⚠ 存在しない部屋だけが早く答えて
+   *   ⚠ 部屋の有無が漏れる**(`.claude/rules/security.md` § 3)。
+   * ⚠ **so 自分の断絶を 自分で測り、⚠ 叩き直す。**
+   */
+  const standAtTheDoor = async (nickname, firstKnockId) => {
+    $("before").hidden = true;
+    $("waiting").hidden = false;
+
+    let knockId = firstKnockId;
+    for (;;) {
+      // ⚠⚠ 読み込み直しても 同じノックに戻るため (⚠ 実機 2026-09-12: ⚠ 戻らないと
+      //   ⚠ 同じ人が Host の扉に 二人になった)。
+      rememberKnock({ roomId, knockId, nickname, lostAt: null });
+
+      let stopWaiting = () => {};
+      const outcome = await new Promise((resolve) => {
+        const quit = () => resolve({ what: "gave-up" });
+        $("give-up").addEventListener("click", quit, { once: true });
+        const done = (value) => {
+          $("give-up").removeEventListener("click", quit);
+          resolve(value);
+        };
+        stopWaiting = waitForDecision(
+          roomId,
+          knockId,
+          (ending) => done({ what: "decided", ending }),
+          undefined,
+          () => done({ what: "stale" }),
+        );
+      });
+      stopWaiting();
+
+      if (outcome.what === "gave-up") {
+        forgetKnock();
+        giveUp();
+        return;
+      }
+      if (outcome.what === "decided") {
+        forgetKnock();
+        if (outcome.ending.state === "admitted") {
+          // ⚠⚠ **Kept now, ⚠ before the camera is even asked for** (`docs/adr/0029`).
+          //   ⚠ **The browser can throw this page away at any point after here, ⚠ and the whole
+          //   ⚠ point is that the Host does not have to decide twice.**
+          rememberRejoin({ roomId, rejoin: outcome.ending.rejoin, nickname });
+          await enterWith(outcome.ending.token, nickname);
+          return;
+        }
+        // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
+        giveUp();
+        $("error").textContent = WORDING.refused;
+        return;
+      }
+
+      // ⚠ このノックは もうサーバに無い。⚠ 黙って叩き直す ― ⚠ 人は待っているだけである。
+      forgetKnock();
+      const again = await knock(roomId, nickname);
+      if (!again.ok) {
+        giveUp();
+        $("error").textContent = WORDING[again.why];
+        return;
+      }
+      knockId = again.knockId;
+    }
+  };
+
+  // ⚠⚠ **去った時刻を残す** (⚠ Owner 決定 2026-09-12)。⚠ **戻ってきたとき、⚠ 猶予の内か
+  //   ⚠ 外かを これで決める。** ⚠ **残っていなければ「分からない」= ⚠ 叩き直す側に倒す。**
+  addEventListener("pagehide", () => {
+    const held = recallKnock();
+    if (held !== null) rememberKnock({ ...held, lostAt: Date.now() });
+  });
+
   $("enter").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("enter-button").disabled = true;
@@ -459,9 +562,6 @@
       return;
     }
 
-    $("before").hidden = true;
-    $("waiting").hidden = false;
-
     // ⚠⚠ **The camera has NOT been asked for, ⚠ and will not be until the Host says yes**
     //   (`docs/PRODUCT.md` § 3 と § 5)。
     // ⚠ **Somebody who is not let in never hands over a camera.**
@@ -472,34 +572,7 @@
     //   ⚠ **and the reads were 1,800/hour per waiting person** (kagima#78).
     // ⚠ **Silence still means waiting** — ⚠ **an unknown room, a Host who has not looked and a
     //   ⚠ door with too many people at it all open a socket that says nothing.**
-    let stopWaiting = () => {};
-    const giveUp = () => {
-      stopWaiting();
-      $("waiting").hidden = true;
-      $("before").hidden = false;
-      $("enter-button").disabled = false;
-    };
-    $("give-up").addEventListener("click", giveUp);
-
-    const token = await new Promise((resolve) => {
-      $("give-up").addEventListener("click", () => resolve(null), { once: true });
-      stopWaiting = waitForDecision(roomId, knocked.knockId, (ending) => {
-        if (ending.state === "admitted") {
-          // ⚠⚠ **Kept now, ⚠ before the camera is even asked for** (`docs/adr/0029`).
-          //   ⚠ **The browser can throw this page away at any point after here, ⚠ and the whole
-          //   ⚠ point is that the Host does not have to decide twice.**
-          rememberRejoin({ roomId, rejoin: ending.rejoin, nickname });
-          return resolve(ending.token);
-        }
-        // ⚠ One sentence for refused, closed, and ended while waiting (`docs/adr/0017`).
-        giveUp();
-        $("error").textContent = WORDING.refused;
-        resolve(null);
-      });
-    });
-    if (token === null) return;
-    stopWaiting();
-    await enterWith(token, nickname);
+    await standAtTheDoor(nickname, knocked.knockId);
   });
 
   /**
@@ -516,6 +589,24 @@
    * existed.** ⚠ **Nothing is said about why** — ⚠ **refused, expired and "that room is over"
    * are one answer** (`.claude/rules/security.md` § 3).
    */
+  /**
+   * ⚠⚠ **読み込み直しただけなら、⚠ 同じノックに戻る** (⚠ Owner 決定 2026-09-12)。
+   *
+   * ⚠ **戻らないと、⚠ 同じ人が Host の扉に 二人になる**(⚠ 実機 2026-09-12)。
+   * ⚠ **猶予を越えていれば サーバはもう知らないので、⚠ 最初の画面から やり直してもらう** —
+   *   ⚠ **黙って待たせない。**
+   * ⚠ **去った時刻が残っていなければ「分からない」であり、⚠ やり直す側に倒す。**
+   */
+  const backAtTheDoor = async () => {
+    const pending = roomId === null ? null : recallKnock();
+    if (pending === null || pending.roomId !== roomId) return false;
+    forgetKnock();
+    if (pending.lostAt === null || Date.now() - pending.lostAt > KNOCK_GRACE_MS) return false;
+    $("nickname").value = pending.nickname;
+    await standAtTheDoor(pending.nickname, pending.knockId);
+    return true;
+  };
+
   const held = roomId === null ? null : recallRejoin();
   if (held !== null && held.roomId === roomId) {
     // ⚠⚠ **The form comes down BEFORE the round trip, ⚠ not after it** (⚠ measured 2026-09-08).
@@ -541,5 +632,8 @@
       rememberRejoin({ roomId, rejoin: back.rejoin, nickname: held.nickname });
       await enterWith(back.token, held.nickname);
     }
+  } else {
+    // ⚠ まだ入れてもらっていない人が 読み込み直した場合。⚠ 同じノックに戻る。
+    await backAtTheDoor();
   }
 </script>

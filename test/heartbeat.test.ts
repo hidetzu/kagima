@@ -18,6 +18,7 @@
 // ⚠ **A hidden tab throttles timers; ⚠ delivering a message is a different thing.**
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createKnocks } from "../src/knock/knocks.ts";
 import { createHub } from "../src/signaling/hub.ts";
 import { parseClientMessage } from "../src/signaling/messages.ts";
 import { CLOSE_SILENT, pingLine } from "../src/signaling/protocol.ts";
@@ -81,6 +82,16 @@ const withBeats = <T>(body: (beat: () => void) => T): T => {
 
 const numberOf = (line: string): number => (JSON.parse(line) as { n: number }).n;
 
+/**
+ * ⚠⚠ **「相手が来た」は 数に入れない** (⚠ Owner 決定 2026-09-12)。
+ *
+ * ⚠ **`peer-here` は サーバが 部屋に居る人へ出す合図であり、⚠ 誰が何を言ったかとは別の話である。**
+ * ⚠ **so 中身についての主張は これを外して数える** — ⚠ **外すのは この 1 種類だけであり、
+ * ⚠ 「何も漏れていない」という主張は 弱まっていない。**
+ */
+const words = (sent: readonly string[]): string[] =>
+  sent.filter((line) => !line.includes('"type":"peer-here"'));
+
 test("⚠ each beat sends a ping, and every ping has a new number", () => {
   withBeats((beat) => {
     const sessions = createSessions({ hub: createHub(), secret: "s" });
@@ -102,7 +113,7 @@ test("⚠⚠ a page that answers stays, ⚠ however many beats pass", () => {
 
     for (let i = 0; i < MISSED_PONGS_ALLOWED + 5; i++) {
       beat();
-      a.pong(numberOf(a.sent[a.sent.length - 1] as string));
+      a.pong(numberOf(a.sent[words(a.sent).length - 1] as string));
     }
 
     assert.deepEqual(a.closes, [], "a socket that answered every ping was hung up on");
@@ -137,7 +148,7 @@ test("⚠⚠ answering, ⚠ then stopping, ⚠ is noticed", () => {
 
     for (let i = 0; i < 5; i++) {
       beat();
-      a.pong(numberOf(a.sent[a.sent.length - 1] as string));
+      a.pong(numberOf(a.sent[words(a.sent).length - 1] as string));
     }
     assert.equal(a.closes.length, 0, "it was hung up on while answering");
 
@@ -181,7 +192,7 @@ test("⚠⚠ an echo of an older ping is not an answer", () => {
     sessions.open(a.socket, ROOM, "sa");
 
     beat();
-    const stale = numberOf(a.sent[0] as string);
+    const stale = numberOf(words(a.sent)[0] as string);
 
     // ⚠ Keeps echoing the first number, ⚠ every beat, ⚠ for ever.
     for (let i = 0; i <= MISSED_PONGS_ALLOWED + 1; i++) {
@@ -227,11 +238,11 @@ test("⚠ a pong is never relayed, and is never answered", () => {
     sessions.open(b.socket, ROOM, "sb");
 
     beat();
-    const sentToB = b.sent.length;
-    a.say(JSON.stringify({ type: "pong", n: numberOf(a.sent[0] as string) }));
+    const sentToB = words(b.sent).length;
+    a.say(JSON.stringify({ type: "pong", n: numberOf(words(a.sent)[0] as string) }));
 
-    assert.equal(b.sent.length, sentToB, "a pong was relayed to the other participant");
-    assert.equal(a.sent.length, 1, "something was said back about a pong");
+    assert.equal(words(b.sent).length, sentToB, "a pong was relayed to the other participant");
+    assert.equal(words(a.sent).length, 1, "something was said back about a pong");
   });
 });
 
@@ -339,5 +350,51 @@ test("⚠ a room that is held again starts a new span, and the first is not repe
       [ROOM, 3_000, false],
       [ROOM, 4_000, true],
     ]);
+  });
+});
+
+test("⚠⚠ 鼓動のたびに、⚠ 誰も待っていないノックを 扉から降ろす", () => {
+  // ⚠⚠ **`docs/adr/0028`: ⚠ 扉に立っている人は 開いている待機 socket である。**
+  //   ⚠ **降ろしたことは Host にだけ言う** — ⚠ **Guest には 扉のことを 何も渡さない**
+  //   (`docs/adr/0018`)。
+  // ⚠ **新しい timer は足していない。** ⚠ **同じ鼓動に乗せている。**
+  withBeats((beat) => {
+    let at = 1_000;
+    const hub = createHub();
+    const knocks = createKnocks({
+      newId: () => "k1",
+      roomExists: () => true,
+      now: () => at,
+      graceMs: 100,
+    });
+    const sessions = createSessions({ hub, secret: "s", knocks, now: () => at });
+    const host = fakeSocket();
+    const guest = fakeSocket();
+    sessions.open(host.socket, ROOM, "sh", "host");
+    sessions.open(guest.socket, ROOM, "sg");
+
+    const { id } = knocks.knock(ROOM, "アン", at);
+
+    // ⚠ まだ猶予の内。⚠ 何も言わない。
+    at = 1_050;
+    beat();
+    assert.deepEqual(
+      host.sent.filter((l) => l.includes("knock-gone")),
+      [],
+      "somebody was taken off the door while still inside the grace",
+    );
+
+    at = 1_200;
+    beat();
+    assert.deepEqual(
+      host.sent.filter((l) => l.includes("knock-gone")),
+      [`{"type":"knock-gone","knockId":"${id}"}`],
+    );
+    // ⚠⚠ Guest には 何も渡らない。⚠ 扉のことは Host のものである。
+    assert.deepEqual(
+      guest.sent.filter((l) => l.includes("knock-gone")),
+      [],
+      "the door reached a Guest's socket",
+    );
   });
 });
