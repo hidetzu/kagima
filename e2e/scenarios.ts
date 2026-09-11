@@ -84,6 +84,10 @@ export const SCENARIOS: readonly Scenario[] = [
     sees: "the retired debug mode staying gone even when its flag is set",
   },
   {
+    name: "one-knock-once",
+    sees: "a knock the Host's page was told about twice still being one person at the door",
+  },
+  {
     name: "third-person",
     sees: "a third person waiting at the door while two are already talking",
   },

@@ -199,8 +199,17 @@
         }
       };
       const decide = (allow) => {
-        const first = atTheDoor.shift();
+        const first = atTheDoor[0];
         if (first === undefined) return;
+        // ⚠⚠ **決めたことが 出ていかないなら、⚠ その人は まだ扉に立っている** (⚠ 実機 2026-09-12)。
+        //
+        // ⚠ **socket が落ちているあいだに押すと、⚠ `send` はどこにも届かない。** ⚠ **それでも
+        //   ⚠ 扉から消していたので、⚠ Host の画面からは その人が居なくなり、⚠ 当人は 待ち続けた。**
+        // ⚠ **扉に立っているのは 人であって、⚠ こちらが押したかどうかではない。**
+        // ⚠ **so 送れないときは 消さない。** ⚠ **戻ってから もう一度押せば それで通る** —
+        //   ⚠ **新しい文言は要らない。⚠ 扉が出たままであることが、⚠ まだ決まっていないという事実である。**
+        if (transport.currentSocket()?.readyState !== WebSocket.OPEN) return;
+        atTheDoor.shift();
         transport.send({ type: "admit", knockId: first.knockId, allow });
         showDoor();
       };
@@ -209,7 +218,17 @@
 
       transport.onMessage((message) => {
         if (message.type === "knock") {
-          atTheDoor.push({ knockId: message.knockId, nickname: message.nickname });
+          // ⚠⚠ **同じノックを 二度 数えない** (⚠ 実機 2026-09-12)。
+          //
+          // ⚠ **サーバは Host の socket がつながるたびに、⚠ 待っている人を全員 announce し直す**
+          //   (`src/signaling/session.ts`) ― ⚠ **socket が離れているあいだに来たノックを
+          //   ⚠ 取りこぼさないためであり、⚠ それ自体は正しい。**
+          // ⚠⚠ **so 再接続のたびに 同じ knockId が また届く。** ⚠ **積んでいると、⚠ 「入れる」で
+          //   ⚠ 1 つ減らしても もう 1 つ残り、⚠ その人が入ったあとも 扉に立ち続ける。**
+          // ⚠ **扉に立っているのは 人であって、⚠ 届いたお知らせの数ではない。**
+          if (!atTheDoor.some((waiting) => waiting.knockId === message.knockId)) {
+            atTheDoor.push({ knockId: message.knockId, nickname: message.nickname });
+          }
           showDoor();
           return;
         }
