@@ -39,3 +39,32 @@ test("⚠⚠ 画面に出る言葉に ⚠ が混ざっていない", () => {
   assert.equal(checked, PAGES.length, "no page was read — ⚠ this check has gone stale");
   console.log(`  observed: ${checked} pages carry no ⚠ where a person can read it`);
 });
+
+// ⚠⚠ **無い仕組みの名前を、⚠ 画面が 言い続けない** (⚠ Owner 決定 2026-10-03)。
+//
+// ⚠ **Host の入口は 2026-10-03 まで「合言葉で、ひとときだけ開く…」のままだった。**
+// ⚠ **合言葉は [`docs/adr/0017`](../docs/adr/0017-let-the-host-decide-who-comes-in-instead-of-a-passphrase.md)
+//   ⚠ が廃止している** — ⚠ **`docs/SPEC.md` § 2 は「合言葉による入室」を 意図的に実装していない
+//   ⚠ ものとして挙げている。** ⚠ **画面だけが 追いついていなかった。**
+//
+// ⚠ **`.claude/rules/README.md`: ⚠ 「passphrase」は 人が声に出して言うものの名前であり、
+//   ⚠ 他のものに 流用しない。** ⚠ **so 画面に出てよい場面は 1 つも無い。**
+
+test("⚠⚠ 画面が 合言葉の話を しない", () => {
+  let checked = 0;
+  for (const page of PAGES) {
+    const shown = shownToAPerson(read(page));
+    checked += 1;
+    const lines = shown
+      .split("\n")
+      .map((l, i) => [i + 1, l] as const)
+      .filter(([, l]) => /合言葉|パスワード|passphrase/i.test(l));
+    assert.deepEqual(
+      lines.map(([n, l]) => `${page}:${n}: ${l.trim()}`),
+      [],
+      `${page} tells a person about a passphrase, and there has not been one since docs/adr/0017`,
+    );
+  }
+  assert.equal(checked, PAGES.length, "no page was read — ⚠ this check has gone stale");
+  console.log(`  observed: ${checked} pages name no passphrase where a person can read it`);
+});
