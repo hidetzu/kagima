@@ -10,6 +10,13 @@
 // ⚠ **Pure on purpose.** ⚠ **Nothing here touches storage or a clock** — ⚠ **the arithmetic is
 //   ⚠ the part that has to be right, ⚠ and it is checked without a Durable Object.**
 
+import { type Counts, NO_COUNTS, type RoomFacts, roomMade, roomOver } from "./counts.ts";
+// ⚠ 人が読む言葉は `./refusal.ts` にある。⚠ ここは それを 1 つの名前として通すだけである ―
+//   ⚠ ブラウザに 数を数える仕組みまで降ろさないため (`test/build.test.ts`)。
+import type { Refusal } from "./refusal.ts";
+
+export type { Refusal };
+
 /**
  * ⚠ **What the day allows** (`docs/adr/0031`).
  *
@@ -62,6 +69,15 @@ export type Ledger = {
    * know who signed in, ⚠ and must not learn.**
    */
   readonly perRoom: Readonly<Record<string, { readonly host: string; readonly ms: number }>>;
+  /**
+   * ⚠⚠ **その日の数** (`docs/adr/0032`)。⚠ **枠とは 別の目的で、⚠ 同じ場所に乗っている。**
+   *
+   * ⚠ **`CLAUDE.md` § 3: ⚠ 1 つの部屋より長生きするものを 2 つ作らない。**
+   * ⚠ **so 計測用の保存を 別に作らず、⚠ 台帳に相乗りする** — ⚠ **同じ規律が そのまま効く:
+   * ⚠ 日が変われば 全部捨てる。**
+   * ⚠⚠ **`perHost` の hash を 計測から見ない** — ⚠ **あれは 枠のためだけである。**
+   */
+  readonly counts: Counts;
 };
 
 /**
@@ -72,6 +88,14 @@ export type Ledger = {
  */
 export const openRooms = (ledger: Ledger): number => Object.keys(ledger.perRoom).length;
 
+/**
+ * ⚠ **古い台帳にも 数の場所がある ことにする。**
+ *
+ * ⚠ **`counts` が入る前に書かれた台帳が 保存に残っている** — ⚠ **読めたものを そのまま信じると
+ * `undefined` に足すことになる。** ⚠ **無ければ 0 から始める。**
+ */
+export const countsOf = (ledger: Ledger): Counts => ledger.counts ?? NO_COUNTS;
+
 /** ⚠ **The UTC day.** ⚠ **Not the machine's day** — ⚠ **the reset is Cloudflare's, at 00:00 UTC.** */
 export const dayOf = (at: number): string => new Date(at).toISOString().slice(0, 10);
 
@@ -80,6 +104,7 @@ export const emptyLedger = (day: string): Ledger => ({
   usedMs: 0,
   perHost: {},
   perRoom: {},
+  counts: NO_COUNTS,
 });
 
 /**
@@ -100,20 +125,12 @@ export const onDay = (ledger: Ledger, day: string): Ledger =>
  * ⚠ **The person's own budget is separate, ⚠ because saying "you have used yours up" to somebody
  * who has not is untrue and changes what they do next** (`CLAUDE.md` § 4-1).
  */
-export type Refusal = "spent" | "busy";
-
 export const mayOpen = (ledger: Ledger, host: string, limits: Limits = LIMITS): Refusal | null => {
   // ⚠ Their own first. ⚠ It is the one that names a next move — ⚠ "tomorrow" rather than "later".
   if ((ledger.perHost[host] ?? 0) >= limits.hostMs) return "spent";
   if (ledger.usedMs >= limits.serviceMs) return "busy";
   if (openRooms(ledger) >= limits.openRooms) return "busy";
   return null;
-};
-
-/** ⚠ **What a person reads** (`docs/adr/0031`, Owner 決定 2026-09-08). ⚠ **Never shown to a Guest.** */
-export const WORDING: Readonly<Record<Refusal, string>> = {
-  spent: "今日の分を使い切りました。明日またルームを作れます。",
-  busy: "いま新しいルームを作れません。しばらくしてからお試しください。",
 };
 
 /**
@@ -123,7 +140,12 @@ export const WORDING: Readonly<Record<Refusal, string>> = {
 export const opened = (ledger: Ledger, roomId: string, host: string): Ledger =>
   ledger.perRoom[roomId] !== undefined
     ? ledger
-    : { ...ledger, perRoom: { ...ledger.perRoom, [roomId]: { host, ms: 0 } } };
+    : {
+        ...ledger,
+        perRoom: { ...ledger.perRoom, [roomId]: { host, ms: 0 } },
+        // ⚠ 分母は ここで増える (`docs/adr/0032`)。⚠ 使われなくても 作られている。
+        counts: roomMade(countsOf(ledger)),
+      };
 
 /**
  * ⚠⚠ **A room said how long it has been held, ⚠ in total.**
@@ -147,10 +169,26 @@ export const reported = (ledger: Ledger, roomId: string, totalMs: number): Ledge
 };
 
 /** ⚠ **The room is over.** ⚠ **Its last total is counted, ⚠ and then its row goes.** */
-export const over = (ledger: Ledger, roomId: string, totalMs: number): Ledger => {
+export const over = (
+  ledger: Ledger,
+  roomId: string,
+  totalMs: number,
+  /**
+   * ⚠ **終わったルームについて 1 度だけ分かること** (`docs/adr/0032`)。
+   * ⚠ **無ければ 数えない** — ⚠ **「数えられなかった」であって「起きなかった」ではない。**
+   */
+  facts: RoomFacts | null = null,
+): Ledger => {
   const counted = reported(ledger, roomId, totalMs);
   const { [roomId]: gone, ...rest } = counted.perRoom;
-  return gone === undefined ? counted : { ...counted, perRoom: rest };
+  // ⚠⚠ **行が無いものは 数えない。** ⚠ **同じ終わりが 二度届いても、⚠ 二度は数えない** —
+  //   ⚠ **行が在るのは 1 度きりだからである。**
+  if (gone === undefined) return counted;
+  return {
+    ...counted,
+    perRoom: rest,
+    counts: facts === null ? countsOf(counted) : roomOver(countsOf(counted), facts),
+  };
 };
 
 /**

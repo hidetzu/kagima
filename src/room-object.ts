@@ -22,6 +22,7 @@
 import { createKnockRejectionCounter, createKnocks } from "./knock/knocks.ts";
 import { openWait, roomIdFromWaitPath } from "./knock/wait.ts";
 import { LEDGER_NAME } from "./ledger-object.ts";
+import { writeFacts } from "./quota/counts.ts";
 import { logger } from "./log.ts";
 import { randomToken } from "./random.ts";
 import { createRoomStore, ROOM_IDLE_MS, type Room } from "./room/store.ts";
@@ -45,6 +46,14 @@ const KEY = "room";
  * Durable Object was held is not something Node's room has any use for.**
  */
 const USED_KEY = "usedMs";
+
+/**
+ * ⚠ **2 人が 同時に居たかどうか** (`docs/adr/0032`)。⚠ **1 ビットであり、⚠ 誰についてでもない。**
+ *
+ * ⚠ **`docs/adr/0023` の 4 フィールドとも、⚠ `0031` の 1 つの数とも 別の鍵である** —
+ * ⚠ **`Room` は platform-free であり、⚠ どれも Node の部屋には 要らない。**
+ */
+const BOTH_KEY = "bothHere";
 
 /**
  * ⚠ **How often a room says how long it has been held** (`docs/adr/0031`).
@@ -162,6 +171,13 @@ export class RoomObject {
   private usedMs = 0;
   /** ⚠ **When the ledger was last told.** ⚠ This wake only; ⚠ a fresh object simply tells again. */
   private toldAt = 0;
+  /**
+   * ⚠⚠ **2 人が 同時に居たか** (`docs/adr/0032`)。
+   *
+   * ⚠ **storage に書く** — ⚠ **object は evict されるので、⚠ memory だけでは
+   * 「立ち上がり直したあとに終わったルーム」が すべて「会話が始まらなかった」ことになる。**
+   */
+  private bothHere = false;
 
   constructor(state: RoomState, env: RoomEnv) {
     this.state = state;
@@ -221,6 +237,11 @@ export class RoomObject {
       // ⚠⚠ **How long this room has been held** (`docs/adr/0031`).
       //   ⚠ **A total, ⚠ never a difference** — ⚠ **the ledger adds `total − last`, ⚠ so a
       //   ⚠ repeat adds nothing and a room that came back does not start again from zero.**
+      bothHere: () => {
+        if (this.bothHere) return;
+        this.bothHere = true;
+        void this.state.storage.put(BOTH_KEY, true);
+      },
       usedSoFar: (id, spanMs, stillHolding) => {
         if (stillHolding) {
           void this.tellTheLedger(id, this.usedMs + spanMs, false, true);
@@ -235,6 +256,7 @@ export class RoomObject {
     });
 
     this.usedMs = (await this.state.storage.get<number>(USED_KEY)) ?? 0;
+    this.bothHere = (await this.state.storage.get<boolean>(BOTH_KEY)) ?? false;
 
     // ⚠⚠ **Rebuild the door from the sockets standing at it** (`docs/adr/0028`).
     //
@@ -261,6 +283,8 @@ export class RoomObject {
     totalMs: number,
     isOver: boolean,
     throttled: boolean,
+    /** ⚠ **終わり方** (`docs/adr/0032`)。⚠ **`isOver` のときだけ 意味を持つ。** */
+    ending: "closed" | "left" = "left",
   ): Promise<void> {
     const ledger = this.env.LEDGER;
     if (ledger === undefined) return;
@@ -272,7 +296,16 @@ export class RoomObject {
         new Request("https://kagima.invalid/ledger", {
           method: "POST",
           headers: { "content-type": "application/json; charset=utf-8" },
-          body: JSON.stringify({ ask: "used", roomId, totalMs, over: isOver }),
+          body: JSON.stringify({
+            ask: "used",
+            roomId,
+            totalMs,
+            over: isOver,
+            // ⚠ 終わるときだけ。⚠ 数えるのは 1 度きりである (`src/quota/counts.ts`)。
+            ...(isOver
+              ? { facts: writeFacts({ bothHere: this.bothHere, heldMs: totalMs, ending }) }
+              : {}),
+          }),
         }),
       );
     } catch (error) {
@@ -378,11 +411,15 @@ export class RoomObject {
       if (before !== null) {
         await this.state.storage.delete(KEY);
         await this.state.storage.delete(USED_KEY);
+        await this.state.storage.delete(BOTH_KEY);
         // ⚠⚠ **The last word** (`docs/adr/0031`). ⚠ **Its row goes, ⚠ so the cap on how many are
         //   ⚠ open comes back down.** ⚠ **The sockets were closed first, ⚠ so their span is
         //   ⚠ already in `usedMs`** (`src/server.ts` closes the hub before the store).
-        await this.tellTheLedger(before.id, this.usedMs, true, false);
+        // ⚠ ここに来るのは Host が閉じたときである (`src/server.ts` の DELETE)。
+        //   ⚠ 時間切れは `alarm()` のほうへ行く。
+        await this.tellTheLedger(before.id, this.usedMs, true, false, "closed");
         this.usedMs = 0;
+        this.bothHere = false;
       }
       return;
     }
@@ -443,8 +480,11 @@ export class RoomObject {
     //   ⚠ ago is in memory before its write has landed.**
     const usedMs = Math.max(this.usedMs, (await this.state.storage.get<number>(USED_KEY)) ?? 0);
     await this.state.storage.delete(USED_KEY);
-    await this.tellTheLedger(held.id, usedMs, true, false);
+    await this.state.storage.delete(BOTH_KEY);
+    // ⚠ 誰も居なくなって 時間切れになった。⚠ 失敗ではない (`CLAUDE.md` § 4-1)。
+    await this.tellTheLedger(held.id, usedMs, true, false, "left");
     this.usedMs = 0;
+    this.bothHere = false;
     await this.state.storage.deleteAlarm();
 
     // ⚠ Says the room is over, ⚠ and says nothing about who was in it

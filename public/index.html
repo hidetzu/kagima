@@ -113,7 +113,7 @@
   import { canShare, SHARE_UNAVAILABLE } from "/client/share.js";
   import { createDiagnostics } from "/client/diagnostics.js";
   import { closeRoom, copyOne, createRoom, hostSession } from "/client/host.js";
-  import { WORDING } from "/quota/ledger.js";
+  import { WORDING } from "/quota/refusal.js";
   import { connectReconnecting } from "/client/reconnect.js";
   import { forget, recall, remember } from "/client/remember.js";
   import { cameBack, hostStatus, outranks } from "/status/status.js";
@@ -497,7 +497,7 @@
   //   ⚠ **a room that exists and is not remembered is a room its own Host cannot get back to.**
   $("create").addEventListener("click", async () => {
     // ⚠⚠ **作れないことがある** (`docs/adr/0031`)。⚠ **その日の分を使い切ったか、⚠ いま混んでいるか。**
-    //   ⚠ **文言は 1 か所にある** (`/quota/ledger.js`) ― ⚠ **扉の断り方と同じ形である。**
+    //   ⚠ **文言は 1 か所にある** (`/quota/refusal.js`) ― ⚠ **扉の断り方と同じ形である。**
     const made = await createRoom();
     if ("refused" in made) {
       $("cannot-open").textContent = WORDING[made.refused];

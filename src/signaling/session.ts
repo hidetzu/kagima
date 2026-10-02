@@ -60,6 +60,13 @@ export type SessionOptions = {
    * ⚠ **Absent means nobody is counting** (⚠ Node has no ledger — ⚠ `src/worker.ts` says why).
    */
   readonly usedSoFar?: (roomId: string, socketOpenMs: number, stillHolding: boolean) => void;
+  /**
+   * ⚠⚠ **2 人が 同時に居た** (`docs/adr/0032`)。
+   *
+   * ⚠ **ノックだけで終わったルームと、⚠ 実際に会話が始まったルームを 分ける 1 ビットである。**
+   * ⚠ **何度言っても よい** — ⚠ **受け取る側が 1 ルームにつき 1 度しか数えない。**
+   */
+  readonly bothHere?: (roomId: string) => void;
   readonly now?: () => number;
   readonly heartbeatMs?: number;
 };
@@ -114,7 +121,10 @@ export const createSessions = (options: SessionOptions): Sessions => {
 
     // ⚠ The room id is not a secret to someone already inside it; ⚠ the passphrase is never
     //   ⚠ mentioned again from here on (`docs/adr/0004`).
-    logger.info("a peer joined", { roomId, peers: options.hub.peerCount(roomId) });
+    const here = options.hub.peerCount(roomId);
+    logger.info("a peer joined", { roomId, peers: here });
+    // ⚠ 2 人 揃った。⚠ 入口が成立したということである (`docs/adr/0032`)。
+    if (here >= 2) options.bothHere?.(roomId);
 
     // ⚠⚠ **「相手が来た」を言う** (⚠ Owner 決定 2026-09-12)。
     //

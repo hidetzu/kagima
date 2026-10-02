@@ -9,7 +9,7 @@
 // ⚠ **So the URL carries only "you may knock here".** ⚠ **A leaked URL lets somebody knock; ⚠ it
 //   ⚠ does not let them in.**
 
-import type { Refusal } from "../quota/ledger.ts";
+import type { Refusal } from "../quota/refusal.ts";
 
 export type CreatedRoom = {
   readonly roomId: string;

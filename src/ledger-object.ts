@@ -19,7 +19,9 @@
 // ⚠ **The arithmetic is `src/quota/ledger.ts`, ⚠ and it is pure.** ⚠ **This file is storage and
 //   ⚠ a route table.**
 import { logger } from "./log.ts";
+import { dayLine, readFacts } from "./quota/counts.ts";
 import {
+  countsOf,
   dayOf,
   emptyLedger,
   type Ledger,
@@ -52,6 +54,11 @@ export type Asked =
       readonly roomId: string;
       readonly totalMs: number;
       readonly over?: boolean;
+      /**
+       * ⚠ **終わったルームについて 1 度だけ分かること** (`docs/adr/0032`)。
+       * ⚠ **`over` のときだけ 意味を持つ。** ⚠ **読めなければ 数えない。**
+       */
+      readonly facts?: unknown;
     };
 
 /**
@@ -72,7 +79,7 @@ export const readAsked = (body: unknown): Asked | null => {
   if (said.ask === "used") {
     const totalMs = said.totalMs;
     if (typeof totalMs !== "number" || !Number.isFinite(totalMs) || totalMs < 0) return null;
-    return { ask: "used", roomId, totalMs, over: said.over === true };
+    return { ask: "used", roomId, totalMs, over: said.over === true, facts: said.facts };
   }
   return null;
 };
@@ -94,7 +101,14 @@ export class LedgerObject {
   private async today(at: number): Promise<Ledger> {
     const held = await this.state.storage.get<Ledger>(KEY);
     const day = dayOf(at);
-    return held === undefined ? emptyLedger(day) : onDay(held, day);
+    if (held === undefined) return emptyLedger(day);
+    const fresh = onDay(held, day);
+    // ⚠⚠ **日が変わった。⚠ 捨てる前に 1 行だけ残す** (`docs/adr/0032` 決定 4)。
+    //   ⚠ **出るのは 数だけである** — ⚠ **ルーム id も hash も 入らない**
+    //   (`.claude/rules/security.md` § 2)。
+    // ⚠ **so「1 日で消す」と「傾向を見る」が 両立する形は これ 1 つである。**
+    if (fresh !== held) logger.info("a day of kagima", dayLine(held.day, countsOf(held)));
+    return fresh;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -134,7 +148,7 @@ export class LedgerObject {
     }
 
     const after = asked.over
-      ? over(before, asked.roomId, asked.totalMs)
+      ? over(before, asked.roomId, asked.totalMs, readFacts(asked.facts))
       : reported(before, asked.roomId, asked.totalMs);
     await this.state.storage.put(KEY, after);
     return json(200, {});
