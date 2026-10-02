@@ -22,7 +22,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { type Browser, chromium, type Page } from "playwright";
 import { issueSession, SESSION_COOKIE } from "../src/auth/session.ts";
-import { LIMITS, WORDING } from "../src/quota/ledger.ts";
+import { LIMITS } from "../src/quota/ledger.ts";
+import { WORDING } from "../src/quota/refusal.ts";
 
 const PORT = 8971;
 const BASE = `http://127.0.0.1:${PORT}`;

@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { issueSession, readSession } from "../src/auth/session.ts";
+import { countsOf } from "../src/quota/ledger.ts";
+import { NO_COUNTS } from "../src/quota/counts.ts";
 import { hostMark } from "../src/quota/host-mark.ts";
 import {
   dayOf,
@@ -18,8 +20,8 @@ import {
   over,
   refusalFrom,
   reported,
-  WORDING,
 } from "../src/quota/ledger.ts";
+import { WORDING } from "../src/quota/refusal.ts";
 
 const MINUTE = 60_000;
 const day = () => emptyLedger("2026-09-09");
@@ -168,4 +170,37 @@ test("⚠⚠ a ledger that did not answer is a refusal, and so is one we did not
   assert.equal(refusalFrom({ ok: true, said: { refused: null } }), null);
   assert.equal(refusalFrom({ ok: true, said: { refused: "spent" } }), "spent");
   assert.equal(refusalFrom({ ok: true, said: { refused: "busy" } }), "busy");
+});
+
+test("⚠⚠ 台帳が その日の数を 持ち、⚠ 日が変わると 一緒に消える", () => {
+  // ⚠⚠ **`docs/adr/0032` 決定 4: ⚠ 計測用の保存を 別に作らず、⚠ 台帳に相乗りする** —
+  //   ⚠ **`CLAUDE.md` § 3: ⚠ 1 つの部屋より長生きするものを 2 つ作らない。**
+  //   ⚠ **so 台帳の規律が そのまま効く: ⚠ 日が変われば 全部捨てる。**
+  let l: Ledger = opened(opened(day(), "r1", "h1"), "r2", "h2");
+  assert.equal(countsOf(l).rooms, 2, "the denominator did not move when rooms were made");
+
+  l = over(l, "r1", 10 * MINUTE, { bothHere: true, heldMs: 10 * MINUTE, ending: "closed" });
+  assert.deepEqual(
+    { rooms: countsOf(l).rooms, calls: countsOf(l).calls, closed: countsOf(l).closed },
+    { rooms: 2, calls: 1, closed: 1 },
+  );
+
+  // ⚠ 同じ終わりが 二度届いても、⚠ 二度は数えない ― ⚠ 行は 1 度きりである。
+  l = over(l, "r1", 10 * MINUTE, { bothHere: true, heldMs: 10 * MINUTE, ending: "closed" });
+  assert.equal(countsOf(l).closed, 1, "one ending was counted twice");
+
+  // ⚠ 読めなかった終わりは 数えない ―「数えられなかった」であって「起きなかった」ではない。
+  l = over(l, "r2", MINUTE, null);
+  assert.equal(countsOf(l).closed + countsOf(l).left, 1);
+  assert.equal(openRooms(l), 0, "the room kept its place after it ended");
+
+  // ⚠⚠ 日が変われば 数も消える。
+  assert.deepEqual(countsOf(onDay(l, "2026-09-10")), NO_COUNTS);
+});
+
+test("⚠ 数の場所が無い台帳を 読んでも、⚠ 0 から始める", () => {
+  // ⚠ `counts` が入る前に書かれた台帳が 保存に残っている ― ⚠ undefined に足さない。
+  const old = { day: "2026-09-09", usedMs: 0, perHost: {}, perRoom: {} } as unknown as Ledger;
+  assert.deepEqual(countsOf(old), NO_COUNTS);
+  assert.equal(countsOf(opened(old, "r1", "h1")).rooms, 1);
 });
